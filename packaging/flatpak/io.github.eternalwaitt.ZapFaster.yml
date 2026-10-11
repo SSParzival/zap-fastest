@@ -15,6 +15,7 @@ runtime-version: '26.08'
 sdk: org.freedesktop.Sdk
 sdk-extensions:
   - org.freedesktop.Sdk.Extension.rust-stable
+  - org.freedesktop.Sdk.Extension.llvm22
 command: zap-faster
 finish-args:
   # Wayland first, X11 when that is what there is.
@@ -34,10 +35,13 @@ finish-args:
   - --persist=.local/state
 build-options:
   append-path: /usr/lib/sdk/rust-stable/bin
+  prepend-ld-library-path: /usr/lib/sdk/llvm22/lib
   env:
     CARGO_HOME: /run/build/zap-faster/cargo
+    # Camera bindings use bindgen at build time, not at runtime.
+    LIBCLANG_PATH: /usr/lib/sdk/llvm22/lib
     # The crate ships bindings for its pinned whisper.cpp revision.
-    # The Flatpak sandbox has no libclang, so use those supported bindings.
+    # Keep using those supported bindings for speech transcription.
     WHISPER_DONT_GENERATE_BINDINGS: '1'
 modules:
   - name: zap-faster
