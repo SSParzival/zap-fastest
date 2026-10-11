@@ -677,3 +677,25 @@ earlier approval covered only the three original commits ending at `595b31f`.
 Then verify new provider results. Do not repeat historical builds/recovery,
 publish a release or replace the installed client. Phone acceptance remains
 blocked on unavailable test numbers; personal accounts are not a substitute.
+
+### Approved follow-up push and deferred validation
+
+The user approved the three follow-up commits on 2026-10-11. A guarded normal
+fast-forward push published `ddb72b5`, `e639996` and `e303c22`. Remote refs and
+GitHub's commits/main API both confirm public main
+`e303c226e360a7b0731d2734bbba8d375f9f037f`.
+
+The user explicitly requires no expensive tests or builds until the backlog is
+ready for a combined validation pass. Do not launch broad local gates, native
+package matrices, Docker/Nix builds, broad visual captures or full-platform CI
+during ongoing backlog work. Cheap inspection and focused checks remain suitable.
+Required final checks remain required when that checkpoint is ready.
+
+The push automatically starts CI `38147406164`, Flatpak `38147406236` and
+Packaging `38147406681`. CI cancellation was requested and Flatpak is confirmed
+cancelled. Packaging had already completed: its user-installer check passed and
+expensive assembly/AppImage/install jobs were skipped. CI and Flatpak remain
+deferred validation, never passing receipts.
+No workflow, hook, test or lint was weakened. Existing local verification is
+preserved. Release/client installation and live-account operations remain outside
+this push. This checkpoint update stays local, avoiding another automatic build.
