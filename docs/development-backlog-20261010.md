@@ -495,7 +495,7 @@ Calling remains requested, but adopting the submitted protocol fork conflicts wi
 - [x] Official dependency reassessment against current refs and exact source is recorded in [upstream capabilities](upstream-capabilities-20261011.md); no newly supported capability was found for the listed blockers.
 - [x] Tested product integration and packaging committed directly to local main, with exact input/receipt read-back and durable evidence. See [delivery review](development-delivery-20261011.md).
 - [ ] Execute [attended acceptance](development-attended-acceptance-20261011.md) on approved synthetic accounts and native devices; no case has run in this continuation.
-- [ ] Source push approval and public-main read-back; publishing a release and replacing the installed client require separate concrete previews/approval.
+- [x] Source push explicitly approved and public-main read-back confirms the three reviewed commits at `595b31f5a0a82fe30c0c73594e0f611c8e8b74fe`. Release publication and installed-client replacement remain separate approvals.
 
 ## Calling implementation evidence
 

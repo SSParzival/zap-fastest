@@ -1,14 +1,19 @@
 # Local delivery review, 2026-10-11
 
-The recovered integration is committed locally on main. It is not published,
-installed or a completed full-backlog delivery. No source change was needed to
+The recovered integration is committed on main and its three reviewed commits
+are published to the fork after explicit approval. It is not installed, released
+or a completed full-backlog delivery. No source change was needed to
 adopt a newly available upstream API because none was found for the documented
 blockers. Remaining work is explicit below.
 
 ## Reviewable commits
 
-Public fork main was read back as `c5896974215a84fafa2c8ee27a9ee2bdd97b83c0`.
-Local work is linear on top of that commit, with no branch or merge commit.
+Public fork main was initially read back as `c5896974215a84fafa2c8ee27a9ee2bdd97b83c0`.
+After approval, the normal fast-forward push publishes the three commits below.
+Both `git ls-remote` and GitHub's commits/main API read back
+`595b31f5a0a82fe30c0c73594e0f611c8e8b74fe`. History is linear, with no branch,
+merge, force push or tag. Follow-up receipt/checkpoint changes remain local to
+respect the exact approved three-commit range.
 
 | Commit | Scope | Verification |
 | --- | --- | --- |
@@ -37,17 +42,19 @@ in review without altering the implementation.
 | Implemented | Integration is in local source, including durable archive/history/media recovery, backup/restore, 1:1 calls and the agreed UI/privacy work. Partial features retain their detailed limitations. |
 | Locally verified | Accepted required native Rust gates, Windows ARM64 compilation, twelve native package install/removal cases, 27 synthetic captures and actual x86 Nix gate. Fresh source/receipt read-back, with no unnecessary rerun. |
 | Attended verified | No new case. Phone availability/sync, hardware calls/permissions, native notifications/input/accessibility/compositors/fonts/GPUs and power loss remain unverified. |
-| Delivered | Local commits only. Public source, installed client and release assets are unchanged. Current version is still 0.30.0; local test artifacts are development builds, not a new 0.30.0 release. |
-| Blocked | Supported upstream APIs/interoperability and specific native reproduction; test accounts/devices and explicitly approved test operations; external source/release/client delivery approval. |
+| Delivered | Three approved source commits published at `595b31f`; packaging validation passed. Original CI finished with the known macOS fixture failure; Windows tests passed but its job was cancelled during cache cleanup. The corrected macOS fixture passes all six native gates, and the corrected Flatpak source build/export/bundle exits 0 locally. Both corrections remain local pending follow-up push approval. Installed client and release assets are unchanged. Current version remains 0.30.0. |
+| Blocked | Supported upstream APIs/interoperability and specific native reproduction; test accounts/devices and explicitly approved test operations; release/client delivery approval. |
 
 ## External delivery preview
 
-The first external action to approve is a normal fast-forward push of the reviewed
-local commits to **eternalwaitt/zap-faster main**, through remote `fork`. It runs
-the existing main CI. The checked workflow set has release builds on `v*` tags;
-the proposed main push does not create a release tag. Re-read public main and
-preserve a linear commit range immediately before pushing. If public main moved,
-reassess the exact range instead of forcing or overwriting it.
+The approved external action was a normal fast-forward push of the exact three
+reviewed commits to **eternalwaitt/zap-faster main**, through remote `fork`.
+The pre-push guard confirmed unchanged local/public heads, no tracked worktree
+changes and no merges. Existing CI, Packaging and Flatpak validation workflows
+were triggered. No version was supplied to Packaging, so its release assembly,
+installation matrix and AppImage publication jobs are skipped; its user-installer,
+ELF fixture and Qt icon validation passed. This is validation, not release delivery.
+Release builds still require a `v*` tag, and no tag was created.
 
 A stable release remains blocked by the recorded acceptance and dependency scope.
 If a development prerelease is later requested despite those limits, agree on its
@@ -68,9 +75,36 @@ installed version/read-back. Neither CI nor a saved package proves installation.
 ## What unblocks remaining work
 
 - Protocol/shared APIs: the exact [dependency requirements](upstream-capabilities-20261011.md) must be supported officially. No upstream outreach is authorized.
-- Attended runtime: identify two test accounts/phones and available native platforms, then approve the exact [test preview](development-attended-acceptance-20261011.md). Only those accounts/actions are in scope.
+- Attended runtime: the user confirms no test numbers are available. Supply two test accounts/phones and identify available native platforms, then approve the exact [test preview](development-attended-acceptance-20261011.md). Personal accounts remain untouched.
 - Power-loss: provide a disposable test environment and approve its interruption method; this host's unrelated services remain untouched.
-- External source delivery: approve the concrete local commit range for the fork's main. Release/client deployment remain separately reviewable actions.
+- Source delivery: the exact three-commit range is approved and published. Follow-up checkpoint changes stay local. Release/client deployment remain separately reviewable actions.
 
 The full goal stays open. Builds are not used to close device, upstream or
 publication requirements.
+
+## Restart recovery and follow-up preview
+
+The restart preserved all source edits, local commit `ddb72b5` and the completed
+Flatpak receipt. The saved build exits 0, compiles camera bindings, composes
+AppStream metadata and exports OSTree commit
+`0b31dfe8d29b8cc754120b63a3691fe49df4751983a0651fc37db14e28250aaf`.
+Its generated bundle SHA256 is
+`65baa480abe3d9d681b72f701fb3ec9134d6c2fab983bf260a888208869c1430`.
+This is local build/package proof, not installation or camera acceptance.
+
+Fresh input comparison confirms only the reviewed demo fixture and Flatpak
+manifest differ from the 388 recorded functional inputs; 386 remain unchanged.
+All six native Mac gates pass for the exact corrected demo hash. The immutable
+baseline is preserved; [follow-up receipts](verification/development-followup-20261011.json)
+record the new hashes, native gate outcomes and final original-provider status.
+Linux tests, quality/advisories, Windows ARM64 compilation and all three Nix jobs
+passed on the public snapshot. Windows test suites passed before cache cleanup
+was cancelled; the complete Windows job is not claimed successful.
+
+The reviewable next external action is one normal fast-forward push of the local
+follow-up range after `595b31f` to `fork/main`: the macOS fixture correction,
+the Flatpak LLVM build-tool correction and this recovery/receipt checkpoint.
+Approval previously covered exactly the original three commits, so this new
+range needs explicit approval. Recheck public/local heads and exclude merges
+before pushing, then verify the new CI and Flatpak terminal outcomes. No tag,
+release, installed-client change or live-account action is part of this preview.

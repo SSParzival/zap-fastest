@@ -1,0 +1,107 @@
+{
+  "date": "2026-10-11",
+  "public_head": "595b31f5a0a82fe30c0c73594e0f611c8e8b74fe",
+  "test_fix_commit": "ddb72b5ea9fdd52085a42143afdd3567da3d1b53",
+  "baseline_manifest": "development-inputs-20261011.json",
+  "unchanged_input_count": 386,
+  "verified_followup_sha256": {
+    "packaging/flatpak/io.github.eternalwaitt.ZapFaster.yml": "ea04f4dac06314ebf64d098ba60f261435f351bcbb9adc561719f525d1e841ac",
+    "src/demo.rs": "3875c2af9ed1cc32081e473edd625a4fda291d5310f40fc86536a21f7f26f71d"
+  },
+  "macos_native_required_gates": {
+    "fmt": "0",
+    "clippy-default": "0",
+    "clippy-all": "0",
+    "test-default": "0",
+    "test-all": "0",
+    "rustdoc": "0"
+  },
+  "macos_log_sha256": {
+    "clippy-all.log": "e0f196e9fe0f9bce03766f2237495c9063be05b8023d6f78a493007b32b449a8",
+    "clippy-default.log": "1d86f53cb7be1129a629bb2cd1ea520362ec6cbb088a58fd251aed28e17c3775",
+    "fmt.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "rustdoc.log": "719c6f3619c9a24584583d0dac8608d3dd85fa2ddcfe920657e2658366103eb4",
+    "test-all.log": "0623c49ac5e9e23356b8fdf5b264dad1b17e7c74b34d454763b1c24776d1199b",
+    "test-default.log": "10f3d16f7b7249bf7969331a33898cc7a112bb00e1c4ad9a5d070e2031a8e267"
+  },
+  "flatpak": {
+    "build_exit": 0,
+    "source_commit": "595b31f5a0a82fe30c0c73594e0f611c8e8b74fe",
+    "manifest_change": "Official LLVM 22 SDK extension and build-time libclang paths",
+    "build_log_sha256": "528a469c9e43014208070c400478d983cd622c3e0b59541b48aab20115ed41e8",
+    "bundle_sha256": "65baa480abe3d9d681b72f701fb3ec9134d6c2fab983bf260a888208869c1430",
+    "fresh_bundle_export_exit": 0,
+    "fresh_bundle_sha256": "2b6ed93c05ab23bcbd4a99f904660ee9b382bdd417c8de1564bbd7c1149fdf5b",
+    "sandbox_parity_test": "passed",
+    "harness_limit": "Full generation test cannot run from a Windows worktree bind or source tar without Git metadata; unchanged generator coverage is retained from prior passing gates.",
+    "ostree_commit": "0b31dfe8d29b8cc754120b63a3691fe49df4751983a0651fc37db14e28250aaf",
+    "scope": "Local source build, metadata composition, export and bundle. No installation or attended runtime."
+  },
+  "published_ci": {
+    "conclusion": "failure",
+    "headSha": "595b31f5a0a82fe30c0c73594e0f611c8e8b74fe",
+    "jobs": [
+      {
+        "name": "Dependency advisories",
+        "conclusion": "success",
+        "databaseId": 114475820937,
+        "url": "https://github.com/eternalwaitt/zap-faster/actions/runs/38141392117/job/114475820937"
+      },
+      {
+        "name": "compile (Windows arm64)",
+        "conclusion": "success",
+        "databaseId": 114475821007,
+        "url": "https://github.com/eternalwaitt/zap-faster/actions/runs/38141392117/job/114475821007"
+      },
+      {
+        "name": "test (ubuntu-latest)",
+        "conclusion": "success",
+        "databaseId": 114475821070,
+        "url": "https://github.com/eternalwaitt/zap-faster/actions/runs/38141392117/job/114475821070"
+      },
+      {
+        "name": "Nix package (aarch64-darwin)",
+        "conclusion": "success",
+        "databaseId": 114475821086,
+        "url": "https://github.com/eternalwaitt/zap-faster/actions/runs/38141392117/job/114475821086"
+      },
+      {
+        "name": "Nix package (aarch64-linux)",
+        "conclusion": "success",
+        "databaseId": 114475821087,
+        "url": "https://github.com/eternalwaitt/zap-faster/actions/runs/38141392117/job/114475821087"
+      },
+      {
+        "name": "Nix package (x86_64-linux)",
+        "conclusion": "success",
+        "databaseId": 114475821101,
+        "url": "https://github.com/eternalwaitt/zap-faster/actions/runs/38141392117/job/114475821101"
+      },
+      {
+        "name": "test (windows-latest)",
+        "conclusion": "cancelled",
+        "databaseId": 114475821103,
+        "url": "https://github.com/eternalwaitt/zap-faster/actions/runs/38141392117/job/114475821103"
+      },
+      {
+        "name": "test (macos-latest)",
+        "conclusion": "failure",
+        "databaseId": 114475821134,
+        "url": "https://github.com/eternalwaitt/zap-faster/actions/runs/38141392117/job/114475821134"
+      },
+      {
+        "name": "quality",
+        "conclusion": "success",
+        "databaseId": 114475821169,
+        "url": "https://github.com/eternalwaitt/zap-faster/actions/runs/38141392117/job/114475821169"
+      }
+    ],
+    "status": "completed"
+  },
+  "limitations": [
+    "Corrected source is local, provider rerun pending follow-up push approval.",
+    "Windows tests passed but provider job cancelled during cache cleanup.",
+    "No test phone numbers available; no personal accounts used.",
+    "No release, installed-client replacement or live account actions."
+  ]
+}

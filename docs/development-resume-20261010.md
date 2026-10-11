@@ -613,3 +613,67 @@ replacement remain separate previews and approvals. Existing artifacts report
 0.30.0; do not relabel them as a new release. Full-goal completion remains blocked
 by supported upstream dependencies, attended account/device proof and external
 delivery approval. Generated `packaging/__pycache__/` remains untracked and intact.
+
+### Approved source push follow-up
+
+The user explicitly approves the previewed three-commit source push. Guards
+confirm local HEAD `595b31f`, unchanged public base `c589697`, no tracked changes
+and no merge commits. Normal `git push fork HEAD:refs/heads/main` succeeds.
+Remote refs and GitHub's commits/main API both confirm public
+`595b31f5a0a82fe30c0c73594e0f611c8e8b74fe`. Packaging validation 38141392466 passes
+(release jobs skipped without a version). CI 38141392117 and Flatpak 38141392071
+remain running on that exact source. No release tag, publication, installed-client
+replacement, live account operation or upstream message occurred. Follow-up
+receipt/checkpoint changes remain local, respecting the approved exact range.
+Do not repeat the push or historical verification/recovery commands. Continue
+provider result read-back and repair new actionable failures if they occur.
+
+### Source-delivery validation follow-up (latest checkpoint)
+
+The approved three-commit push remains public at `595b31f`. New provider evidence
+justifies two focused corrections. Flatpak failed because camera bindgen could
+not load libclang; the source manifest now requests the official LLVM 22 SDK
+extension for 26.08 and its library paths. Its isolated build has compiled camera
+bindings but the complete build/bundle result remains pending.
+
+The macOS all-feature suite failed the typing repaint fixture. Theme application
+recreates cursor visual settings, undoing its pre-frame blink override. A native
+Mac reproduction confirms the light-theme fixture error. `ddb72b5` keeps the
+composer unfocused and exercises both light/dark system themes, retaining the
+original timing bounds and required typing-dot repaint cause. All six required
+native Mac gates pass on the corrected source, including 1,715 library tests in
+each configuration. No production animation behavior changed. Exact evidence is
+`H:/Scratch/Codex/zap-delivery-20261011/macos-gates`.
+
+The user confirms no test numbers are available. Phone acceptance is blocked on
+that prerequisite. Personal accounts are not a substitute. Follow-up commits
+remain local because push approval named only the original three commits.
+Continue the active isolated Flatpak validation and remaining provider jobs,
+record their terminal outcomes, finish explicit-path commits/checkpoint review,
+then present the exact follow-up push for approval. Do not rerun historical
+recovery commands, repeat the already approved push, replace the installed client,
+pair an account, send a message or place a call.
+
+
+### Post-restart continuation, latest checkpoint
+
+The restart preserved the source and completed Flatpak exit-0 receipt. Fresh
+read-back confirms its OSTree export, generated bundle and another successful
+bundle export from that repository. The source/bundle sandbox parity test passes.
+All six native Mac gates pass for the corrected `ddb72b5` demo fixture. Exactly
+two of the 388 recorded functional inputs changed: that fixture and the Flatpak
+LLVM build-tool manifest. The baseline remains intact; current evidence is in
+[follow-up receipts](verification/development-followup-20261011.json).
+
+The original provider run is now terminal: macOS has the already corrected
+fixture failure, Windows tests pass but its job is cancelled during cache
+cleanup, and the other seven CI jobs pass. Original Flatpak failed before the
+local build-tool correction. Neither original workflow is claimed green.
+
+The macOS and Flatpak fixes and recovery documentation are committed locally.
+Continue with the exact follow-up source-push preview in
+[delivery review](development-delivery-20261011.md), after explicit approval:
+earlier approval covered only the three original commits ending at `595b31f`.
+Then verify new provider results. Do not repeat historical builds/recovery,
+publish a release or replace the installed client. Phone acceptance remains
+blocked on unavailable test numbers; personal accounts are not a substitute.

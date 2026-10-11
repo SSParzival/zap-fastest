@@ -4,6 +4,9 @@ All cases below are **not run**. Local fixtures, software X11 captures and build
 remain recorded separately. A test account means a WhatsApp number used only for
 invented conversations, with no personal chats, contacts or attachments.
 
+The user confirmed on 2026-10-11 that no test numbers are available. Phone
+acceptance is blocked on that prerequisite; personal accounts are not a fallback.
+
 ## Smallest first session
 
 Use two test WhatsApp accounts on two phones and one separate application test

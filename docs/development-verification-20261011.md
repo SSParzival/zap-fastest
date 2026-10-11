@@ -100,3 +100,67 @@ needs a disposable machine/VM and a specific approved interruption method.
 See [the delivery review](development-delivery-20261011.md) for the local commit
 scope and external delivery prerequisites. No push, tag, release, installed-client
 replacement, live WhatsApp send/call or outbound message occurred.
+
+### Approved source delivery
+
+The user subsequently approved only the three reviewed source commits. A guarded
+fast-forward push publishes `d98487d`, `17868ea` and `595b31f` to fork/main.
+Fresh Git remote and GitHub API read-back both confirm
+`595b31f5a0a82fe30c0c73594e0f611c8e8b74fe`. The [Packaging validation](https://github.com/eternalwaitt/zap-faster/actions/runs/38141392466)
+passes; version-dependent release packaging/install/publication jobs are skipped.
+[CI](https://github.com/eternalwaitt/zap-faster/actions/runs/38141392117) remains
+running on that exact SHA; formatting, both Clippy checks, Rustdoc and advisories
+pass. [Flatpak](https://github.com/eternalwaitt/zap-faster/actions/runs/38141392071)
+fails in `v4l2-sys-mit` because bindgen cannot load libclang. The source manifest
+now requests the official LLVM 22 SDK extension and sets `LIBCLANG_PATH` to its
+library directory. The extension's official branch/26.08 manifest matches our
+SDK version. An isolated local Flatpak build validates that packaging correction;
+its result must be recorded before claiming it passes. Follow-up checkpoint
+changes remain local, outside the approved three-commit range. Release, client
+replacement and attended operations are still unapproved/unperformed.
+
+### Follow-up regression correction
+
+Provider macOS default tests pass, but its all-feature suite fails the typing
+repaint fixture because cursor blinking requests an immediate frame. A native
+Mac reproduction proves that the fixture's pre-frame blink override is lost when
+the application reapplies theme visuals. Commit `ddb72b5` keeps the composer
+unfocused, checks that prerequisite, exercises light/dark system preferences and
+retains the original timing bounds and typing-dot repaint cause. Production
+animation behavior is unchanged.
+
+All six required gates exit 0 on native Apple ARM64/Rust 1.98 for corrected
+`src/demo.rs` SHA256 `3875c2af9ed1cc32081e473edd625a4fda291d5310f40fc86536a21f7f26f71d`.
+Both configurations pass 1,715 library tests with 13 ignored; binary suites pass
+9/11 and update integration passes 2 per configuration. Exact captured receipts:
+`H:/Scratch/Codex/zap-delivery-20261011/macos-gates/results.txt` and adjacent logs.
+The focused corrected test also exits 0. The earlier light-theme reproduction
+exits 101 as expected, before the correction. No native window or live account
+was opened.
+
+The user confirms no test numbers are available. Phone acceptance remains
+blocked on test accounts, with no substitution of personal accounts.
+
+
+### Post-restart continuation, latest checkpoint
+
+The restart preserved the source and completed Flatpak exit-0 receipt. Fresh
+read-back confirms its OSTree export, generated bundle and another successful
+bundle export from that repository. The source/bundle sandbox parity test passes.
+All six native Mac gates pass for the corrected `ddb72b5` demo fixture. Exactly
+two of the 388 recorded functional inputs changed: that fixture and the Flatpak
+LLVM build-tool manifest. The baseline remains intact; current evidence is in
+[follow-up receipts](verification/development-followup-20261011.json).
+
+The original provider run is now terminal: macOS has the already corrected
+fixture failure, Windows tests pass but its job is cancelled during cache
+cleanup, and the other seven CI jobs pass. Original Flatpak failed before the
+local build-tool correction. Neither original workflow is claimed green.
+
+The macOS and Flatpak fixes and recovery documentation are committed locally.
+Continue with the exact follow-up source-push preview in
+[delivery review](development-delivery-20261011.md), after explicit approval:
+earlier approval covered only the three original commits ending at `595b31f`.
+Then verify new provider results. Do not repeat historical builds/recovery,
+publish a release or replace the installed client. Phone acceptance remains
+blocked on unavailable test numbers; personal accounts are not a substitute.
