@@ -6,6 +6,11 @@ redirect_from:
 nav_order: 3
 ---
 
+This guide includes unreleased development features. The public download is
+still 0.30.0. The history recovery, account backup, native calling, custom font,
+Messages appearance and portable-preference additions below require a development
+build; device acceptance is still in progress.
+
 ## Writing
 
 Enter sends and Shift+Enter adds a line. Turn off **Enter sends** in Settings
@@ -664,11 +669,13 @@ open it. In a group, a mention of you or a reply to you always notifies.
 Press `Ctrl+/` or click the keyboard button under the composer to list all
 shortcuts.
 
-Notification sounds, voice playback and video playback use the system's current
-default audio output. Zap Faster does not fall back to an unrelated output when
-that device cannot open. Active playback checks for default-device changes and
-stream errors; it reopens at the current position or pauses with an error. Routing
-on other platforms and physical device changes still need attended testing.
+Notification sounds use the native system notification output. Under Settings,
+**Microphone and sound output** chooses the account's devices for recording,
+voice/video playback and calls. A missing or failed chosen sound output falls
+back to the system default with a warning. Recording refuses an unavailable
+chosen microphone instead of switching silently. Active playback follows output
+changes or pauses with an error. Physical Bluetooth/HDMI routing and device
+removal still require attended testing.
 
 The rate-limit queue adapts [pulgueta's PR #364](https://github.com/crmne/zapfast/pull/364),
 with fork-specific durable reconnect recovery and transfer handling. The gallery
@@ -739,3 +746,49 @@ file may then be moved. Reset local picture returns to their WhatsApp picture.
 This changes display only on this computer, never uploads a picture, and never
 replaces the photo downloaded from WhatsApp. Separate accounts keep separate
 overrides. Encrypted full account backups include these local pictures.
+
+## History recovery and downloaded files (development builds)
+
+Before pairing a new account, choose **Recent sync** or **Full sync**. Full asks
+for a larger initial history profile and continues requesting older history and
+attachments across eligible chats. It can take a long time and use substantial
+network traffic and disk space. The phone and WhatsApp determine what remains
+available; Full cannot guarantee a lifetime archive.
+
+Settings lets you change recovery mode, background media recovery, request
+budgets and the storage budget. Reopening resumes durable progress. A storage
+budget pauses new background downloads; it does not discard archived files.
+Recovery counts and the oldest recovered date describe what has arrived, rather
+than treating the phone's percentage as proof of completeness.
+
+Under **Settings > Files**, choose the download root, account/chat or
+account/chat/month folders, and readable filenames. These affect future copies
+only. Verified private media keeps its archive identity, so moving an exported
+copy does not break playback. Existing files are preserved.
+
+## Encrypted account backups (development builds)
+
+Under **Settings > Files**, back up the account and downloaded files with a
+passphrase of at least twelve characters. The connection pauses while saving.
+Keep the passphrase separately; it cannot be recovered. Missing referenced
+attachments stop the backup instead of being silently omitted.
+
+Restore creates a separate account and leaves it offline. Existing accounts are
+never overwritten. A full backup includes linked-device identity, preferences,
+the encrypted archive and its key, and media. Choose **Resume connection** only
+after closing the original installation: pending operations may send on resume,
+and the same restored identity must not connect from two computers at once.
+The phone can invalidate a saved session, requiring relinking. Actual power-loss
+and platform-keyring acceptance remain unverified.
+
+## Voice and video calls (development builds)
+
+In a direct conversation, use the voice or video button in the header. Incoming
+calls offer answer or decline. Calls use the selected microphone/sound output;
+video requires camera permission and uses the default camera. Ending or locking
+the app stops capture. Local call history stays in the account's encrypted archive.
+
+Native 1:1 calling is implemented through the official protocol library, but
+two-device interoperability and physical permissions/device removal still need
+attended acceptance. Group calls await upstream interoperability fixes. Calls
+embedded as interactive-message actions have separate unsupported-action rules.

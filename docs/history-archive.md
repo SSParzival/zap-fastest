@@ -27,9 +27,3 @@ Use [organized downloads](download-organization.md) for readable copies in your 
 Restart replay preserves chat metadata already stored, so an older staged chunk cannot overwrite newer chat names and preferences. History does not carry a reliable generation stamp for every chat field. If an initial metadata update failed after the chat already existed, replay may recover the messages without restoring every old snapshot preference.
 
 Logging out records a durable cleanup intent before deleting account data. If archive or account-file cleanup fails, linking waits until cleanup succeeds, including after restart. Old capture writers and queued protocol callbacks cannot publish into the next linked identity. A saved archive without a linked device identity is preserved and cannot be used for a fresh pairing in that slot; back it up or open it offline, and use another account slot to link.
-
-Completed background job counts record prior successful fetches; they do not audit
-files deleted outside Zap Faster. Jobs marked unavailable do not automatically
-requeue when later history supplies a missing motion identity. An explicit retry
-can recover the file. These remaining recovery gaps do not establish that
-WhatsApp has lost the attachment.

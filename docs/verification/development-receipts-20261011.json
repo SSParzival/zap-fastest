@@ -1,0 +1,195 @@
+{
+  "source_manifest": "development-inputs-20261011.json",
+  "receipt_readback_date": "2026-10-11",
+  "receipts": {
+    "windows-x86_64": {
+      "fmt": 0,
+      "clippy": 0,
+      "clippy-all": 0,
+      "test": 0,
+      "test-all": 0,
+      "doc": 0,
+      "complete": 0
+    },
+    "linux-x86_64": {
+      "fmt": 0,
+      "clippy": 0,
+      "clippy-all": 0,
+      "test": 0,
+      "test-all": 0,
+      "doc": 0,
+      "complete": 0
+    },
+    "linux-arm64": {
+      "build-all": 0,
+      "fmt": 0,
+      "clippy-default": 0,
+      "clippy-all": 0,
+      "test-default": 0,
+      "test-all": 0,
+      "rustdoc": 0
+    },
+    "macos-arm64": {
+      "fmt": 0,
+      "clippy-default": 0,
+      "clippy-all": 0,
+      "test-default": 0,
+      "test-all": 0,
+      "rustdoc": 0,
+      "menu": 0
+    },
+    "nix-x86_64": {
+      "preflight.exit": 0,
+      "flake-check.exit": 0,
+      "build.exit": 0,
+      "output-check.exit": 0,
+      "complete": 0
+    }
+  },
+  "reports": {
+    "zap-macos-post-call-final-verification.md": {
+      "sha256": "329c0f955c6a0416aff747fda264d3ac339afbc3f1796f16802f7e88824939f3",
+      "report": "# Final native macOS verification\n\nFinal frozen call-layout source was extracted from the canonical LF snapshot into the existing task-owned Mac checkout. The two changed source files were read back with matching SHA256 hashes:\n- src/ui/call.rs: 66badb2e1b383d2d33ed1944fca2b34cc1925c69c74e94c3f9569bb84c40587c\n- src/demo.rs: 3fd217fbdb0f9dc1271154b9138226883541615ad1d98967da85ee6933eed672\n\nAll six required gates and the native menu integration exited 0 on native Apple ARM64, pinned Rust 1.98.0, one Cargo job and normal compiler/profile settings:\n- cargo fmt --all --check\n- strict Clippy, all targets, default and all features\n- tests, all targets, default and all features\n- strict all-feature rustdoc\n- native macOS menu integration: Settings opens Settings\n\nDefault tests: 1715 library passed, 0 failed, 13 ignored; 9 binary passed; 2 update integration passed.\nAll-feature tests: 1715 library passed, 0 failed, 13 ignored; 11 binary passed; 2 update integration passed.\n\nReceipts and full captured logs are H:/Scratch/Codex/zap-macos-post-call-final-results.txt, zap-macos-post-call-final.log, and zap-macos-post-call-final-{fmt,clippy-default,clippy-all,test-default,test-all,rustdoc,menu}.log.\n\nNo application window was opened or focused on the Mac. The native menu fixture uses synthetic application state and no live account. Attended macOS GUI, real calling devices and live phone behavior remain unverified. The separate native Linux Xvfb screenshot matrix demonstrates synthetic rendering and scroll behavior only.\n\nThe existing upstream block 0.1.6 future-incompatibility notice appeared in Cargo's report; all requested strict gates themselves exited 0. No source changes were needed after the final snapshot.\r\n"
+    },
+    "zap-arm64-call-final-verification.md": {
+      "sha256": "8f7c515418bbc6660df384efdc191db57b5f054448f15f8e3c1d4be15e78e46c",
+      "report": "# Final Linux ARM64 verification\n\nFinal source uses the viewport-bounded call panel and 30% preview budget. The focused fixture passed all 32 combinations, including real microphone/speaker selector rectangles, short-window scrolling, incoming video calls, both themes and 100/150% text size.\n\n## Binary and required checks\n\nImmutable normal-profile binary: H:/Scratch/Codex/zap-faster-linux-arm64-call-final\nSHA256: 298414d65f8a22c49b5cc89da7fd46043d3c3c8f4c833aaa7d4dc885027fed41\n\nNative ARM64 Ubuntu 22.04, pinned Rust 1.98.0, one Cargo job, normal compiler/profile settings. All seven stages exited 0: all-feature build, formatting, strict default/all-feature Clippy on all targets, default/all-feature tests on all targets, strict all-feature rustdoc.\n\nDefault library: 1722 passed, 0 failed, 14 ignored. Binary: 9 passed. Integration: 2 passed.\nAll-feature library: 1722 passed, 0 failed, 14 ignored. Binary: 11 passed. Integration: 2 passed.\n\nReceipts: results-call-final.txt, checks-call-final.log, build-all-call-final.log, fmt-call-final.log, clippy-default-call-final.log, clippy-all-call-final.log, test-default-call-final.log, test-all-call-final.log, rustdoc-call-final.log, all under H:/Scratch/Codex.\n\nThe owned container memory limit was 7 GiB with 8 GiB memory plus swap. Recorded peak: 7390343168 bytes; final current-container memory.events oom=0. Earlier limited-memory linker failures are retained separately and occurred before these passing gates. No host VM settings or unrelated containers were changed.\n\n## Independent synthetic GUI proof\n\nH:/Scratch/Codex/zap-linux-demo-20261010/final/REPORT.md records 18 successful final captures on the exact binary above. Both actual audio selectors are initially visible at 640x620 and 400x600. Real X11 wheel events expose every control at 400x300. Nine standard CI demo pages also passed. No real account, microphone or camera was used.\n\n## Native packages\n\nFinal artifact tree: H:/Scratch/Codex/zap-arm64-native-final-packages\nManifest checksums verified locally; AppImage, deb and rpm are native ARM64. Package assembly, AppImage version, ELF checks and Qt SVG checks passed. The final six-distribution installation/removal matrix passed all six cases. Proof: H:/Scratch/Codex/zap-arm64-final-install-validation/validation.md and results-final.json, with all six logs. The final package tree and exact input binary hash were independently verified on Windows.\n\nThese are local verification artifacts, not a published release. Live phone sync, calling devices and attended platform behavior remain untested.\r\n"
+    },
+    "zap-windows-arm64-final-verification.md": {
+      "sha256": "bb5abb6e50bfcc1d924c13c00d358e72ff8becac8b4f8575b9753ab62fca3a95",
+      "report": "# Final Windows ARM64 CI verification\n\nCommand: cargo check --locked --all-targets --all-features --target aarch64-pc-windows-msvc -j1\nResult: exit 0. Cargo completed normal dev profile (unoptimized plus debuginfo) in 29m57s.\nStart: 2026-10-11T02:40:29.0641162Z. Finish: 2026-10-11T03:10:26.6351521Z.\n\nPinned toolchain: Rust1.98.0, direct binaries under H:/Packages/rustup-legacy/toolchains/1.98.0-x86_64-pc-windows-msvc/bin. CARGO_HOME=H:/Packages/cargo, RUSTUP_HOME=H:/Packages/rustup-legacy. The matching ARM64 standard library was verified before launch.\n\nOfficial Microsoft SHA256-verified payloads were extracted into isolated H:/Packages/msvc-arm64-codex-20261010. Existing SDK10.0.26100.0 supplied ARM64 Windows/UCRT libraries; installed x64 VS supplied host compiler environments. clang-cl plus target /EHsc, Ninja, one Cargo/CMake job and normal compiler/profile settings were retained. No elevation, installer, registry changes, installed-tool/SDK changes, source edits or host windows/focus were involved.\n\nThe native OpenSSL stage generated verified COFF-ARM64 objects. Whisper's completed CMake cache explicitly recorded Ninja, clang-cl for C/C++, --target=aarch64-pc-windows-msvc and /EHsc. That targeted receipt is zap-windows-arm64-whisper-cmake-receipt.txt.\n\nFinal frozen source hashes before and after the run:\n- src/ui/call.rs: 66badb2e1b383d2d33ed1944fca2b34cc1925c69c74e94c3f9569bb84c40587c\n- src/demo.rs: 3fd217fbdb0f9dc1271154b9138226883541615ad1d98967da85ee6933eed672\n\nEvidence under H:/Scratch/Codex: zap-windows-arm64-check.log (live stderr), zap-windows-arm64-check.stdout.log, zap-windows-arm64-check-status.txt (PID/timestamps/exit), zap-windows-arm64-check-exit.txt, zap-windows-arm64-check.ps1 and zap-windows-arm64-tool-preparation.md. The architecture-specific target cache is retained.\n\nThis establishes the Windows ARM64 compile-only CI gate. It does not establish native ARM64 execution, GUI, package installation, devices or live WhatsApp behavior.\r\n"
+    },
+    "zap-linux-x86-final-verification.md": {
+      "sha256": "329ace83f743cf62f75e7a5d350f564ae404ec64818dc48d567b418054425aec",
+      "report": "# Final Linux x86_64 verification\n\nNative Ubuntu 22.04 container, pinned Rust 1.98, one Cargo job and normal project compiler/profile settings. All-feature application build and all six required gates passed with independently read exit-0 receipts.\n\n| Check | Receipt |\n| --- | --- |\n| All-feature build | build=0 |\n| Formatting | fmt=0 |\n| Strict default/all-feature Clippy | clippy=0, clippy-all=0 |\n| Complete default/all-feature all-target tests | test=0, test-all=0 |\n| Strict all-feature rustdoc | doc=0 |\n| Completed gates | complete=0 |\n| Final all-feature build and immutable export | build-export=0, export=0 |\n\nBoth library suites pass 1,722 tests, zero failures, 14 ignored. Default executable suite passes nine; all-feature suite passes eleven. Both update suites pass two. Strict rustdoc retains RUSTDOCFLAGS=-D warnings and finishes in 3m41s. The ignored manual/platform tests are not claimed as executed.\n\nFinal normal-profile binary: H:/Scratch/Codex/zap-native-input/zap-faster\nSHA256: 10dc8c88896e68283bc0305bd2f55527fd37ee933ffc600f8d945cefb273f82e\nVersion: zap-faster 0.30.0\n\nLinux-side and Windows-side exported hashes match. Source call.rs/demo.rs hashes match the frozen source recorded in the repository verification checkpoint. Exact readelf ABI and dynamic-library reports are zap-linux-final-abi.txt and zap-linux-final-dynamic.txt. Logs: zap-linux-final-gate-{build,fmt,clippy,clippy-all,test,test-all,doc,build-export}.log; receipts: zap-linux-final-gate-status.\n\nThe initial memory-starved default-test link was interrupted under authorized build recovery and is not accepted as a completed test. Its preserved log and interruption marker remain separate. Accepted tests were resumed after a temporary, documented VM memory increase. Docker disks, images, volumes and build caches were retained. The temporary WSL settings must still be restored after remaining package/Nix checks.\n\nThis establishes compilation and synthetic behavior. Package installation and offline X11 acceptance have their own reports; no phone, camera/microphone, real archive or attended compositor behavior is inferred. The binary is local, unsigned and unreleased.\n"
+    },
+    "zap-arm64-final-install-validation/validation.md": {
+      "sha256": "9b24fa0723fcd8a2f25792e9439bd24d1b99c2c1c61bd87ee79fe7102e83eb04",
+      "report": "# Final native ARM64 package verification\r\n\r\nLatest final call-layout binary SHA256: 298414d65f8a22c49b5cc89da7fd46043d3c3c8f4c833aaa7d4dc885027fed41.\r\nThis hash was required before package assembly; the input remained unchanged and only a disposable payload copy was stripped.\r\n\r\nAll six clean native ARM64 cases passed installation, application --version, all 13 required runtime libraries, desktop/icon and exact desktop keys, actual installed Omarchy hook execution using a synthetic palette/reload shim with exact SHA256 byte comparison, package removal, and retention of preexisting synthetic settings. Every case used one CPU and at most 1 GiB, then its owned container was removed.\r\n\r\n| Distribution | Architecture | Exit | Log |\r\n| --- | --- | --- | --- |\r\n| ubuntu:22.04 | arm64 | 0 | ubuntu22_04.log |\r\n| ubuntu:24.04 | arm64 | 0 | ubuntu24_04.log |\r\n| debian:12-slim | arm64 | 0 | debian12.log |\r\n| debian:13-slim | arm64 | 0 | debian13.log |\r\n| fedora:41 | arm64 | 0 | fedora41.log |\r\n| fedora:latest | arm64 | 0 | fedora_latest.log |\r\n\r\nPinned native-packages 0.8.1/nFPM 2.47.0 built all three formats. Package manifest/checksums passed on ARM and were independently verified from the Windows mirror. AppImage --version passed, external update sidecar was generated locally, both ELF finalization tests passed, and headless Qt rendered the icon without warnings. App ABI floor is glibc 2.35; separately compiled runtime checker needs only 2.34.\r\n\r\nArtifact mirror: H:/Scratch/Codex/zap-arm64-native-final-packages.\r\n\r\n- packages/linux-arm64/deb/zap-faster_0.30.0_arm64.deb: ae64bba68404f39dc225358b84105e625f1f7f1e59435b6b1b5b7be3cdd00dbb\r\n\r\n- packages/linux-arm64/rpm/zap-faster-0.30.0-1.aarch64.rpm: 578febc54e48cbe817e93f3b178d2b1cd5c6c70d11e97022db1f03bacca2870b\r\n\r\n- packages/linux-arm64/appimage/zap-faster-0.30.0-aarch64.AppImage: 015238bed91bdb8814046993cc3f98dc25eb17dcde31e2370f7314586f8def82\r\n\r\nDisposable stripped payload SHA256: 0d95f78e45a10e1b2213902e86df8658e5e4b6d22d617d0c62afc19311d34672.\r\n\r\nresults-final.json binds each case to its exact package hash, image architecture/ID/digests and accessible Windows log. Earlier CRLF packaging and cmp-only fixture failure evidence remains in H:/Scratch/Codex/zap-arm64-install-validation-20261010; these final cases all ran fresh against the final binary and artifact hashes.\r\n\r\nThese are unsigned, unpublished local packages derived from the current debug build. They do not prove release performance/signing, an attended desktop session, camera/audio devices or live WhatsApp behavior. No real archive, account, message, host installation or publishing was involved.\r\n"
+    },
+    "zap-linux-demo-20261010/final/REPORT.md": {
+      "sha256": "d56db6677665fc823e16bbe9a9369c8ac1e212869a7bc3a3ce3c67f3f0a3c2c6",
+      "report": "# Final independent Linux synthetic UI acceptance\n\nFinal immutable ARM64 binary SHA256: `298414d65f8a22c49b5cc89da7fd46043d3c3c8f4c833aaa7d4dc885027fed41`. [Checksum](binary.sha256), [all exit codes](results.tsv), [logs](logs).\n\n18 captures exited 0 and were mirrored to this Windows folder, then visually inspected. The seven call layouts and all nine required Linux CI pages rendered successfully. The two additional real-X11-wheel captures verified lower-control reachability. No error, panic or unknown-demo-page diagnostic appeared in the captured synthetic logs.\n\nBoth actual microphone and speaker selectors are fully visible on first presentation at [640x620 dark](shots/call-video-normal-final.png), [640x620 light](shots/call-video-light-final.png) and [400x600](shots/call-video-compact-final.png), at the normal 100% text size. [Incoming video at 400x600](shots/call-incoming-video-compact-final.png), [wide active video](shots/call-video-wide-final.png) and [narrow voice](shots/call-active-normal-final.png) also fit. At 400x300, the panel remains inside the viewport and [eight real X11 wheel steps expose all lower controls](shots/call-video-short-scrolled-final.png), including Mute, End call, camera, microphone and speaker. This resolves the clipping found in the original capture; original and intermediate PNGs remain preserved outside this final folder.\n\nThe required CI pages are [media album](shots/media-album.png), [forward review](shots/forward-review.png), [voice transcript](shots/voice-transcript.png), [starred messages](shots/starred.png), [star menu](shots/star-menu.png), [pinned messages](shots/pinned.png), [background history](shots/background-history.png), [original documents](shots/original-documents.png) and [international sender](shots/international-sender.png). No new visual defect was found in those samples.\n\nEnvironment: the task-owned Ubuntu 22.04 ARM64 container `codex-zap-arm64-20261010` on macbook, Xvfb X11, Mesa software rendering, Noto fallback fonts and Inter interface fallback. Every capture used fresh synthetic HOME/XDG/TMPDIR directories. The demo creates its own fresh headless account fixture. Pointer/wheel input stayed inside the virtual X server. No real archive, session, contacts, messages, camera, microphone or phone was used.\n\nAcceptance here is limited to these synthetic Linux software-X11 layouts and actual wheel reachability. It does not establish Wayland/compositor or hardware GPU behavior, screen-reader delivery, operating-system handoff, device permissions, native media capture, or live phone/call interoperability. Full build/test gates are tracked independently by root and calling agents. No release or installed-client replacement occurred.\n"
+    },
+    "zap-x86-linux-demo-final/REPORT.md": {
+      "sha256": "61ff543347c2860a2a34b7fdb2fd6c60dc963a0d5ef8e1daf13517729b5fe3cd",
+      "report": "# Final x86 Linux CI-page visual acceptance, 2026-10-11\n\nPASS: all nine required synthetic pages exited 0, produced nonempty valid PNG files at exactly 1180x780, decoded in the image viewer, and were visually reviewed. No blank capture, clipped dialog controls or new visible defect was found in these samples. [Actual process exits and PNG validation](results.tsv), [runner](capture-x86-ci.sh).\n\nBinary SHA256 before and after capture: `10dc8c88896e68283bc0305bd2f55527fd37ee933ffc600f8d945cefb273f82e`. It matched root's exported final hash before starting. [Exported checksum](exported-binary.sha256), [before](binary-before.sha256), [after](binary-after.sha256).\n\n| Page | Process exit | PNG | Visual result |\n| --- | ---: | --- | --- |\n| [Media album](shots/media-album.png) | 0 | 1180x780 | Album and Download all visible |\n| [Forward review](shots/forward-review.png) | 0 | 1180x780 | Recipient confirmation and both controls fit |\n| [Voice transcript](shots/voice-transcript.png) | 0 | 1180x780 | Synthetic transcript appears beneath voice message |\n| [Starred messages](shots/starred.png) | 0 | 1180x780 | Starred sidebar and corresponding message visible |\n| [Star menu](shots/star-menu.png) | 0 | 1180x780 | Context menu actions fit within window |\n| [Pinned messages](shots/pinned.png) | 0 | 1180x780 | Pin banners and message indicators visible |\n| [Background history](shots/background-history.png) | 0 | 1180x780 | Recovery preference and availability wording visible |\n| [Original documents](shots/original-documents.png) | 0 | 1180x780 | Synthetic original-file staging and composer fit |\n| [International sender](shots/international-sender.png) | 0 | 1180x780 | Synthetic international sender and group message visible |\n\nThe owned `zap-backlog-linux` container rendered through Xvfb X11 and Mesa llvmpipe. Host DISPLAY, WAYLAND_DISPLAY and WAYLAND_SOCKET were unset before Xvfb created its virtual DISPLAY. Each page had fresh HOME/XDG/TMPDIR directories, and demo mode creates a fresh headless account fixture. The installed interface font was DejaVu Sans, as recorded in every synthetic log; this differs from the earlier ARM container's Inter fallback environment. Logs contain ordinary virtual-display XSETTINGS and physical-size warnings, with no error, panic or unknown-demo-page diagnostic.\n\nNo source, binary or build cache was changed. No host GUI window, real archive, session, messages, contacts, phone or media device was used. This is actual x86 Linux software-X11 rendering evidence; it does not establish Wayland, hardware GPU, screen-reader, platform handoff, permissions, or live phone/call acceptance. Build/test and package checks remain separate root-owned evidence.\n"
+    },
+    "zap-nix-final/REPORT.md": {
+      "sha256": "74a074ee9488fbd6340abb12265c8932343df5f7b7d6ae03676c6fcb86b2bc68",
+      "report": "# Final Nix package verification\n\nActual final preflight, release build, normal package checks, installed-output checks and completion all exited 0. Proof is mirrored at H:/Scratch/Codex/zap-nix-final; no further build is needed.\n\n| Receipt | Result |\n| --- | --- |\n| preflight.exit / flake-check.exit | 0 / 0 |\n| build.exit | 0 |\n| output-check.exit | 0 |\n| complete | 0 |\n| Normal package library tests | 1,722 passed, 0 failed, 14 ignored |\n| Binary tests | 9 passed, 0 failed |\n| Update integration tests | 2 passed, 0 failed |\n| Doc tests | 0 tests, successful |\n\nNix 2.35.2 evaluated the pinned flake and built the x86_64-linux package with the normal optimized release profile, doCheck=1, one Cargo job, one Nix job/core. Release compilation completed in 23m50s; buildPhase was 24m17s and checkPhase was 37m56s. Exact final command (also in active-runner.sh and verified against the live process):\n\n```\nnix --extra-experimental-features 'nix-command flakes' build path:/source --no-link --keep-failed --max-jobs 1 --cores 1 --option sandbox false -L\n```\n\nPreflight command was `nix --extra-experimental-features 'nix-command flakes' flake check path:/source --no-build --option sandbox false`. The preflight evaluates x86_64-linux; it explicitly reports that aarch64-linux and aarch64-darwin were omitted as incompatible systems. Their separate native Rust/package receipts are not inferred from this Nix run. Nix's own sandbox was disabled inside the task-owned Docker container; the build used the existing normal locked/offline Cargo hooks. No tests or package checks were disabled.\n\nExact output from result-path.txt:\n\n```\n/nix/store/xxj8dq7ln66sgydnmxgwys6li4lxld7c-zap-faster-0.30.0\n```\n\nFinal derivation: `/nix/store/pvfn50a8km4xr4vj9sy0waja0i5zh6qg-zap-faster-0.30.0.drv`. Generated derivation data is preserved in derivation.json.\n\nThe installed executable reports `zap-faster 0.30.0`. Actual output checks verified executable permissions, the LD_LIBRARY_PATH runtime wrapper, exact desktop Icon=zap-faster and StartupWMClass=zap-faster, a nonempty scalable SVG icon, a nonempty Omarchy theme template and executable Omarchy hook. installPhase and fixupPhase both completed, including RPATH shrinking, script interpreter patching and stripping. The earlier disposable install/wrapper fixture is recorded separately and was not substituted for these actual gates. No GUI or hardware was opened, and this proves the package output rather than attended NixOS desktop, camera/audio or linked-account runtime.\n\n## Corrections and preservation\n\nThe initial actual build failed because v4l2-sys-mit could not find linux/videodev2.h. Adding the official rustPlatform.bindgenHook to the flake's development shell and package native inputs resolved the missing header. Its complete failed proof is retained at H:/Scratch/Codex/zap-nix-final-before-bindgen-fix.\n\nThe next actual build passed all normal tests but failed installPhase because the copied Windows CRLF flake embedded carriage returns in shell hooks. The flake and its scoped Git attribute were normalized to LF. Both generated shell hooks passed bash -n and contained zero CR; shipped desktop, template and executable Omarchy hook also contained zero CR. That full failed receipt is retained at H:/Scratch/Codex/zap-nix-final-bindgen-crlf-failure. Final corrected build repeated the normal build and tests and completed successfully. No Rust/product source changes were made during these Nix corrections.\n\nFinal source SHA256 values, read back after completion and matching source-hashes.txt:\n\n```\nflake.nix       90916a6010453c03d1874e266f037ac377906973998b7a327e745c9a429203f0\n.gitattributes  ba681faa80b75157698a0a013a7a6f5a4b9db8824bea5a192b0a23c58293ce83\nsrc/ui/call.rs  66badb2e1b383d2d33ed1944fca2b34cc1925c69c74e94c3f9569bb84c40587c\nsrc/demo.rs     3fd217fbdb0f9dc1271154b9138226883541615ad1d98967da85ee6933eed672\n```\n\nThe task-owned container retained the authorized 8 GiB memory / 10 GiB combined limit and two CPUs throughout the final retry. Final cgroup memory.events high/max/OOM/OOM-kill counters were all zero. Container/config restoration is handled by the parent task after independent receipt read-back; this report does not claim restoration itself.\r\n"
+    },
+    "zap-arm64-startup-measurements-20261011/REPORT.md": {
+      "sha256": "db0f380a8c04c968c2b28e679d9fd63a5a3ab92f9585ea38da353dbc4d0ec8f9",
+      "report": "# Native ARM64 synthetic startup and memory receipt\n\nThree accepted app runs completed with exit 0 on 2026-10-11. Median elapsed capture-and-exit proxy: **0.73 seconds**. Median application peak RSS: **176.35 MiB** (180,584 KiB). No repository source edits or Cargo compilation were performed.\n\n| Run | App capture-and-exit elapsed | Peak RSS, KiB | Peak RSS, MiB | PNG | Exit |\n| --- | --- | --- | --- | --- | --- |\n| 1 | 0.79 s | 180,584 | 176.35 | 1280x800 | 0 |\n| 2 | 0.73 s | 181,132 | 176.89 | 1280x800 | 0 |\n| 3 | 0.71 s | 180,404 | 176.18 | 1280x800 | 0 |\n\n## Method and scope\n\nThe immutable final native Linux ARM64 executable was run in a disposable Ubuntu 22.04 task helper on the MacBook's Docker VM, bounded to one CPU, 1 GiB memory and zero swap. Networking was disconnected before the accepted runs. Each run received new HOME, XDG config/data/cache/runtime and TMP directories. Xvfb provided an isolated 1600x1200 display; Mesa software rendering was selected. GNU time -v wrapped only the application, excluding Xvfb startup:\n\n```\n/usr/bin/time -v -o run-N/time.txt /input/zap-faster --demo --demo-shot run-N/startup.png --demo-size 1280x800 --demo-shot-delay 0\n```\n\nThe dataset is the built-in offline Messages demo in src/demo.rs, default dark theme, selected Ada Lovelace synthetic conversation. This is not the separate 100-chat/10,000-message archive profiling dataset. All three PNG signatures and dimensions were verified on Windows, and all three images were visually inspected: chat list, message bubbles, document/voice/link cards and composer are present. The synthetic image thumbnail is still blurred in this first requested frame. The image is not blank, and this receipt does not claim fully settled asynchronous media.\n\nAll three PNG SHA256 values are c0dcb0da00b3dfca92b5d496f5cc869c34331f98d2294ba10c13ad9c81a2c30d. The executable SHA256 before and after is unchanged: 298414d65f8a22c49b5cc89da7fd46043d3c3c8f4c833aaa7d4dc885027fed41.\n\nElapsed time measures process start through the first requested PNG capture and process exit. It does not separately timestamp first window presentation. It does not measure real-account archive startup, initial phone sync, network recovery, old Intel hardware or Windows performance. App directories are cold; the operating-system file cache was warm and was not cleared. Binary hash verification and an earlier preflight warmed that cache. The binary retains its normal debug build profile. These conditions prevent a cold-boot or release-build performance claim.\n\nRaw GNU time reports, app logs, exit receipts, PNGs, binary hashes and resource bounds are beside this report; results.json and validated-pngs.json contain machine-readable results. A preliminary app run succeeded, but its subsequent validator failed because python3 was absent; that attempt is retained under python-validation-attempt-run-1 and is excluded from the three accepted samples. PNG validation was moved to the Windows host. App logs have ordinary Xvfb XSETTINGS/physical-size warnings, with no panic or ERROR-level failure. Cgroup memory peak was 1,073,741,824 bytes including cache/provisioning/hash work; memory.events max was already 9,466 and remained unchanged across the three accepted samples. OOM and OOM-kill counters remained zero. Application RSS is the GNU time measurement above, not the cgroup cache peak.\n\n## Quantitative recovery fairness evidence\n\nExisting fixture backend::worker::background_history::tests::full_mode_rotates_beyond_ten_chats_and_preserves_daily_budget (src/backend/worker/background_history.rs:284) asserts exact round-robin ordering for 60 successful requests across 12 synthetic chats. Each receives exactly 60 / 12 = **5 requests**; maximum/minimum service ratio is **1.0**. Restoring the checkpoint also preserves the exhausted 60-request daily budget. The fixture passed in H:/Scratch/Codex/test-default-call-final.log:550. No compilation or fixture rerun was needed for this reconciliation. This quantifies scheduler fairness under a virtual clock, not phone/network latency or recovery throughput.\n\nTogether with the earlier Windows synthetic archive ingestion/reopen/peak-working-set receipts and passing persistence/backoff fixtures, this fills the locally runnable native-client startup/RSS and numeric scheduler-fairness evidence. Attended real-account sync and actual-device runtime remain separate verification boundaries.\r\n\nCleanup: after evidence was copied and inspected, the verified idle task-owned helper codex-zap-arm64-startup-20261011 and its disposable committed image codex-zap-arm64-startup-20261011:1 were removed successfully. The original stopped ARM build container, its caches, and all host proof files were preserved.\r\n"
+    }
+  },
+  "amd64_install_cases": [
+    {
+      "distribution": "ubuntu:22.04",
+      "format": "deb",
+      "container": "codex-zap-amd64-install-final-20261011-ubuntu22_04",
+      "status": "passed",
+      "log": "H:\\Scratch\\Codex\\zap-amd64-final-install-validation\\matrix\\ubuntu22_04.log",
+      "image_id": "sha256:5ec03bb3441e8b0bf3b4f9cd4629a1ae763010dc3035bb8da3ae6cf026486401",
+      "image_architecture": "amd64",
+      "image_digests": [
+        "ubuntu@sha256:5ec03bb3441e8b0bf3b4f9cd4629a1ae763010dc3035bb8da3ae6cf026486401"
+      ],
+      "artifact": "H:\\Scratch\\Codex\\zap-amd64-native-final-packages\\packages\\linux-amd64\\deb\\zap-faster_0.30.0_amd64.deb",
+      "artifact_sha256": "e8323f271dda0213969578421683d74eba90bab6bf1c64c9afa5fd4021447e2f",
+      "exit_code": 0,
+      "seconds": 191.17
+    },
+    {
+      "distribution": "ubuntu:24.04",
+      "format": "deb",
+      "container": "codex-zap-amd64-install-final-20261011-ubuntu24_04",
+      "status": "passed",
+      "log": "H:\\Scratch\\Codex\\zap-amd64-final-install-validation\\matrix\\ubuntu24_04.log",
+      "image_id": "sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55",
+      "image_architecture": "amd64",
+      "image_digests": [
+        "ubuntu@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55"
+      ],
+      "artifact": "H:\\Scratch\\Codex\\zap-amd64-native-final-packages\\packages\\linux-amd64\\deb\\zap-faster_0.30.0_amd64.deb",
+      "artifact_sha256": "e8323f271dda0213969578421683d74eba90bab6bf1c64c9afa5fd4021447e2f",
+      "exit_code": 0,
+      "seconds": 479.8
+    },
+    {
+      "distribution": "debian:12-slim",
+      "format": "deb",
+      "container": "codex-zap-amd64-install-final-20261011-debian12",
+      "status": "passed",
+      "log": "H:\\Scratch\\Codex\\zap-amd64-final-install-validation\\matrix\\debian12.log",
+      "image_id": "sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587",
+      "image_architecture": "amd64",
+      "image_digests": [
+        "debian@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587"
+      ],
+      "artifact": "H:\\Scratch\\Codex\\zap-amd64-native-final-packages\\packages\\linux-amd64\\deb\\zap-faster_0.30.0_amd64.deb",
+      "artifact_sha256": "e8323f271dda0213969578421683d74eba90bab6bf1c64c9afa5fd4021447e2f",
+      "exit_code": 0,
+      "seconds": 307.94
+    },
+    {
+      "distribution": "debian:13-slim",
+      "format": "deb",
+      "container": "codex-zap-amd64-install-final-20261011-debian13",
+      "status": "passed",
+      "log": "H:\\Scratch\\Codex\\zap-amd64-final-install-validation\\matrix\\debian13.log",
+      "image_id": "sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f",
+      "image_architecture": "amd64",
+      "image_digests": [
+        "debian@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f"
+      ],
+      "artifact": "H:\\Scratch\\Codex\\zap-amd64-native-final-packages\\packages\\linux-amd64\\deb\\zap-faster_0.30.0_amd64.deb",
+      "artifact_sha256": "e8323f271dda0213969578421683d74eba90bab6bf1c64c9afa5fd4021447e2f",
+      "exit_code": 0,
+      "seconds": 284.67
+    },
+    {
+      "distribution": "fedora:41",
+      "format": "rpm",
+      "container": "codex-zap-amd64-install-final-20261011-fedora41",
+      "status": "passed",
+      "log": "H:\\Scratch\\Codex\\zap-amd64-final-install-validation\\matrix\\fedora41.log",
+      "image_id": "sha256:f1a3fab47bcb3c3ddf3135d5ee7ba8b7b25f2e809a47440936212a3a50957f3d",
+      "image_architecture": "amd64",
+      "image_digests": [
+        "fedora@sha256:f1a3fab47bcb3c3ddf3135d5ee7ba8b7b25f2e809a47440936212a3a50957f3d"
+      ],
+      "artifact": "H:\\Scratch\\Codex\\zap-amd64-native-final-packages\\packages\\linux-amd64\\rpm\\zap-faster-0.30.0-1.x86_64.rpm",
+      "artifact_sha256": "a67dedd19f66d33e497baa089e65e39f0bf53d9f43465ba98f534a0e19905099",
+      "exit_code": 0,
+      "seconds": 63.43
+    },
+    {
+      "distribution": "fedora:latest",
+      "format": "rpm",
+      "container": "codex-zap-amd64-install-final-20261011-fedora_latest",
+      "status": "passed",
+      "log": "H:\\Scratch\\Codex\\zap-amd64-final-install-validation\\matrix\\fedora_latest.log",
+      "image_id": "sha256:43b29f65a41eb9c35e1cd5323e3bdf3b655c2357a9f4f1ff2f9c2798e5045d80",
+      "image_architecture": "amd64",
+      "image_digests": [
+        "fedora@sha256:43b29f65a41eb9c35e1cd5323e3bdf3b655c2357a9f4f1ff2f9c2798e5045d80"
+      ],
+      "artifact": "H:\\Scratch\\Codex\\zap-amd64-native-final-packages\\packages\\linux-amd64\\rpm\\zap-faster-0.30.0-1.x86_64.rpm",
+      "artifact_sha256": "a67dedd19f66d33e497baa089e65e39f0bf53d9f43465ba98f534a0e19905099",
+      "exit_code": 0,
+      "seconds": 72.87
+    }
+  ],
+  "limitations": "Local receipts reused for matching inputs; no attended phone/device proof, publication or installed-client replacement.",
+  "delivery_document_checks": {
+    "product_inputs_verified": 388,
+    "document_corrections": 2,
+    "inventory_entries": 153,
+    "document_paths_checked": 14,
+    "linear_history": true,
+    "metadata_refresh_files": 9,
+    "source_changes_after_gates": false
+  }
+}

@@ -489,6 +489,26 @@ A release is not finished when the tag is pushed. Do these in order:
    native builds with `makepkg -f`. A recipe-only `zapfast-git` change does
    not require an application release.
 
+## Verification cadence
+
+- During development, run formatting, focused tests and compilation/lints
+  relevant to the change. Keep required hooks and per-commit checks intact.
+  Check an affected platform early when platform code or dependencies change.
+- Batch expensive full-platform CI, Docker/Nix builds, package installation
+  matrices and broad visual checks at the final checkpoint. Freeze application,
+  dependency and packaging inputs first; do not run the full matrix per edit.
+- Before expensive builds, validate cheap packaging prerequisites: metadata,
+  executable permissions, LF shell text and generated shell-script syntax.
+- Reuse passing CI or local receipts for matching source, configuration and
+  toolchain inputs. Record commands, actual exit results and tested inputs in
+  the checkpoint. Avoid equivalent CI/local duplication; run missing coverage.
+- After a correction, rerun affected gates. Repeat the full matrix only when
+  changes invalidate its coverage. Preserve caches and normal profiles; avoid
+  concurrent heavy builds that compete for host memory or storage.
+- Documentation/instruction-only edits need relevant document checks, not
+  application builds. These rules change timing, never required coverage or
+  the distinction between local checks and attended device acceptance.
+
 ## Definition of done
 
 - Add focused tests for changed behaviour. The `demo` feature carries sample
@@ -497,7 +517,8 @@ A release is not finished when the tag is pushed. Do these in order:
   `--demo-shot` to look at the result.
 - Update the docs site (`docs/`) when user-visible behaviour, settings,
   files, or network access changes. The README stays a short pointer to it.
-- Run the full checks before finishing:
+- For code or build changes, run the full checks at the final checkpoint
+  before finishing (matching successful CI receipts may supply coverage):
 
   ```sh
   cargo fmt --all --check
