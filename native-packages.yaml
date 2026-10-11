@@ -4,10 +4,10 @@ schema: 1
 tool:
   version: 0.8.1
   nfpm: 2.47.0
-# Ubuntu 24.04 and Debian 13 use ALSA's t64 package name.
+# Ubuntu 22.04 build ABI also works with the t64 package's Provides alias.
 libraries:
   libasound.so.2:
-    deb: libasound2t64
+    deb: libasound2
     rpm: alsa-lib
 nfpm:
   name: zap-faster
@@ -50,7 +50,7 @@ nfpm:
   overrides:
     deb:
       depends:
-      - libc6 (>= 2.39)
+      - libc6 (>= 2.35)
       - libgl1
       - libegl1
       - libxkbcommon0
@@ -63,13 +63,13 @@ nfpm:
       - libxcursor1
       - libxi6
       - libxrandr2
-      - libasound2t64
+      - libasound2
       - libasound2-plugins
       - libgcc-s1
       - libstdc++6
     rpm:
       depends:
-      - glibc >= 2.39
+      - glibc >= 2.35
       - libglvnd-glx
       - libglvnd-egl
       - libxkbcommon
@@ -104,6 +104,7 @@ targets:
     arch: amd64
     libc: glibc
     compiler_target: x86_64-unknown-linux-gnu
+    after_package: [python3, packaging/linux-finalize.py, '@FORMAT@', '@PACKAGE@', '@PAYLOAD@/zap-faster-v@VERSION@-@TARGET@/zap-faster', '@ARCH@']
     formats:
     - deb
     - rpm
@@ -116,6 +117,7 @@ targets:
     arch: arm64
     libc: glibc
     compiler_target: aarch64-unknown-linux-gnu
+    after_package: [python3, packaging/linux-finalize.py, '@FORMAT@', '@PACKAGE@', '@PAYLOAD@/zap-faster-v@VERSION@-@TARGET@/zap-faster', '@ARCH@']
     formats:
     - deb
     - rpm

@@ -55,6 +55,7 @@
                   cmake
                   perl
                   llvmPackages.libclang
+                  rustPlatform.bindgenHook
                 ]
                 # On macOS the app links the system frameworks instead.
                 ++ lib.optionals isLinux [
@@ -128,6 +129,7 @@
                 cmake
                 perl
                 makeWrapper
+                rustPlatform.bindgenHook
               ]
               # Sandboxed stand-ins for iconutil and codesign in bundle.sh.
               ++ lib.optionals isDarwin [

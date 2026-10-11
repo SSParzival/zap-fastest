@@ -38,16 +38,20 @@ jobs:
       id-token: write
       attestations: write
     runs-on: ${{ matrix.os }}
+    # Build Linux against glibc 2.35, compatible with Debian 12 (2.36).
+    container: ${{ matrix.container }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
+            container: ubuntu:22.04
           # A native arm64 runner, so the GUI's system libraries need no
           # cross-compilation sysroot.
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
+            container: ubuntu:22.04
           - os: windows-latest
             target: x86_64-pc-windows-msvc
           # Cross-compiled from x64: the MSVC arm64 linker ships with the
@@ -55,6 +59,11 @@ jobs:
           - os: windows-latest
             target: aarch64-pc-windows-msvc
     steps:
+      - name: Linux container tools
+        if: runner.os == 'Linux'
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl git build-essential pkg-config
       - uses: actions/checkout@v7
       - name: Check release version
         shell: bash
@@ -79,8 +88,8 @@ jobs:
       - name: GUI build dependencies
         if: runner.os == 'Linux'
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libxkbcommon-dev libwayland-dev libgl1-mesa-dev libasound2-dev cmake perl libclang-dev
+          apt-get update
+          apt-get install -y libxkbcommon-dev libwayland-dev libgl1-mesa-dev libasound2-dev cmake perl libclang-dev
       # No compiler cache: published binaries never build from outputs
       # restored from an Actions cache.
       - run: cargo build --locked --release --target ${{ matrix.target }}

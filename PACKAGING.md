@@ -18,7 +18,7 @@ native-packages build --release v1.2.3 --target linux-amd64 --target linux-arm64
 ```
 
 Replace `v1.2.3` with an existing stable application release. Local use also
-requires nFPM 2.47.0, `bsdtar`, `readelf` and, for the AppImage,
+requires nFPM 2.47.0, `bsdtar`, `readelf`, Python 3 and, for the AppImage,
 `mksquashfs` (squashfs-tools); AUR generation needs `makepkg`
 or Docker. CI installs its tooling. To package local release archives, put
 every configured input and recipe asset under `dist/`, then run
@@ -30,6 +30,17 @@ Stable tags run the existing native build jobs first. After binaries and
 builds the configured packages, and attaches them to the GitHub release.
 Configured recipes are attached as an archive. Package checksums are separate
 from the original binary checksums. PR validation never publishes.
+
+Linux package finalization rejects inputs requiring glibc newer than 2.35,
+matching the Ubuntu 22.04 build container. Older published binaries built on
+Ubuntu 24.04 must be rebuilt before using these lower dependency declarations.
+The AppImage hook writes passive stable-release update information into the
+runtime's reserved ELF section before package checksums are recorded. It keeps
+the appended filesystem and offsets intact. Packaging CI generates an
+architecture-specific `.zsync` sidecar and separate sidecar checksums for external
+AppImage updaters. This metadata does not enable automatic updates or change
+Zap Faster's built-in signature verification. Local package builds need the CI
+sidecar step before external update metadata can resolve successfully.
 
 Review or publish an existing build with the same installed CLI:
 
@@ -91,7 +102,8 @@ native-packages build \
 Secret configuration applies to future builds. Existing published DMGs retain
 their original signatures; this setup does not replace release assets.
 
-Linux releases build on Ubuntu 24.04 (glibc 2.39). DEB/RPM recipes declare
+Linux releases build inside Ubuntu 22.04 containers (glibc 2.35), including
+the native ARM runner, so Debian 12's glibc 2.36 can run them. DEB/RPM recipes declare
 runtime-loaded Wayland, X11 and EGL libraries as well as ALSA and its PulseAudio
 plugin. Packaging CI builds both architectures from an explicitly supplied published
 fork version; release runs use their own tag. Source-only PRs run the user-installer
