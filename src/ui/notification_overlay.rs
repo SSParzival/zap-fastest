@@ -23,25 +23,27 @@ pub(crate) struct Notification {
     pub expires: Instant,
 }
 
-pub(crate) fn show(app: &mut App, ctx: &egui::Context) {
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) struct Snapshot {
+    pub id: u64,
+    pub target: NotificationTarget,
+    pub title: String,
+    pub body: String,
+    pub expires: Instant,
+}
+
+/// The same current eligibility and originating-account privacy for native and egui cards.
+pub(crate) fn snapshots(app: &App) -> Vec<Snapshot> {
+    if app.app_lock.is_locked() {
+        return Vec::new();
+    }
     let now = Instant::now();
     app.in_app_notifications
-        .retain(|notification| notification.expires > now);
-    if app.app_lock.is_locked()
-        || app.window_hidden
-        || app.dialog.is_some()
-        || app.show_update
-        || app.image_preview.is_some()
-        || app.video_expanded
-        || app.picture_edit.is_some()
-        || egui::Popup::is_any_open(ctx)
-    {
-        return;
-    }
-    let notifications: Vec<_> = app
-        .in_app_notifications
         .iter()
         .filter_map(|notification| {
+            if notification.expires <= now {
+                return None;
+            }
             let account = app
                 .accounts
                 .iter()
@@ -70,21 +72,45 @@ pub(crate) fn show(app: &mut App, ctx: &egui::Context) {
                     .screen_privacy
                     .hides(ScreenPrivacyWhat::Preview, false);
             let (generic_title, generic_body) = crate::notify::locked_lines(app.locale);
-            Some((
-                notification.clone(),
-                if sender {
+            Some(Snapshot {
+                id: notification.id,
+                target: notification.target.clone(),
+                title: if sender {
                     notification.title.clone()
                 } else {
                     generic_title
                 },
-                if content {
+                body: if content {
                     notification.body.clone()
                 } else {
                     generic_body
                 },
-            ))
+                expires: notification.expires,
+            })
         })
-        .collect();
+        .take(LIMIT)
+        .collect()
+}
+
+pub(crate) fn show(app: &mut App, ctx: &egui::Context) {
+    let now = Instant::now();
+    app.in_app_notifications
+        .retain(|notification| notification.expires > now);
+    #[cfg(target_os = "windows")]
+    if app.native_notifications.is_some() && !app.window_focused {
+        return;
+    }
+    if app.window_hidden
+        || app.dialog.is_some()
+        || app.show_update
+        || app.image_preview.is_some()
+        || app.video_expanded
+        || app.picture_edit.is_some()
+        || egui::Popup::is_any_open(ctx)
+    {
+        return;
+    }
+    let notifications = snapshots(app);
     if notifications.is_empty() {
         return;
     }
@@ -95,7 +121,9 @@ pub(crate) fn show(app: &mut App, ctx: &egui::Context) {
         .order(egui::Order::Foreground)
         .show(ctx, |ui| {
             ui.set_max_width(width);
-            for (notification, title, body) in &notifications {
+            for notification in &notifications {
+                let title = &notification.title;
+                let body = &notification.body;
                 Frame::new()
                     .fill(palette.panel)
                     .corner_radius(CornerRadius::same(8))
@@ -141,7 +169,7 @@ pub(crate) fn show(app: &mut App, ctx: &egui::Context) {
     // One wake at expiry, with no animation or idle repaint loop.
     if let Some(expires) = notifications
         .iter()
-        .map(|(notification, _, _)| notification.expires)
+        .map(|notification| notification.expires)
         .min()
     {
         ctx.request_repaint_after(expires.saturating_duration_since(now));
@@ -187,6 +215,15 @@ mod tests {
             body: "Synthetic private preview".into(),
             expires: Instant::now() + LIFETIME,
         });
+        app.window_hidden = true;
+        let hidden_snapshots = snapshots(&app);
+        assert_eq!(hidden_snapshots.len(), 1);
+        assert_eq!(hidden_snapshots[0].target.account, app.account().id);
+        assert_eq!(hidden_snapshots[0].body, "Synthetic private preview");
+        app.account_mut().settings.notification_content = false;
+        assert!(!snapshots(&app)[0].body.contains("private preview"));
+        app.account_mut().settings.notification_content = true;
+        app.window_hidden = false;
         let ctx = egui::Context::default();
         theme::install(&ctx);
         theme::apply(&ctx, &crate::theme::Palette::dark());

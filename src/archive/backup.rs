@@ -169,7 +169,7 @@ fn map_paths(
     Ok(())
 }
 
-fn rewrite(
+pub(super) fn rewrite(
     connection: &rusqlite::Connection,
     mut map: impl FnMut(&str) -> Result<String>,
 ) -> Result<()> {
@@ -539,8 +539,8 @@ fn write_file(
 
 /// Authenticated restore staged privately; drop it to discard without changing accounts.
 pub struct PreparedRestore {
-    staging: tempfile::TempDir,
-    database_key: Zeroizing<[u8; 32]>,
+    pub(super) staging: tempfile::TempDir,
+    pub(super) database_key: Zeroizing<[u8; 32]>,
     pub summary: BackupSummary,
     full_account: bool,
 }

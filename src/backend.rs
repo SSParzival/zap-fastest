@@ -152,6 +152,13 @@ pub struct CreatedPoll {
 #[derive(Debug)]
 pub enum Command {
     Automation(crate::automation::Pending),
+    Statuses,
+    DownloadStatus(String),
+    StatusDownloaded {
+        key: String,
+        token: u64,
+        result: Result<PathBuf, String>,
+    },
     StartCall {
         chat: ChatId,
     },
@@ -174,6 +181,8 @@ pub enum Command {
     SetCallVideo(bool),
     SetCallMicrophone(Option<String>),
     SetCallSpeaker(Option<String>),
+    SetCallCamera(Option<String>),
+    SetCacheRetention(Option<u32>),
     LoadCallLog,
     RefreshAudioDevices,
     CallDevicesDiscovered(crate::calls::DeviceList),
@@ -625,7 +634,11 @@ pub enum Command {
     },
     /// Where new downloads go; `None` is the cache.
     SetDownloadFolder(Option<std::path::PathBuf>),
+    SetAutomaticExportPolicy(crate::settings::AutomaticExportPolicy),
     ExportArchiveBackup(crate::archive::backup::BackupPassphrase),
+    PrepareBackupMerge(crate::archive::backup::BackupPassphrase),
+    ConfirmBackupMerge,
+    CancelBackupMerge,
     /// Explicitly resume a restored, currently offline linked-device session.
     ResumeRestoredAccount,
     SetDownloadOrganization {
@@ -957,6 +970,14 @@ pub enum Command {
         paths: Vec<PathBuf>,
     },
     /// Internal uploaded attachment ready for archiving and sending.
+    AutomationOutbound {
+        permit: std::sync::Arc<crate::automation::Permit>,
+        locked: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        chat: ChatId,
+        row: Box<Message>,
+        raw: Vec<u8>,
+        upload: Option<u64>,
+    },
     Outbound {
         chat: ChatId,
         row: Box<Message>,
@@ -1073,6 +1094,7 @@ pub enum SendFailure {
 
 #[derive(Debug)]
 pub enum Event {
+    Statuses(Vec<Message>),
     ArchiveProgress(crate::model::ArchiveRecoveryProgress),
     Call(Box<crate::calls::CallUpdate>),
     CallPreparing(bool),
@@ -1080,6 +1102,8 @@ pub enum Event {
     CallDevices(Box<crate::calls::DeviceList>),
     CallLog(Vec<crate::archive::CallRecord>),
     ArchiveBackupFinished(Result<Option<crate::archive::backup::BackupSummary>, String>),
+    BackupMergePreview(Result<Option<crate::archive::merge::MergePreview>, String>),
+    BackupMergeFinished(Result<crate::archive::merge::MergePreview, String>),
     Gallery {
         chat: ChatId,
         token: u64,

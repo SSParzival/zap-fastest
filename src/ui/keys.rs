@@ -46,6 +46,7 @@ pub fn handle(app: &mut App, ctx: &egui::Context) {
         return;
     }
     let editing_text = ctx.text_edit_focused();
+    accessibility_shortcuts(app, ctx);
     let find = find_action(app);
     let archive = archive_action(app);
     let next_account = next_account_action(app);
@@ -165,6 +166,7 @@ pub fn handle(app: &mut App, ctx: &egui::Context) {
         && app.picker.is_none()
         && app.reaction_target.is_none()
         && !menu_open
+        && !super::accessibility::list_focused(ctx)
     {
         let home_end_allowed = !editing_text || (composer_focused && app.composer.is_empty());
         ctx.input_mut(|input| {
@@ -338,6 +340,77 @@ pub fn handle(app: &mut App, ctx: &egui::Context) {
         actions.push(Action::Edit(id));
     }
     app.actions.extend(actions);
+}
+
+fn accessibility_shortcuts(app: &mut App, ctx: &egui::Context) {
+    if app.page != Page::Chats
+        || (app.dialog.is_some() && !super::dialogs::uses_side_panel(app, ctx))
+        || app.show_update
+        || app.picker.is_some()
+        || app.reaction_target.is_some()
+        || egui::Popup::is_any_open(ctx)
+    {
+        return;
+    }
+    let modifiers = if cfg!(target_os = "macos") {
+        Modifiers::CTRL
+    } else {
+        Modifiers::ALT
+    };
+    let section = ctx.input_mut(|input| {
+        [Key::Num1, Key::Num2, Key::Num3]
+            .into_iter()
+            .position(|key| take_exact(input, modifiers, key))
+    });
+    if section == Some(0) {
+        if let Some(chat) = app.visible_chats().first().map(|chat| chat.id.clone()) {
+            app.scroll_chat_into_view = Some(chat.clone());
+            super::accessibility::request_item(ctx, super::chats::chat_row_id(&chat).with("focus"));
+        }
+    } else if let Some(section) = section
+        && let Some(chat) = app.open_chat.clone()
+        && let Some(conversation) = app.conversations.get(&chat)
+    {
+        let message = if section == 2 {
+            app.unread_divider
+                .as_ref()
+                .filter(|divider| divider.chat == chat)
+                .and_then(|divider| {
+                    conversation
+                        .messages
+                        .iter()
+                        .rev()
+                        .filter(|message| !message.from_me)
+                        .nth(divider.count.saturating_sub(1) as usize)
+                })
+        } else {
+            conversation.messages.last()
+        };
+        if let Some(message) = message {
+            let id = message.id.clone();
+            super::accessibility::request_item(ctx, super::conversation::bubble_id(&chat, &id));
+            app.actions.push(Action::OpenMessage { chat, message: id });
+        }
+    }
+    if app.recording.is_none()
+        && app.current_chat().is_some_and(Chat::can_send)
+        && ctx.input_mut(|input| take_exact(input, Modifiers::COMMAND | Modifiers::SHIFT, Key::R))
+    {
+        app.actions.push(Action::StartRecording);
+    }
+}
+
+pub(crate) fn take_exact(input: &mut egui::InputState, expected: Modifiers, key: Key) -> bool {
+    let mut taken = false;
+    input.events.retain(|event| {
+        if matches!(event, egui::Event::Key { key: actual, pressed: true, modifiers, .. }
+            if *actual == key && modifiers.shift == expected.shift && modifiers.alt == expected.alt
+                && if expected.command { modifiers.command } else { modifiers.ctrl == expected.ctrl && (!cfg!(target_os = "macos") || !modifiers.command) }) {
+            taken = true;
+            false
+        } else { true }
+    });
+    taken
 }
 
 /// Recognizes native Copy and plain Command/Ctrl+C presses.
@@ -568,6 +641,28 @@ fn next_account_action(app: &App) -> Option<Action> {
 
 /// Shortcuts shown in the help dialog.
 pub const SHORTCUTS: &[(&str, &str)] = &[
+    (
+        "Alt+1 / 2 / 3",
+        "Chat list / messages / first unread (Ctrl on macOS)",
+    ),
+    (
+        "Home / End, PgUp / PgDn",
+        "First / last / page of focused list items",
+    ),
+    ("← / →", "Move between controls in a toolbar"),
+    (
+        "R / E / C / F",
+        "Reply / react / copy / forward the focused message",
+    ),
+    (
+        "Delete / Space / O / V / G",
+        "Delete / play / open / poll options / quoted message",
+    ),
+    ("Ctrl+← / Ctrl+→", "Move between a message's controls"),
+    (
+        "Ctrl+Shift+R",
+        "Start a voice recording (Enter sends, Escape discards)",
+    ),
     ("Ctrl+K / Ctrl+Shift+F", "Search chats"),
     ("Ctrl+F", "Search the open chat or the settings"),
     (
@@ -614,6 +709,12 @@ pub const SHORTCUTS: &[(&str, &str)] = &[
 /// Uses Command and Option labels on macOS.
 pub fn label(keys: &str) -> String {
     if cfg!(target_os = "macos") {
+        if keys == "Alt+1 / 2 / 3" {
+            return "⌃1 / 2 / 3".to_owned();
+        }
+        if keys == "Ctrl+← / Ctrl+→" {
+            return "⌃← / ⌃→".to_owned();
+        }
         keys.replace("Ctrl", "⌘")
             .replace("Strg", "⌘")
             .replace("Alt", "⌥")
@@ -625,6 +726,31 @@ pub fn label(keys: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn section_shortcuts_leave_numbered_chats_and_text_input_alone() {
+        let (_root, mut app, ids) = app_with_chats(2);
+        let ctx = egui::Context::default();
+        let modifiers = if cfg!(target_os = "macos") {
+            Modifiers::CTRL
+        } else {
+            Modifiers::ALT
+        };
+        assert!(!press(&mut app, &ctx, Key::Num1, modifiers));
+        assert!(
+            app.actions
+                .iter()
+                .all(|action| !matches!(action, Action::OpenChat(_)))
+        );
+        assert_eq!(app.scroll_chat_into_view.as_ref(), Some(&ids[0]));
+        app.actions.clear();
+        assert!(!press(&mut app, &ctx, Key::Num2, Modifiers::COMMAND));
+        assert!(
+            app.actions
+                .iter()
+                .any(|action| matches!(action, Action::OpenChat(id) if *id == ids[1]))
+        );
+    }
 
     #[test]
     fn close_shortcut_preserves_default_and_uses_platform_command_for_chat_choice() {
@@ -1051,7 +1177,7 @@ mod tests {
     }
 
     #[test]
-    fn numbered_shortcuts_leave_plain_and_modified_numbers_alone() {
+    fn numbered_shortcuts_leave_unbound_plain_and_modified_numbers_alone() {
         let (_root, mut app, _ids) = app_with_chats(2);
         let ctx = egui::Context::default();
         for modifiers in [
@@ -1061,8 +1187,22 @@ mod tests {
             Modifiers::COMMAND | Modifiers::SHIFT,
             Modifiers::COMMAND | Modifiers::ALT,
         ] {
-            assert!(press(&mut app, &ctx, Key::Num1, modifiers));
-            assert!(app.actions.is_empty());
+            let modifiers = if modifiers.command {
+                Modifiers {
+                    ctrl: !cfg!(target_os = "macos"),
+                    mac_cmd: cfg!(target_os = "macos"),
+                    ..modifiers
+                }
+            } else {
+                modifiers
+            };
+            for key in [Key::Num1, Key::Num4] {
+                let unconsumed = press(&mut app, &ctx, key, modifiers);
+                let section_shortcut =
+                    !cfg!(target_os = "macos") && modifiers == Modifiers::ALT && key == Key::Num1;
+                assert_eq!(unconsumed, !section_shortcut, "{key:?}, {modifiers:?}");
+                assert!(app.actions.is_empty());
+            }
         }
     }
 

@@ -204,6 +204,15 @@ pub fn ballot(
                     },
                 );
                 let active = enabled && state.can_vote && !pending;
+                if index == 0 && active {
+                    ui.ctx().data_mut(|data| {
+                        data.insert_temp(
+                            super::conversation::bubble_id(&message.chat, &message.id)
+                                .with("first-poll-option"),
+                            response.id,
+                        )
+                    });
+                }
                 if ui.is_rect_visible(rect) {
                     if active && response.hovered() {
                         ui.painter().rect_filled(rect, 5.0, palette.surface_hover);

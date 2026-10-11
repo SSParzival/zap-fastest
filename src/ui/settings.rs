@@ -342,7 +342,7 @@ fn sections(app: &App) -> Vec<Section> {
     );
     appearance.row(
         translated(locale, "Emoji style"),
-        translated(locale, "System uses platform emoji with bundled Noto fallback. Noto uses bundled Noto Color Emoji only. Restart Zap Faster to apply."),
+        translated(locale, "System uses platform emoji with Noto fallback. Noto uses bundled emoji only. You can import a CBDT or sbix colour emoji font you are allowed to use (up to 256 MiB). Custom fonts have no Noto fallback. Restart Zap Faster to apply."),
         emoji_renderer_picker,
     );
     appearance.row(
@@ -597,10 +597,11 @@ fn sections(app: &App) -> Vec<Section> {
     if app.account().settings.notifications {
         notifications.account_toggle(
             translated(locale, "In-app notification cards"),
-            translated(
-                locale,
-                "Show notifications inside the window, with the same privacy and mute settings.",
-            ),
+            if cfg!(target_os = "windows") {
+                translated(locale,"Show notifications in the desktop corner, even while the window is hidden, with the same privacy and mute settings.")
+            } else {
+                translated(locale,"Show notifications inside the window, with the same privacy and mute settings.")
+            },
             |settings| &mut settings.in_app_notifications,
         );
         notifications.account_toggle(
@@ -993,6 +994,30 @@ fn sections(app: &App) -> Vec<Section> {
         },
     );
     files.row(
+        translated(locale, "Unused cache cleanup"),
+        translated(locale, "Remove only old, unreferenced media-cache files. Archived attachments and background recovery files stay saved. Removed files may not be recoverable."),
+        move |ui, app| {
+            let previous = app.account().settings.cache_retention_days;
+            let mut enabled = previous.is_some();
+            let mut days = previous.unwrap_or(30).clamp(1, 3650);
+            ui.vertical(|ui| {
+                ui.set_width(ui.available_width().min(260.0));
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+                ui.checkbox(&mut enabled, crate::i18n::gettext(locale, "Remove unused files automatically"));
+                if enabled {
+                    ui.label(crate::i18n::gettext(locale, "Keep unused files for this many days"));
+                    ui.add(egui::DragValue::new(&mut days).range(1..=3650));
+                } else {
+                    ui.label(crate::i18n::gettext(locale, "Keep all files (default)"));
+                }
+            });
+            let chosen = enabled.then_some(days);
+            if chosen != previous {
+                app.actions.push(Action::SetCacheRetention(chosen));
+            }
+        },
+    );
+    files.row(
         translated(locale, "Encrypted account backups"),
         translated(locale, "Save the account and downloaded files with a passphrase. Restore into a separate account, initially offline."),
         |ui, app| {
@@ -1006,6 +1031,9 @@ fn sections(app: &App) -> Vec<Section> {
                 app.actions.push(Action::ShowDialog(Dialog::ArchiveBackup { restore: true }));
             }
             if let Some(status) = &app.backup_status { ui.label(status); }
+            if app.backup_merge_preview.is_some() && theme::soft_button(ui, &palette, None, &crate::i18n::gettext(app.locale, "Review merge…"), false).clicked() {
+                app.actions.push(Action::ShowDialog(Dialog::ConfirmBackupMerge));
+            }
         },
     );
     if app.account().settings.archive_only && app.account().dirs.session_db().is_file() {
@@ -1060,6 +1088,16 @@ fn sections(app: &App) -> Vec<Section> {
                 });
             }
         },
+    );
+    files.account_toggle(
+        translated(locale, "Include older files in automatic downloads"),
+        translated(locale, "Copy files from before automatic downloads were enabled into your chosen folder. Full history recovery still keeps older files in the private archive."),
+        |settings| &mut settings.download_older_files,
+    );
+    files.account_toggle(
+        translated(locale, "Preserve original download names"),
+        translated(locale, "Use the original document filename inside your chosen folders. Unsafe characters are removed and duplicate names get a number."),
+        |settings| &mut settings.preserve_original_download_names,
     );
     files.row(
         translated(locale, "Readable download names"),
@@ -1486,18 +1524,33 @@ fn emoji_renderer_picker(ui: &mut egui::Ui, app: &mut App) {
         EmojiRenderer::Noto => "Noto Color Emoji".to_owned(),
     };
     let palette = app.palette;
+    let custom = app
+        .settings
+        .custom_emoji_font
+        .as_deref()
+        .and_then(std::path::Path::file_stem)
+        .map(|name| name.to_string_lossy().into_owned());
     let response = egui::ComboBox::from_id_salt("emoji_renderer")
-        .selected_text(label(selected))
+        .selected_text(custom.clone().unwrap_or_else(|| label(selected)))
         .width(200.0_f32.min(ui.available_width()))
         .show_ui(ui, |ui| {
             for choice in [EmojiRenderer::System, EmojiRenderer::Noto] {
                 let label = label(choice);
-                if theme_option(ui, &palette, &label, selected == choice) {
+                if theme_option(ui, &palette, &label, custom.is_none() && selected == choice) {
                     app.actions.push(Action::SetEmojiRenderer(choice));
                 }
             }
+            if let Some(name) = &custom {
+                theme_option(ui, &palette, name, true);
+            }
+            if theme_option(ui, &palette, "Choose a colour emoji font file", false) {
+                app.actions.push(Action::PickCustomEmojiFont);
+            }
         });
     theme::reveal_focus(&response.response);
+    if let Some(error) = crate::emoji::startup_error() {
+        ui.label(format!("Custom emoji font could not load: {error}. The built-in emoji style is active until restart."));
+    }
 }
 
 fn language_picker(ui: &mut egui::Ui, app: &mut App) {
@@ -2220,7 +2273,11 @@ fn account_toggle(
         changed = response.changed();
     });
     if changed {
+        let was_automatic = app.account().settings.auto_download;
         *field(&mut app.account_mut().settings) = value;
+        if !was_automatic && app.account().settings.auto_download {
+            app.account_mut().settings.automatic_download_since = None;
+        }
         app.account_mut().mark_settings_dirty();
         app.sync_automation_authority();
     }
@@ -2388,6 +2445,12 @@ fn theme_option(ui: &mut egui::Ui, palette: &theme::Palette, text: &str, selecte
             selected,
             text,
         )
+    });
+    ui.ctx().accesskit_node_builder(ui.unique_id(), |node| {
+        node.set_role(egui::accesskit::Role::ListBox)
+    });
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(egui::accesskit::Role::ListBoxOption)
     });
     response.clicked()
 }

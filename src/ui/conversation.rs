@@ -394,6 +394,7 @@ fn header(app: &mut App, ui: &mut egui::Ui, chat: &Chat) -> Rect {
             }
             let narrow = super::narrow(ui.ctx());
             let row = ui.horizontal(|ui| {
+                super::accessibility::toolbar(ui, "Conversation controls");
                 // Give both rows a fixed height so their contents align.
                 ui.set_min_height(HEADER_ROW);
                 // With no chat list beside it, the header clears the traffic
@@ -1038,10 +1039,19 @@ fn emoji_suggestions(app: &mut App, ui: &mut egui::Ui, field: egui::Id) {
 
     let list = widgets::raised(ui, &palette, suggestion_frame(&palette), |ui| {
         let row_height = 36.0;
+        super::accessibility::suggestions(ui, "Emoji suggestions", candidates.len());
         ui.spacing_mut().item_spacing.y = 0.0;
         for (index, candidate) in candidates.iter().enumerate() {
             let (rect, response) =
                 ui.allocate_exact_size(vec2(ui.available_width(), row_height), Sense::click());
+            super::accessibility::suggestion(
+                &response,
+                field,
+                &format!("{} {}", candidate.shortcode, candidate.name),
+                index,
+                candidates.len(),
+                index == app.emoji_selected,
+            );
             if index == app.emoji_selected {
                 ui.painter().rect_filled(
                     rect,
@@ -1151,6 +1161,7 @@ fn mention_picker(app: &mut App, ui: &mut egui::Ui, chat: &Chat, field: egui::Id
 
     let list = widgets::raised(ui, &palette, suggestion_frame(&palette), |ui| {
         let row_height = 38.0;
+        super::accessibility::suggestions(ui, "Mention suggestions", candidates.len());
         egui::ScrollArea::vertical()
             .id_salt("mention-members")
             .max_height(row_height * candidates.len().min(5) as f32)
@@ -1162,6 +1173,14 @@ fn mention_picker(app: &mut App, ui: &mut egui::Ui, chat: &Chat, field: egui::Id
                     let (rect, response) = ui.allocate_exact_size(
                         vec2(ui.available_width(), row_height),
                         Sense::click(),
+                    );
+                    super::accessibility::suggestion(
+                        &response,
+                        field,
+                        label,
+                        index,
+                        candidates.len(),
+                        index == app.mention_selected,
                     );
                     if index == app.mention_selected || response.hovered() {
                         ui.painter().rect_filled(
@@ -1469,6 +1488,7 @@ fn composer(app: &mut App, ui: &mut egui::Ui, chat: &Chat) {
                 });
                 return;
             }
+            ui.ctx().data_mut(|data| data.remove::<egui::Id>(id.with("suggestion-selected")));
             emoji_suggestions(app, ui, id);
             mention_picker(app, ui, chat, id);
             // `consume_key(NONE, Enter)` also matches Shift+Enter. Check the
@@ -1536,6 +1556,7 @@ fn composer(app: &mut App, ui: &mut egui::Ui, chat: &Chat) {
                 vec2(ui.available_width(), row_height),
                 Layout::left_to_right(Align::Max),
                 |ui| {
+                super::accessibility::toolbar(ui, "Message composer controls");
                 // The plus sits in the field's rounded left end, centred as
                 // the send button is in the right one.
                 ui.add_space((line / 2.0 - PLUS_EDGE / 2.0).max(0.0));
@@ -1716,7 +1737,13 @@ fn composer(app: &mut App, ui: &mut egui::Ui, chat: &Chat) {
                                     ui.ctx().request_discard("composer height changed");
                                 }
                                 let response = output.response.response.clone().tab_stop(Stop::Composer);
-                                ui.ctx().accesskit_node_builder(response.id, |node| node.set_label("Message"));
+                                let suggestion = ui.ctx().data(|data| data.get_temp::<egui::Id>(id.with("suggestion-selected")));
+                                ui.ctx().accesskit_node_builder(response.id, |node| {
+                                    node.set_label("Message");
+                                    if let Some(suggestion) = suggestion {
+                                        node.set_active_descendant(suggestion.accesskit_id());
+                                    }
+                                });
                                 if response.changed() {
                                     app.actions.push(Action::Composing {
                                         chat: chat.id.clone(),
@@ -2304,6 +2331,20 @@ fn album_run(messages: &[Message], start: usize) -> Option<&[Message]> {
     (end > start + 1).then_some(&messages[start..end])
 }
 
+fn album_continuation(messages: &[Message], index: usize) -> bool {
+    let Some(previous) = index.checked_sub(1).and_then(|index| messages.get(index)) else {
+        return false;
+    };
+    let Some(message) = messages.get(index) else {
+        return false;
+    };
+    album_id(message).is_some()
+        && album_id(previous) == album_id(message)
+        && previous.from_me == message.from_me
+        && previous.sender == message.sender
+        && crate::util::day_key(previous.timestamp) == crate::util::day_key(message.timestamp)
+}
+
 /// A row height to assume for a message that has not been laid out yet. Rows
 /// near the viewport are always measured, and a change in the height of a row
 /// above the viewport moves the scroll offset with it, so this only shapes the
@@ -2425,6 +2466,25 @@ fn messages(app: &mut App, ui: &mut egui::Ui, chat: &Chat, under: f32) {
     let scroll_forced = std::mem::take(&mut app.scroll_to_bottom_forced);
     // Check out the conversation while drawing rows and collecting actions.
     let mut conversation = app.conversations.remove(&chat.id).unwrap_or_default();
+    let accessible_rows: Vec<usize> = (0..conversation.messages.len())
+        .filter(|index| {
+            app.selection.is_some() || !album_continuation(&conversation.messages, *index)
+        })
+        .collect();
+    if ui.is_enabled()
+        && (app.dialog.is_none() || super::dialogs::uses_side_panel(app, ui.ctx()))
+        && app.picker.is_none()
+        && !egui::Popup::is_any_open(ui.ctx())
+    {
+        let ids: Vec<_> = accessible_rows
+            .iter()
+            .map(|index| bubble_id(&chat.id, &conversation.messages[*index].id))
+            .collect();
+        if let Some(index) = super::accessibility::navigate(ui.ctx(), &ids) {
+            app.scroll_anchor = Some(conversation.messages[accessible_rows[index]].id.clone());
+            app.scroll_to_bottom = false;
+        }
+    }
     let typing = app.typing_in(&chat.id);
     // Keep transcript state independently borrowable while row measurements
     // and paging state are updated on the checked-out conversation.
@@ -2725,6 +2785,7 @@ fn messages(app: &mut App, ui: &mut egui::Ui, chat: &Chat, under: f32) {
                 .show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     ui.spacing_mut().item_spacing.y = 3.0;
+                    super::accessibility::list(ui, "Messages", accessible_rows.len());
                     if under > 0.0 {
                         ui.add_space(under);
                     }
@@ -2750,15 +2811,7 @@ fn messages(app: &mut App, ui: &mut egui::Ui, chat: &Chat, under: f32) {
                         // same parent id. Only its first item owns a row; the
                         // remaining consecutive items are painted in that row.
                         if selection.is_none()
-                            && message_index > 0
-                            && album_id(message).is_some()
-                            && album_id(&conversation.messages[message_index - 1])
-                                == album_id(message)
-                            && conversation.messages[message_index - 1].from_me == message.from_me
-                            && conversation.messages[message_index - 1].sender == message.sender
-                            && crate::util::day_key(
-                                conversation.messages[message_index - 1].timestamp,
-                            ) == crate::util::day_key(message.timestamp)
+                            && album_continuation(&conversation.messages, message_index)
                         {
                             rows.insert(
                                 message.id.clone(),
@@ -2974,6 +3027,15 @@ fn messages(app: &mut App, ui: &mut egui::Ui, chat: &Chat, under: f32) {
                                 &mut actions,
                             )
                         };
+                        if response.is_some()
+                            && let Some(item) =
+                                ui.ctx().read_response(bubble_id(&chat.id, &message.id))
+                        {
+                            let position = accessible_rows
+                                .binary_search(&message_index)
+                                .expect("drawn message row");
+                            super::accessibility::item(&item, position, accessible_rows.len());
+                        }
                         if let Some((slot, top)) = flash {
                             if row_is_anchor && response.is_some() {
                                 jump_since.set(Some(time));
@@ -4463,7 +4525,7 @@ fn speed_pill(
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
-/// The message menu's row of every playback speed for a playable voice
+/// The message menu's row of every playback speed for a playable voice or video
 /// message, so 1.25x and 1.75x are reachable without cycling.
 fn speed_menu_row(
     ui: &mut egui::Ui,
@@ -4471,8 +4533,13 @@ fn speed_menu_row(
     message: &Message,
     actions: &mut Vec<Action>,
 ) {
-    let speed = view.player.speed();
-    let preparing = view.player.preparing_speed(&message.id);
+    let video = matches!(message.content, Content::Video { .. });
+    let speed = if video {
+        view.video.speed()
+    } else {
+        view.player.speed()
+    };
+    let preparing = !video && view.player.preparing_speed(&message.id);
     widgets::menu_separator(ui, &view.palette);
     ui.allocate_ui_with_layout(
         vec2(ui.available_width(), 28.0),
@@ -4497,7 +4564,11 @@ fn speed_menu_row(
                     );
                 });
                 if response.clicked() {
-                    actions.push(Action::SetVoiceSpeed(option));
+                    actions.push(if video {
+                        Action::SetVideoSpeed(option)
+                    } else {
+                        Action::SetVoiceSpeed(option)
+                    });
                     ui.close();
                 }
             }
@@ -4793,6 +4864,77 @@ fn bubble_frame(
         });
     let keyboard_menu =
         focused_inside && ui.input_mut(|input| input.consume_key(Modifiers::SHIFT, Key::F10));
+    if bubble.has_focus()
+        && !ui.ctx().text_edit_focused()
+        && !egui::Popup::is_any_open(ui.ctx())
+        && view.reaction.is_none()
+    {
+        let key = ui.input_mut(|input| {
+            [
+                Key::R,
+                Key::E,
+                Key::C,
+                Key::F,
+                Key::Delete,
+                Key::Space,
+                Key::O,
+                Key::V,
+                Key::G,
+            ]
+            .into_iter()
+            .find(|key| super::keys::take_plain(input, *key))
+        });
+        if let Some(key) = key {
+            if key == Key::V && matches!(message.content, Content::Poll { .. }) {
+                if let Some(id) = ui
+                    .ctx()
+                    .data(|data| data.get_temp::<egui::Id>(bubble_id.with("first-poll-option")))
+                {
+                    ui.memory_mut(|memory| memory.request_focus(id));
+                }
+            } else if let Some(action) = message_shortcut(message, key, &mentions_of(view, message))
+            {
+                actions.push(action);
+            }
+        }
+    }
+    if let Some(frame) = ui
+        .ctx()
+        .data(|data| data.get_temp::<u64>(bubble_id.with("subcontrol-move")))
+        && frame < ui.ctx().cumulative_frame_nr()
+    {
+        ui.ctx()
+            .data_mut(|data| data.remove::<u64>(bubble_id.with("subcontrol-move")));
+        if !focused_inside && !ui.input(|input| input.pointer.any_click()) {
+            bubble.request_focus();
+        }
+    }
+    if focused_inside && !ui.ctx().text_edit_focused() && !egui::Popup::is_any_open(ui.ctx()) {
+        let step = ui.input_mut(|input| {
+            if super::keys::take_exact(input, Modifiers::CTRL, Key::ArrowRight) {
+                1
+            } else if super::keys::take_exact(input, Modifiers::CTRL, Key::ArrowLeft) {
+                -1
+            } else {
+                0
+            }
+        });
+        if step != 0 {
+            ui.memory_mut(|memory| {
+                memory.move_focus(if step > 0 {
+                    egui::FocusDirection::Next
+                } else {
+                    egui::FocusDirection::Previous
+                })
+            });
+            ui.ctx().data_mut(|data| {
+                data.insert_temp(
+                    bubble_id.with("subcontrol-move"),
+                    ui.ctx().cumulative_frame_nr(),
+                )
+            });
+        }
+    }
     let force_menu = view.open_menu == Some(message.id.as_str()) || keyboard_menu;
     let quick = quick_reactions(message, view.reaction_emoji).len() as f32 + 1.0;
     let width = widgets::menu_width(
@@ -4871,6 +5013,78 @@ fn bubble_frame(
 }
 
 /// Minimum shared width for cards inside message bubbles.
+fn message_shortcut(message: &Message, key: Key, mentions: &[markup::Mention]) -> Option<Action> {
+    let local = message.from_me && message.status.is_local();
+    let revoked = matches!(message.content, Content::Revoked);
+    let id = || message.id.clone();
+    let chat = || message.chat.clone();
+    match key {
+        Key::R if !local && !revoked => Some(Action::Reply(id())),
+        Key::E if message.allows_reaction() => Some(Action::OpenReactionPicker {
+            chat: chat(),
+            message: id(),
+            beside_menu: false,
+        }),
+        Key::F if !local && crate::app::can_select(&message.content) => {
+            Some(Action::ShowDialog(Dialog::Forward {
+                chat: chat(),
+                messages: vec![id()],
+            }))
+        }
+        Key::Delete if !local || message.status == Delivery::Unconfirmed => {
+            Some(Action::ShowDialog(Dialog::ConfirmDeleteMessage {
+                chat: chat(),
+                message: id(),
+                for_everyone: false,
+            }))
+        }
+        Key::G => message.quoted.as_ref().map(|quoted| Action::OpenMessage {
+            chat: quoted.chat.clone().unwrap_or_else(chat),
+            message: quoted.id.clone(),
+        }),
+        Key::C => {
+            let text = match &message.content {
+                Content::Text { text, .. } | Content::Interactive { text, .. } => {
+                    Some(text.as_str())
+                }
+                Content::Image { caption, .. }
+                | Content::Video { caption, .. }
+                | Content::Document { caption, .. } => caption.as_deref(),
+                _ => None,
+            }?;
+            Some(Action::CopyText(markup::plain(text, mentions)))
+        }
+        Key::Space | Key::O => {
+            let media = message.content.media()?;
+            if let Some(path) = &media.path {
+                Some(match &message.content {
+                    Content::Audio { .. } => Action::PlayVoice {
+                        message: id(),
+                        path: path.clone(),
+                    },
+                    Content::Video { .. } if key == Key::Space => Action::PlayVideo {
+                        message: id(),
+                        path: path.clone(),
+                    },
+                    Content::Image { .. } | Content::Video { .. } => Action::PreviewMedia {
+                        chat: chat(),
+                        message: id(),
+                    },
+                    Content::Sticker { .. } => Action::PreviewSticker(path.clone()),
+                    _ => Action::OpenFile(path.clone()),
+                })
+            } else {
+                Some(Action::Download {
+                    card: None,
+                    chat: chat(),
+                    message: id(),
+                })
+            }
+        }
+        _ => None,
+    }
+}
+
 const CARD_WIDTH: f32 = 320.0;
 const CAROUSEL_CARD_WIDTH: f32 = 280.0;
 /// Location cards: a map preview across the top, then the details.
@@ -6377,7 +6591,7 @@ fn context_menu(
             None => {}
         }
     }
-    if let Content::Audio { media, .. } = &message.content
+    if let Content::Audio { media, .. } | Content::Video { media, .. } = &message.content
         && media.path.is_some()
     {
         speed_menu_row(ui, view, message, actions);
@@ -7423,7 +7637,15 @@ fn album_content(
             Some((path.clone(), attachment_name(&message.content, path)))
         })
         .collect();
-    if !files.is_empty() && theme::pill_button(ui, &view.palette, "Save all…", true).clicked() {
+    if !files.is_empty()
+        && theme::pill_button(
+            ui,
+            &view.palette,
+            &crate::i18n::gettext(view.locale, "Save all…"),
+            true,
+        )
+        .clicked()
+    {
         actions.push(Action::SaveAttachments { files });
     }
     if !missing.is_empty() {
@@ -7438,10 +7660,10 @@ fn album_content(
         if theme::pill_button(
             ui,
             &view.palette,
-            if downloading {
-                "Downloading…"
+            &if downloading {
+                crate::i18n::gettext(view.locale, "Downloading…")
             } else {
-                "Download all"
+                crate::i18n::gettext(view.locale, "Download all")
             },
             !downloading,
         )
@@ -9431,12 +9653,30 @@ pub(crate) fn video_controls(
         speed_galley,
         Color32::WHITE,
     );
-    if ui
+    let speed_response = ui
         .interact(speed, id.with("speed"), Sense::click())
         .on_hover_cursor(egui::CursorIcon::PointingHand)
-        .clicked()
-    {
+        .on_hover_text("Playback speed. Right-click for every speed.");
+    if speed_response.clicked() {
         actions.push(Action::CycleVideoSpeed);
+    }
+    // Inline controls use the bubble's existing message menu; the full-window player
+    // has no bubble, so its chip owns a compact menu with the same five choices.
+    if controls.expanded {
+        speed_response.context_menu(|ui| {
+            for option in crate::audio::SPEEDS {
+                if ui
+                    .selectable_label(
+                        option == controls.player.speed(),
+                        crate::audio::speed_label(option),
+                    )
+                    .clicked()
+                {
+                    actions.push(Action::SetVideoSpeed(option));
+                    ui.close();
+                }
+            }
+        });
     }
     let time = format!(
         "{} / {}",
@@ -10133,6 +10373,7 @@ fn recording_strip(app: &mut App, ui: &mut egui::Ui) {
         vec2(ui.available_width().max(0.0), row_height),
         egui::Layout::left_to_right(egui::Align::Center),
         |ui| {
+            super::accessibility::toolbar(ui, "Voice recording controls");
             ui.spacing_mut().item_spacing.x = 10.0;
             if theme::circle_button(
                 ui,
@@ -10143,6 +10384,7 @@ fn recording_strip(app: &mut App, ui: &mut egui::Ui) {
                 palette.secondary,
                 "Discard",
             )
+            .tab_stop(Stop::RecordCancel)
             .clicked()
             {
                 app.actions.push(Action::CancelRecording);
@@ -10184,6 +10426,7 @@ fn recording_strip(app: &mut App, ui: &mut egui::Ui) {
                 palette.on_accent,
                 "Send",
             )
+            .tab_stop(Stop::RecordSend)
             .clicked()
             {
                 app.actions.push(Action::SendRecording);
@@ -10315,6 +10558,61 @@ fn chat_of(chat: &ChatId) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn focused_message_keys_keep_confirmation_and_local_send_boundaries() {
+        let mut message = Message {
+            id: "synthetic-key-message".into(),
+            chat: "synthetic-chat".into(),
+            sender: "synthetic-sender".into(),
+            sender_name: None,
+            from_me: false,
+            timestamp: 1,
+            history_order: None,
+            content: Content::text("*Synthetic* text"),
+            status: Delivery::Sent,
+            delivered_at: None,
+            read_at: None,
+            quoted: None,
+            reactions: Vec::new(),
+            edited: false,
+            mentions: Vec::new(),
+            forwarded: false,
+            thumbnail: None,
+        };
+        assert!(
+            matches!(message_shortcut(&message, Key::R, &[]), Some(Action::Reply(id)) if id == message.id)
+        );
+        assert!(matches!(
+            message_shortcut(&message, Key::E, &[]),
+            Some(Action::OpenReactionPicker { .. })
+        ));
+        assert!(matches!(
+            message_shortcut(&message, Key::F, &[]),
+            Some(Action::ShowDialog(Dialog::Forward { .. }))
+        ));
+        assert!(matches!(
+            message_shortcut(&message, Key::Delete, &[]),
+            Some(Action::ShowDialog(Dialog::ConfirmDeleteMessage {
+                for_everyone: false,
+                ..
+            }))
+        ));
+        assert!(
+            matches!(message_shortcut(&message, Key::C, &[]), Some(Action::CopyText(text)) if text == "Synthetic text")
+        );
+        message.from_me = true;
+        message.status = Delivery::Queued;
+        assert!(message_shortcut(&message, Key::R, &[]).is_none());
+        assert!(message_shortcut(&message, Key::E, &[]).is_none());
+        assert!(message_shortcut(&message, Key::F, &[]).is_none());
+        assert!(message_shortcut(&message, Key::Delete, &[]).is_none());
+        message.status = Delivery::Unconfirmed;
+        assert!(matches!(
+            message_shortcut(&message, Key::Delete, &[]),
+            Some(Action::ShowDialog(Dialog::ConfirmDeleteMessage { .. }))
+        ));
+    }
 
     #[test]
     fn message_info_requires_a_confirmed_outgoing_send() {

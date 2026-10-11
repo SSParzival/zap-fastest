@@ -699,3 +699,74 @@ deferred validation, never passing receipts.
 No workflow, hook, test or lint was weakened. Existing local verification is
 preserved. Release/client installation and live-account operations remain outside
 this push. This checkpoint update stays local, avoiding another automatic build.
+
+### Active implementation batch after follow-up delivery
+
+Continue from the dirty source recorded in
+[the active batch checkpoint](development-batch-20261011.md). Camera selection,
+paragraph-specific bidirectional alignment and opt-in unused-cache cleanup are
+implemented with new synthetic fixtures and translated controls. Formatting and
+catalog/static checks are separate from the deliberately deferred whole-batch
+build/test validation. None of the new Rust fixtures has run; earlier green
+receipts must not be reused to claim these changed inputs passed. Remaining
+native/protocol/retention limitations are preserved in that checkpoint. Do not
+push or start expensive validation merely to close this continuation.
+
+### Current combined validation recovery
+
+The complete original-report audit expanded the dirty source batch with
+community grouping, five video speeds, local emoji-font import, account sound
+routing, wide chat information, CLI collections/watch/attachment batches,
+future-only exports, Windows native popup cards, delivered Status, accessibility,
+Undo and authenticated same-account history merging. Required combined checks
+started after this source checkpoint. Windows and Mac strict default/all-feature
+compiler checks passed. Mac test rejection logs are preserved; the nested panel
+lock and Undo fixtures are corrected, and five remaining accessibility/layout
+failures are being resolved. A final audit found the CLI IPC result-size gap;
+application-level bounded fragmentation is active work. Do not call the source
+batch validated or finished until its new frozen inputs pass all required gates.
+
+Use the live checkpoint and captured runners in
+`H:/Scratch/Codex/zap-batch-validation-20261011`. Preserve the source, old failure
+logs and unrelated `packaging/__pycache__/`. Do not restart historical completed
+package matrices merely because the host rebooted. The new batch still requires
+Windows, Mac and Linux gates, affected platform cross-checks and synthetic visual
+acceptance. Phone and native attended prerequisites remain explicitly blocked.
+No new push, installed-client replacement, release or live-account action is
+authorized by starting these validation jobs.
+
+The source is now frozen after the CLI fragment and real keyboard focus
+corrections. macOS default tests pass (1,784 library plus 12 other tests, 13
+existing ignored); its all-feature suite is active. Windows is still compiling
+test dependencies. The current source audit is
+`docs/development-source-audit-20261011.md`. Resume validation from the current
+runner receipts, rather than reopening already corrected source gaps. Final
+Linux/platform/visual checks and final receipts remain required.
+
+All six native Mac gates passed on the prior frozen batch. A subsequent native
+Linux ARM64 assertion exposed only the stale Alt+1 untouched fixture; its
+expanded modifier/key matrix is the sole new functional-input delta, with no
+production behavior or catalog change. New frozen input manifests and the Mac
+rerun are active. Linux ARM64 uses bundled Rust LLD after preserving a genuine
+GNU-link memory-limit rejection; default assertions otherwise passed. Continue
+its final frozen rerun, Windows native checks and Linux x86_64/visual acceptance.
+
+The next ARM64 run isolated the same matrix's impossible non-Mac modifier:
+`Modifiers::COMMAND | ALT` supplied abstract command without physical Ctrl.
+The fixture now constructs actual platform Ctrl/Command modifier combinations,
+and still verifies Ctrl+Alt numbers remain unconsumed. Production keys are
+unchanged. The refreshed 342-input pair is in the batch validation folder;
+Mac and ARM64 required gates restarted against it. Windows dependency codegen
+completed and its native test build continues. Keep the rejected receipts.
+
+Mac and Linux ARM64 all six gates passed, with ARM all-feature normal build and
+four inspected synthetic visuals. Windows default tests then exposed one fixture
+construction error: a canonical Windows verbatim PathBuf normalizes joined `..`
+before the path guard receives it. The guard and outside-file refusal already
+worked. The fixture now constructs literal malformed input and confirms ParentDir.
+The new frozen 342-input pair is undergoing full Windows/Mac/ARM64 runs. Windows
+session21204 and Mac37570 are active; ARM camera_review owns final-fixture run.
+Linux x86_64 follows heavy Windows jobs; affected Windows ARM64 compile remains.
+Current dependency audit exits0, no vulnerabilities, two existing unmaintained
+advisories. Nix flake check --no-build --all-systems exits0 on current inputs;
+Nix package builds remain historical. Owned Nix container returned to stopped.

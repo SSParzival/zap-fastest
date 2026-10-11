@@ -1,5 +1,6 @@
 //! Window layout: panels, overlays, keyboard shortcuts.
 
+pub(crate) mod accessibility;
 pub mod accounts;
 pub mod archive_backup;
 pub mod call;
@@ -22,6 +23,7 @@ pub mod pane;
 pub mod picker;
 pub mod polls;
 pub mod settings;
+mod statuses;
 pub mod update;
 pub mod video_preview;
 pub mod widgets;
@@ -43,21 +45,23 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     // Locked, nothing else is drawn: no chat list, no messages, no dialogs,
     // no toasts, and no shortcut reaches them.
     if app.app_lock.is_locked() {
+        app.accessibility_announcements.clear();
+        accessibility::clear_live(ctx);
         titlebar_strip(app, ui);
         lock::show(app, ui);
         focus_ring(app, ctx);
         return;
     }
+    accessibility::live(ui, &mut app.accessibility_announcements);
     call::show(app, ctx);
     keys::handle(app, ctx);
     history_buttons(app, ctx);
     let main_navigation = app.is_linked()
         && app.page == Page::Chats
-        && app.dialog.is_none()
+        && (app.dialog.is_none() || dialogs::uses_side_panel(app, ctx))
         && !app.show_update
         && app.picker.is_none()
         && app.reaction_target.is_none()
-        && app.recording.is_none()
         && app.image_preview.is_none()
         && app.sticker_view.is_none()
         && !app.video_expanded
@@ -125,6 +129,7 @@ fn main_view(app: &mut App, ui: &mut egui::Ui, list_only: bool) {
         }
     }
     let search_overlay = pane::show(app, ui);
+    dialogs::side_panel(app, ui);
     egui::CentralPanel::default()
         .frame(central_frame(app))
         .show(ui, |ui| match app.page {
@@ -568,12 +573,11 @@ fn toasts(app: &mut App, ctx: &egui::Context) {
         return;
     }
     let palette = app.palette;
-    let lifetime = crate::app::INFO_TOAST_LIFETIME.as_secs_f32();
     // Errors carry buttons, so the area must take clicks while one is shown.
     let has_error = app
         .toasts
         .iter()
-        .any(|toast| toast.kind == ToastKind::Error);
+        .any(|toast| toast.kind == ToastKind::Error || toast.undo.is_some());
     let mut actions = Vec::new();
     // Stay clear of the composer: an error waiting to be dismissed must not
     // cover the send button.
@@ -590,6 +594,7 @@ fn toasts(app: &mut App, ctx: &egui::Context) {
             ui.spacing_mut().item_spacing.y = 8.0;
             for (index, toast) in app.toasts.iter().enumerate() {
                 let error = toast.kind == ToastKind::Error;
+                let lifetime = toast.lifetime().as_secs_f32();
                 // Errors appear at once: fading in needs frames that an idle
                 // window does not draw.
                 let alpha = if error {
@@ -620,7 +625,13 @@ fn toasts(app: &mut App, ctx: &egui::Context) {
                             palette.text,
                             (ctx.content_rect().width() - 150.0).clamp(80.0, 360.0),
                         );
-                        let buttons = if error { 2.0 * 26.0 + 12.0 } else { 0.0 };
+                        let buttons = if error {
+                            2.0 * 26.0 + 12.0
+                        } else if toast.undo.is_some() {
+                            70.0
+                        } else {
+                            0.0
+                        };
                         let text = widgets::line(
                             ui,
                             &toast.message,
@@ -642,6 +653,18 @@ fn toasts(app: &mut App, ctx: &egui::Context) {
                             let (rect, _) =
                                 ui.allocate_exact_size(text.size(), egui::Sense::hover());
                             text.paint(ui, rect.min, palette.text);
+                            if let Some(token) = toast.undo
+                                && theme::soft_button(
+                                    ui,
+                                    &palette,
+                                    None,
+                                    &crate::i18n::gettext(app.locale, "Undo"),
+                                    false,
+                                )
+                                .clicked()
+                            {
+                                actions.push(Action::UndoToast(token));
+                            }
                             ui.ctx().data_mut(|data| {
                                 data.insert_temp(toast_close_id(index).with("text"), rect);
                             });

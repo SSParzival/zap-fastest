@@ -106,6 +106,8 @@ struct Cli {
 
 #[derive(Debug, clap::Subcommand)]
 enum Control {
+    #[command(flatten)]
+    Access(Automation),
     /// Private read/watch/send access to an explicitly opted-in running account.
     Automation {
         #[command(subcommand)]
@@ -119,7 +121,49 @@ enum Control {
 
 #[derive(Debug, clap::Subcommand)]
 enum Automation {
-    /// Read a bounded archive page without sending read receipts.
+    /// List conversations available to local automation.
+    Chats {
+        #[arg(long)]
+        account: String,
+        #[arg(long, default_value_t = 25)]
+        limit: usize,
+        #[arg(long)]
+        after: Option<String>,
+    },
+    /// List address-book contacts; --all includes unsaved contacts.
+    Contacts {
+        #[arg(long)]
+        account: String,
+        #[arg(long)]
+        all: bool,
+        #[arg(long, default_value_t = 25)]
+        limit: usize,
+        #[arg(long)]
+        after: Option<String>,
+    },
+    /// Read a conversation without sending read receipts.
+    Messages {
+        chat: String,
+        #[arg(long)]
+        account: String,
+        #[arg(long, default_value_t = 25)]
+        limit: usize,
+        #[arg(long)]
+        before: Option<i64>,
+    },
+    /// Search archived message text and captions.
+    Search {
+        text: String,
+        #[arg(long)]
+        account: String,
+        #[arg(long)]
+        chat: Option<String>,
+        #[arg(long, default_value_t = 25)]
+        limit: usize,
+        #[arg(long)]
+        before_row: Option<i64>,
+    },
+    /// Read one archive page (compatibility command).
     Read {
         #[arg(long)]
         account: String,
@@ -132,33 +176,41 @@ enum Automation {
         #[arg(long, requires = "before_time")]
         before_id: Option<String>,
     },
-    /// Poll archived arrivals as JSON lines; does not fetch phone history.
+    /// Watch new incoming messages. Without --seconds, runs until interrupted.
     Watch {
         #[arg(long)]
         account: String,
         #[arg(long)]
-        chat: String,
-        #[arg(long, default_value_t = 10)]
+        chat: Option<String>,
+        #[arg(long, default_value_t = 25)]
         limit: usize,
-        #[arg(long, default_value_t = 60)]
-        seconds: u32,
-        #[arg(long, requires = "after_id")]
+        #[arg(long)]
+        seconds: Option<u32>,
+        #[arg(long)]
+        since: Option<i64>,
+        #[arg(long, default_value_t = 1)]
+        interval: u32,
+        #[arg(long, requires_all = ["after_id", "chat"])]
         after_row: Option<i64>,
         #[arg(long, requires = "after_row")]
         after_id: Option<String>,
     },
-    /// Send a UTF-8 text file once under a stable 32-hex-digit request id.
+    /// Send text, stdin (-), or repeated --file attachments under a stable request id.
     Send {
+        target: Option<String>,
+        text: Option<String>,
         #[arg(long)]
         account: String,
-        #[arg(long)]
-        chat: String,
+        #[arg(long, conflicts_with = "target")]
+        chat: Option<String>,
         #[arg(long)]
         request_id: String,
-        #[arg(long)]
-        text_file: std::path::PathBuf,
+        #[arg(long, conflicts_with = "text")]
+        text_file: Option<std::path::PathBuf>,
+        #[arg(long = "file")]
+        files: Vec<std::path::PathBuf>,
     },
-    /// Check a prior send's state, including Unconfirmed, without sending again.
+    /// Check a previous send without retrying it.
     Status {
         #[arg(long)]
         account: String,
@@ -169,85 +221,229 @@ enum Automation {
     },
 }
 fn automation_command(operation: &Automation, runtime: &std::path::Path) -> Result<(), String> {
-    use zapfast::automation::Request;
+    use std::io::Read;
+    use zapfast::automation::{Attachment, Request};
     let mut cursor = None;
-    let (request, duration) = match operation {
+    let mut row_cursor = None;
+    let mut collection_cursor = None;
+    let mut message_cursor = None;
+    let mut search_cursor = None;
+    let mut remaining = None;
+    let mut page_limit = 25;
+    let mut interval = 1;
+    let mut watching = false;
+    let mut duration = None;
+    let request = match operation {
+        Automation::Chats {
+            account,
+            after,
+            limit,
+        } => Request::Chats {
+            account: account.clone(),
+            after: after.clone(),
+            limit: *limit,
+        },
+        Automation::Contacts {
+            account,
+            all,
+            after,
+            limit,
+        } => Request::Contacts {
+            account: account.clone(),
+            all: *all,
+            after: after.clone(),
+            limit: *limit,
+        },
+        Automation::Messages {
+            account,
+            chat,
+            before,
+            limit,
+        } => {
+            remaining = Some(*limit);
+            Request::Read {
+                account: account.clone(),
+                chat: chat.clone(),
+                before: before.map(|time| (time, String::new())),
+                limit: (*limit).min(25),
+            }
+        }
+        Automation::Search {
+            account,
+            chat,
+            text,
+            before_row,
+            limit,
+        } => {
+            remaining = Some(*limit);
+            Request::Search {
+                account: account.clone(),
+                chat: chat.clone().unwrap_or_default(),
+                text: text.clone(),
+                before: *before_row,
+                limit: (*limit).min(25),
+            }
+        }
         Automation::Read {
             account,
             chat,
             limit,
             before_time,
             before_id,
-        } => (
-            Request::Read {
-                account: account.clone(),
-                chat: chat.clone(),
-                before: before_time.zip(before_id.clone()),
-                limit: *limit,
-            },
-            0,
-        ),
+        } => Request::Read {
+            account: account.clone(),
+            chat: chat.clone(),
+            before: before_time.zip(before_id.clone()),
+            limit: *limit,
+        },
         Automation::Watch {
             account,
             chat,
             limit,
             seconds,
+            since,
+            interval: poll,
             after_row,
             after_id,
         } => {
-            if !(1..=3600).contains(seconds) {
-                return Err("Watch duration must be 1 through 3600 seconds".into());
+            if !(1..=60).contains(poll)
+                || seconds.is_some_and(|seconds| !(1..=3600).contains(&seconds))
+            {
+                return Err(
+                    "Watch interval must be 1 through 60 seconds; duration 1 through 3600".into(),
+                );
             }
-            cursor = after_row.zip(after_id.clone());
-            (
+            watching = true;
+            interval = *poll;
+            duration = *seconds;
+            if let Some(chat) = chat {
+                cursor = after_row.zip(after_id.clone());
                 Request::Watch {
                     account: account.clone(),
                     chat: chat.clone(),
                     after: cursor.clone(),
                     limit: *limit,
-                },
-                *seconds,
-            )
+                }
+            } else {
+                Request::WatchAccount {
+                    account: account.clone(),
+                    since: since.unwrap_or_else(|| {
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs() as i64
+                    }),
+                    after: None,
+                    limit: *limit,
+                }
+            }
         }
         Automation::Send {
             account,
+            target,
             chat,
             request_id,
+            text,
             text_file,
+            files,
         } => {
-            if std::fs::metadata(text_file)
-                .map_err(|_| "Could not open text file")?
-                .len()
-                > 4000
-            {
-                return Err("Text file must be at most 4000 UTF-8 bytes".into());
+            let chat = chat
+                .as_ref()
+                .or(target.as_ref())
+                .ok_or("Send requires a chat id")?
+                .clone();
+            let mut body = Vec::new();
+            if let Some(path) = text_file {
+                std::fs::File::open(path)
+                    .map_err(|_| "Could not open text file")?
+                    .take(4001)
+                    .read_to_end(&mut body)
+                    .map_err(|_| "Could not read text file")?;
+            } else if text.as_deref() == Some("-") {
+                std::io::stdin()
+                    .take(4001)
+                    .read_to_end(&mut body)
+                    .map_err(|_| "Could not read stdin")?;
+            } else if let Some(text) = text {
+                body.extend_from_slice(text.as_bytes());
             }
-            let text = std::fs::read_to_string(text_file)
-                .map_err(|_| "Text file must be readable UTF-8")?;
-            (
+            if body.len() > 4000 {
+                return Err("Text must be at most 4000 UTF-8 bytes".into());
+            }
+            let text = String::from_utf8(body).map_err(|_| "Text must be UTF-8")?;
+            if files.is_empty() {
                 Request::Send {
                     account: account.clone(),
-                    chat: chat.clone(),
+                    chat,
                     request_id: request_id.to_ascii_lowercase(),
                     text,
-                },
-                0,
-            )
+                }
+            } else {
+                if files.len() > 8 {
+                    return Err("At most eight attachments per request".into());
+                }
+                use sha2::{Digest, Sha256};
+                let mut attachments = Vec::new();
+                for path in files {
+                    let path = std::fs::canonicalize(path)
+                        .map_err(|_| "Attachment must be an existing readable file")?;
+                    let source =
+                        std::fs::File::open(&path).map_err(|_| "Could not open attachment")?;
+                    let metadata = source
+                        .metadata()
+                        .map_err(|_| "Could not inspect attachment")?;
+                    if !metadata.is_file() || metadata.len() > zapfast::automation::FILE_LIMIT {
+                        return Err("Attachments must be files of at most 64 MiB".into());
+                    }
+                    let mut source = source.take(zapfast::automation::FILE_LIMIT + 1);
+                    let mut hash = Sha256::new();
+                    let mut buffer = [0u8; 65536];
+                    let mut size = 0u64;
+                    loop {
+                        let count = source
+                            .read(&mut buffer)
+                            .map_err(|_| "Could not read attachment")?;
+                        if count == 0 {
+                            break;
+                        }
+                        size += count as u64;
+                        hash.update(&buffer[..count]);
+                    }
+                    if size != metadata.len() {
+                        return Err("Attachment changed while being read".into());
+                    }
+                    let sha256 = hash
+                        .finalize()
+                        .iter()
+                        .map(|byte| format!("{byte:02x}"))
+                        .collect();
+                    attachments.push(Attachment { path, size, sha256 });
+                }
+                Request::SendFiles {
+                    account: account.clone(),
+                    chat,
+                    request_id: request_id.to_ascii_lowercase(),
+                    text,
+                    files: attachments,
+                }
+            }
         }
         Automation::Status {
             account,
             chat,
             request_id,
-        } => (
-            Request::Status {
-                account: account.clone(),
-                chat: chat.clone(),
-                request_id: request_id.to_ascii_lowercase(),
-            },
-            0,
-        ),
+        } => Request::Status {
+            account: account.clone(),
+            chat: chat.clone(),
+            request_id: request_id.to_ascii_lowercase(),
+        },
     };
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(u64::from(duration));
+    if !request.valid() {
+        return Err("Invalid request; page size must be 1 through 25, and send needs a stable 32-digit hexadecimal request id and text or files".into());
+    }
+    let deadline = duration.map(|seconds| {
+        std::time::Instant::now() + std::time::Duration::from_secs(u64::from(seconds))
+    });
     loop {
         let current = match &request {
             Request::Watch {
@@ -261,23 +457,157 @@ fn automation_command(operation: &Automation, runtime: &std::path::Path) -> Resu
                 limit: *limit,
                 after: cursor.clone(),
             },
+            Request::WatchAccount {
+                account,
+                since,
+                limit,
+                ..
+            } => Request::WatchAccount {
+                account: account.clone(),
+                since: *since,
+                limit: *limit,
+                after: row_cursor,
+            },
+            Request::Chats {
+                account,
+                after,
+                limit,
+            } => Request::Chats {
+                account: account.clone(),
+                after: collection_cursor.clone().or_else(|| after.clone()),
+                limit: *limit,
+            },
+            Request::Contacts {
+                account,
+                all,
+                after,
+                limit,
+            } => Request::Contacts {
+                account: account.clone(),
+                all: *all,
+                after: collection_cursor.clone().or_else(|| after.clone()),
+                limit: *limit,
+            },
+            Request::Read {
+                account,
+                chat,
+                before,
+                limit,
+            } if remaining.is_some() => Request::Read {
+                account: account.clone(),
+                chat: chat.clone(),
+                before: message_cursor.clone().or_else(|| before.clone()),
+                limit: remaining.unwrap_or(*limit).min(page_limit),
+            },
+            Request::Search {
+                account,
+                chat,
+                text,
+                before,
+                limit,
+            } => Request::Search {
+                account: account.clone(),
+                chat: chat.clone(),
+                text: text.clone(),
+                before: search_cursor.or(*before),
+                limit: remaining.unwrap_or(*limit).min(page_limit),
+            },
             _ => request.clone(),
         };
+        // Reassemble authorized byte fragments before printing any row from this page.
         let reply=zapfast::automation::send(runtime,&current).map_err(|_|"Could not reach opted-in local automation. A send may be Unconfirmed; query the same request id".to_owned())?;
         let value: serde_json::Value =
             serde_json::from_str(&reply).map_err(|_| "Invalid automation reply")?;
-        println!("{reply}");
-        if value.get("error").is_some() {
-            return Err("Automation request was refused, see JSON response".into());
+        if let Some(error) = value.get("error") {
+            if error.as_str() == Some("Response too large; use a smaller page")
+                && remaining.is_some()
+                && page_limit > 1
+            {
+                page_limit = 1;
+                continue;
+            }
+            return Err(error
+                .as_str()
+                .unwrap_or("Automation request refused")
+                .to_owned());
         }
-        if duration == 0 || std::time::Instant::now() >= deadline {
+        // Collection and message output is one object per row, suitable for jq and pipes.
+        let page = value.get("page").unwrap_or(&value);
+        let rows = page
+            .get("chats")
+            .or_else(|| page.get("contacts"))
+            .or_else(|| page.get("messages"))
+            .and_then(|rows| rows.as_array());
+        if let Some(rows) = rows {
+            for row in rows {
+                println!("{row}");
+            }
+        } else {
+            println!("{value}");
+        }
+        if let Some(left) = remaining.as_mut() {
+            *left = left.saturating_sub(rows.map_or(0, Vec::len));
+            if *left == 0 {
+                break;
+            }
+            if matches!(request, Request::Search { .. }) {
+                let next = value.get("cursor").and_then(|cursor| cursor.as_i64());
+                if next.is_none() {
+                    break;
+                }
+                if search_cursor == next {
+                    return Err("Archive cursor made no progress".into());
+                }
+                search_cursor = next;
+            } else {
+                let next = value.get("next_before").filter(|cursor| !cursor.is_null());
+                let Some(next) = next else {
+                    break;
+                };
+                let next =
+                    serde_json::from_value(next.clone()).map_err(|_| "Invalid message cursor")?;
+                if message_cursor.as_ref() == Some(&next) {
+                    return Err("Archive cursor made no progress".into());
+                }
+                message_cursor = Some(next);
+            }
+            continue;
+        }
+        if matches!(request, Request::Chats { .. } | Request::Contacts { .. }) {
+            let next = value.get("cursor").and_then(|cursor| cursor.as_str());
+            if let Some(next) = next {
+                if collection_cursor.as_deref() == Some(next) {
+                    return Err("Archive cursor made no progress".into());
+                }
+                collection_cursor = Some(next.to_owned());
+                continue;
+            }
             break;
         }
-        if let Some(next) = value.get("cursor").filter(|next| !next.is_null()) {
-            cursor =
-                Some(serde_json::from_value(next.clone()).map_err(|_| "Invalid watch cursor")?);
+        if !watching {
+            break;
         }
-        std::thread::sleep(std::time::Duration::from_secs(1));
+        if deadline.is_some_and(|deadline| std::time::Instant::now() >= deadline) {
+            break;
+        }
+        let next = value.get("cursor").filter(|next| !next.is_null());
+        let mut advanced = false;
+        if let Some(next) = next {
+            if matches!(request, Request::WatchAccount { .. }) {
+                let next = next.as_i64().ok_or("Invalid watch cursor")?;
+                advanced = row_cursor != Some(next);
+                row_cursor = Some(next);
+            } else {
+                let next =
+                    serde_json::from_value(next.clone()).map_err(|_| "Invalid watch cursor")?;
+                advanced = cursor.as_ref() != Some(&next);
+                cursor = Some(next);
+            }
+        }
+        // Drain bounded pages before waiting; filtering private rows must still advance.
+        if !advanced {
+            std::thread::sleep(std::time::Duration::from_secs(u64::from(interval)));
+        }
     }
     Ok(())
 }
@@ -323,6 +653,14 @@ fn run() -> eframe::Result<()> {
     if launch
         .arguments
         .iter()
+        .any(|argument| argument == "--camera-list-helper")
+    {
+        zapfast::camera::run_list_helper();
+        return Ok(());
+    }
+    if launch
+        .arguments
+        .iter()
         .any(|argument| argument == "--camera-helper")
     {
         zapfast::camera::run_helper();
@@ -340,7 +678,7 @@ fn run() -> eframe::Result<()> {
             )
         })?;
     let discovered = paths::AppDirs::discover();
-    if let Some(Control::Automation { operation }) = &cli.command {
+    if let Some(Control::Automation { operation } | Control::Access(operation)) = &cli.command {
         if let Err(error) = automation_command(operation, &discovered.runtime) {
             eprintln!("{error}");
             std::process::exit(1);
@@ -354,7 +692,7 @@ fn run() -> eframe::Result<()> {
                 "Zap Faster is not running, so there are no themes to reload.",
             ),
             Control::Quit => ("quit", "Zap Faster is not running."),
-            Control::Automation { .. } => unreachable!("handled above"),
+            Control::Automation { .. } | Control::Access(_) => unreachable!("handled above"),
         };
         if let Err(error) = single_instance::send(&discovered.runtime, verb) {
             use std::io::ErrorKind;
@@ -454,7 +792,10 @@ fn run() -> eframe::Result<()> {
     }
     let settings = settings::Settings::load(&dirs.settings_file());
     // Configure fastframe-emoji before any renderer wrapper can initialize it.
-    zapfast::emoji::setup(settings.emoji_renderer);
+    zapfast::emoji::setup_with_font(
+        settings.emoji_renderer,
+        settings.custom_emoji_font.as_deref(),
+    );
     let demo_persistence = demo.then(|| dirs.state.join("window.ron"));
 
     #[allow(unused_mut)]
@@ -917,6 +1258,42 @@ fn app_icon() -> egui::IconData {
 #[cfg(test)]
 mod chat_link_cli_tests {
     use super::*;
+    #[test]
+    fn original_cli_surface_accepts_collections_stdin_files_and_unbounded_watch() {
+        for args in [
+            vec!["chats"],
+            vec!["contacts", "--all"],
+            vec!["messages", "fixture", "--limit", "100"],
+            vec!["search", "synthetic phrase"],
+            vec!["watch", "--since", "100", "--interval", "2"],
+        ] {
+            let mut command = vec!["zap-faster"];
+            command.extend(args);
+            command.extend(["--account", "2"]);
+            assert!(matches!(
+                Cli::try_parse_from(command).unwrap().command,
+                Some(Control::Access(_))
+            ));
+        }
+        let cli = Cli::try_parse_from([
+            "zap-faster",
+            "send",
+            "fixture",
+            "-",
+            "--account",
+            "2",
+            "--request-id",
+            "0123456789abcdef0123456789abcdef",
+            "--file",
+            "synthetic-first.pdf",
+            "--file",
+            "synthetic-second.png",
+        ])
+        .unwrap();
+        assert!(
+            matches!(cli.command,Some(Control::Access(Automation::Send { text:Some(text), files,.. })) if text=="-" && files.len()==2)
+        );
+    }
 
     #[test]
     fn automation_cli_is_explicit_and_send_requires_a_file_and_request_id() {

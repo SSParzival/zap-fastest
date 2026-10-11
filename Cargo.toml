@@ -236,7 +236,7 @@ windows-sys = { version = "0.60", features = ["Win32_Foundation", "Win32_Globali
 raw-window-handle = "0.6"
 # Pauses other apps' media through the system media transport controls while
 # recording or playing voice messages. The same version cpal already uses.
-windows = { version = "0.62", features = ["Media_Control", "Foundation_Collections", "Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_UI_Controls", "Win32_System_Com", "Win32_System_Ole", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+windows = { version = "0.62", features = ["Media_Control", "Foundation_Collections", "Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_UI_Controls", "Win32_System_Com", "Win32_System_Ole", "Win32_System_LibraryLoader", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
 # clang-cl is required by whisper.cpp on Windows ARM64. Opus's runtime SIMD
 # probe uses MSVC-only __emit intrinsics, so keep its portable scalar path on

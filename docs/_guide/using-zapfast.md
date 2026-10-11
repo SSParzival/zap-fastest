@@ -694,6 +694,22 @@ Offline previews are available as `gallery`, `gallery-docs`, `gallery-links`,
 
 Choose **Document** on a staged attachment tile to send original image file bytes or lossless PNG clipboard pixels. Original file names and existing file metadata are preserved; clipboard pixels have neither an original filename nor EXIF. See [Original documents]({{ site.baseurl }}/original-documents/) for refusal recovery and acceptance checks.
 
+## Custom emoji fonts
+
+Under **Settings > Appearance > Emoji style**, choose System, Noto Color Emoji,
+or **Choose a colour emoji font file**. Supply a local font you are allowed to
+use; Zap Faster does not download or include proprietary emoji libraries.
+Apple emoji already come from the system font on macOS in System mode.
+
+Import accepts CBDT or sbix colour bitmap fonts (TTF, OTF or collections) up to
+256 MiB, using the first face of a collection. COLR/SVG-only fonts and image
+packs are unsupported. The application keeps its own copy, so the original
+can move. All accounts share the choice. **Restart Zap Faster to apply it.**
+Missing emoji in a custom font have no bundled Noto fallback. If the custom
+font cannot load at startup, Settings shows the reason and the selected
+built-in style remains active. Choose System or Noto to reset the choice and
+remove the application's imported copies, then restart.
+
 ## Custom interface fonts
 
 Under **Settings > Appearance > Font**, choose System, Inter, or **Choose a font
@@ -785,10 +801,46 @@ and platform-keyring acceptance remain unverified.
 
 In a direct conversation, use the voice or video button in the header. Incoming
 calls offer answer or decline. Calls use the selected microphone/sound output;
-video requires camera permission and uses the default camera. Ending or locking
+video requires camera permission. The call device controls let you select a camera
+and refresh the device list. A selection applies the next time you turn the camera
+on; an unavailable selected camera reports an error. Ending or locking
 the app stops capture. Local call history stays in the account's encrypted archive.
 
 Native 1:1 calling is implemented through the official protocol library, but
 two-device interoperability and physical permissions/device removal still need
 attended acceptance. Group calls await upstream interoperability fixes. Calls
 embedded as interactive-message actions have separate unsupported-action rules.
+
+## Status (development builds)
+
+The **Status** chip beside the chat filters opens stories received while this
+instance is running. Stories expire 24 hours after their original timestamp and
+are not added to the permanent conversation archive. Viewing sends no read
+receipt. Photos stay inside the filtered viewer; downloaded videos open in the
+system player. Locked senders and screen privacy retain their restrictions.
+
+## Automatic exports (development builds)
+
+With automatic downloads enabled, files copied to your chosen folder default
+to those received since enabling the option. **Include older files** opts into
+historical copies independently of Full private history recovery. Original
+document names are optional and remain sanitized and collision-safe.
+
+## Undo and backup merging (development builds)
+
+Archive and Delete for me offer **Undo** for five seconds before their command
+is sent. Closing or crashing during this grace period leaves the request unsent.
+An accepted deletion cannot be reversed through Undo.
+
+Backup restoration can optionally merge historical messages into the current
+account after identity matching and a review of the exact changes. Current
+credentials and pending work stay in place. Imported pending sends never run;
+ambiguous edited alternatives are retained separately in the encrypted archive.
+
+## Unused cache cleanup (development builds)
+
+Under account storage settings, **Unused cache cleanup** can remove old files
+that are no longer referenced by the archive. It is off by default. Every
+archived attachment, background recovery file and tracked export stays protected.
+The age uses the file modification time. See the [cache policy](../cache-retention.md)
+for safety limits and remaining platform validation.

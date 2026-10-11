@@ -15,6 +15,7 @@ pub mod call_audio;
 pub mod calls;
 pub mod camera;
 pub mod chat_link;
+pub mod custom_emoji;
 pub mod custom_font;
 #[cfg(any(test, feature = "demo"))]
 pub mod demo;
@@ -52,6 +53,7 @@ pub mod transcript;
 pub mod transport;
 pub mod tray_indicator;
 pub mod ui;
+pub mod undo;
 pub mod updates;
 pub mod util;
 pub mod video;

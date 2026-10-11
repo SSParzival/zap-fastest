@@ -50,6 +50,8 @@ mod archive_sync;
 mod automation;
 mod background_history;
 mod background_media;
+mod backup_merge;
+mod cache_retention;
 mod calls;
 mod disappearing;
 mod favorite_chats;
@@ -58,6 +60,7 @@ mod link_watch;
 mod outgoing;
 mod poll_history;
 mod polls;
+mod statuses;
 mod sticker_pace;
 mod stickers;
 #[cfg(any(test, feature = "demo"))]
@@ -615,6 +618,9 @@ pub async fn run(
         presence_subscribed: HashSet::new(),
         download_folder: None,
         download_organization: crate::settings::DownloadOrganization::Flat,
+        automatic_exports: account_settings.automatic_export_policy(),
+        automatic_media_exports: HashSet::new(),
+        pending_backup_merge: None,
         descriptive_download_names: false,
         keep_chats_archived: true,
         online_wanted: false,
@@ -663,6 +669,8 @@ pub async fn run(
         background_media_enabled: false,
         background_media_budget_mib: 20 * 1024,
         background_media_usage: None,
+        cache_retention_days: account_settings.cache_retention_days,
+        cache_retention_next: None,
         background_media_cancelled: HashSet::new(),
         history_checkpoint_failed: false,
         background_media: HashSet::new(),
@@ -673,7 +681,10 @@ pub async fn run(
         disappearing_pending: HashSet::new(),
         call_prepare_generation: 0,
         call_devices: Default::default(),
+        call_device_discovery: Default::default(),
+        stories: Default::default(),
         call_defaults: Default::default(),
+        call_camera: account_settings.call_camera.clone(),
         call_privacy_paused: false,
         sync_mode,
         archive_only: account_settings.archive_only,
@@ -779,6 +790,7 @@ pub async fn run(
                 worker.refresh_legacy_preferences();
                 worker.expire_older_requests();
                 worker.expire_disappearing_messages();
+                if !worker.stories.rows_empty() { worker.emit_statuses(); }
                 worker.retry_avatars();
                 worker.pump_group_info();
                 worker.pump_favorite_stickers();
@@ -790,6 +802,7 @@ pub async fn run(
                 worker.pump_poll_history();
                 worker.pump_background_history();
                 worker.pump_background_media().await;
+                worker.expire_unreferenced_cache().await;
                 worker.replay_captured_history().await;
                 worker.reconcile_call().await;
                 worker.prune_waiting_receipts();
@@ -1065,6 +1078,8 @@ struct Worker {
     background_media_enabled: bool,
     background_media_budget_mib: u32,
     background_media_usage: Option<(Instant, Option<u64>)>,
+    cache_retention_days: Option<u32>,
+    cache_retention_next: Option<Instant>,
     background_media_cancelled: HashSet<(ChatId, String, i64)>,
     history_checkpoint_failed: bool,
     background_media: HashSet<(ChatId, String, i64)>,
@@ -1075,7 +1090,10 @@ struct Worker {
     call_video_preparing: Option<(u64, tokio::task::JoinHandle<()>)>,
     disappearing_pending: HashSet<String>,
     call_devices: crate::calls::DeviceList,
+    call_device_discovery: calls::DeviceDiscovery,
+    stories: statuses::Stories,
     call_defaults: crate::calls::CallDevices,
+    call_camera: Option<String>,
     call_privacy_paused: bool,
     sync_mode: Option<crate::settings::SyncMode>,
     archive_only: bool,
@@ -1142,6 +1160,9 @@ struct Worker {
     /// Chosen folder for new downloads, when not the cache.
     download_folder: Option<PathBuf>,
     download_organization: crate::settings::DownloadOrganization,
+    automatic_exports: crate::settings::AutomaticExportPolicy,
+    automatic_media_exports: HashSet<(ChatId, String, i64)>,
+    pending_backup_merge: Option<crate::archive::merge::PreparedMerge>,
     descriptive_download_names: bool,
     /// Settings' "Keep chats archived". Off, a new message unarchives its
     /// chat here, as the phone does; WhatsApp sends no mutation for it.
@@ -1414,6 +1435,7 @@ impl Worker {
                     | Event::Call(_)
                     | Event::CallDevices(_)
                     | Event::CallLog(_)
+                    | Event::Statuses(_)
                     | Event::StarredList { .. }
                     | Event::Pins { .. }
             )
@@ -3774,6 +3796,7 @@ impl Worker {
         }
         self.lid_to_pn.clear();
         self.contacts.clear();
+        self.stories = Default::default();
         self.group_info_requested.clear();
         self.group_info_queue.clear();
         self.group_info_tries.clear();
@@ -4127,6 +4150,7 @@ impl Worker {
     fn ingest(&mut self, message: &Arc<wa::Message>, info: &MessageInfo) {
         self.learn_source(&info.source);
         if info.source.chat.is_status_broadcast() {
+            self.ingest_status(message, info);
             return;
         }
         let chat = self.canonical(&info.source.chat);
@@ -6063,6 +6087,11 @@ impl Worker {
         }
         match command {
             Command::Automation(request) => self.automation(request),
+            Command::Statuses => self.emit_statuses(),
+            Command::DownloadStatus(key) => self.download_status(key),
+            Command::StatusDownloaded { key, token, result } => {
+                self.status_downloaded(key, token, result)
+            }
             Command::StartCall { chat } => self.start_call(chat).await,
             Command::StartVideoCall { chat } => self.start_video_call(chat).await,
             Command::CallPrepared { generation, result } => {
@@ -6079,6 +6108,14 @@ impl Worker {
             Command::SetCallVideo(enabled) => self.set_call_video(enabled).await,
             Command::SetCallMicrophone(device) => self.set_call_microphone(device),
             Command::SetCallSpeaker(device) => self.set_call_speaker(device),
+            Command::SetCallCamera(device) => self.call_camera = device,
+            Command::SetCacheRetention(days) => {
+                let days = days.filter(|days| (1..=3650).contains(days));
+                if self.cache_retention_days != days {
+                    self.cache_retention_days = days;
+                    self.cache_retention_next = None;
+                }
+            }
             Command::LoadCallLog => self.load_call_log(),
             Command::RefreshAudioDevices => self.begin_call_device_discovery(),
             Command::CallDevicesDiscovered(devices) => self.publish_call_devices(devices),
@@ -6589,6 +6626,43 @@ impl Worker {
                 mentions,
                 quoting,
             } => self.send_pasted_image(chat, width, height, rgba, caption, mentions, quoting),
+            Command::AutomationOutbound {
+                permit,
+                locked,
+                chat,
+                row,
+                raw,
+                upload,
+            } => {
+                let prepared_path = row.content.media().and_then(|media| media.path.clone());
+                let allowed =
+                    !locked.load(std::sync::atomic::Ordering::SeqCst)
+                        && self.archive.chat(&chat).ok().flatten().is_some_and(|chat| {
+                            !chat.locked && chat.disappearing_timer().is_none()
+                        })
+                        && upload.is_none_or(|token| {
+                            self.uploads
+                                .get(&token)
+                                .is_some_and(|control| !control.cancelled())
+                        })
+                        && row.sender == self.me();
+                let accepted = allowed
+                    && permit
+                        .execute(|| {
+                            self.pending_outbound_order =
+                                upload.and_then(|token| self.upload_order.get(&token).copied());
+                            self.outbound(chat, *row, raw);
+                        })
+                        .is_some();
+                if !accepted
+                    && let Some(path) =
+                        prepared_path.filter(|path| path.starts_with(self.dirs.media_cache_dir()))
+                {
+                    tokio::spawn(async move {
+                        let _ = tokio::fs::remove_file(path).await;
+                    });
+                }
+            }
             Command::Outbound {
                 chat,
                 row,
@@ -6648,6 +6722,11 @@ impl Worker {
             Command::ExportArchiveBackup(passphrase) => {
                 self.export_account_backup(passphrase).await;
             }
+            Command::PrepareBackupMerge(passphrase) => self.prepare_backup_merge(passphrase).await,
+            Command::ConfirmBackupMerge => self.confirm_backup_merge(),
+            Command::CancelBackupMerge => {
+                self.pending_backup_merge = None;
+            }
             Command::SetDownloadFolder(folder) => {
                 // Interrupted downloads leave hidden staging files behind.
                 if let Some(folder) = &folder {
@@ -6655,6 +6734,7 @@ impl Worker {
                 }
                 self.download_folder = folder;
             }
+            Command::SetAutomaticExportPolicy(policy) => self.automatic_exports = policy,
             Command::SetDownloadOrganization {
                 organization,
                 descriptive_names,
@@ -8894,6 +8974,9 @@ impl Worker {
         explicit: bool,
         managed: bool,
     ) {
+        // Older visible media still downloads to the private cache, independently of user copies.
+        let automatic_export = !managed && !explicit;
+        let managed = managed || !explicit;
         if self.downloads.len() >= 8 {
             self.emit(Event::Media {
                 chat,
@@ -8905,6 +8988,13 @@ impl Worker {
         }
         if !self.downloads.insert((chat.clone(), id.clone(), card)) {
             return;
+        }
+        if automatic_export {
+            self.automatic_media_exports.insert((
+                chat.clone(),
+                id.clone(),
+                card.map_or(-1, |card| card as i64),
+            ));
         }
         let Some(client) = self.client.clone() else {
             self.downloaded(chat, id, card, Err("Not connected to WhatsApp".to_owned()));
@@ -9075,7 +9165,8 @@ impl Worker {
             !managed
                 && **folder == dir
                 && (self.download_organization != crate::settings::DownloadOrganization::Flat
-                    || self.descriptive_download_names)
+                    || self.descriptive_download_names
+                    || self.automatic_exports.original_names)
         });
         let export = organized.map(|folder| {
             let chat_name = self
@@ -9091,10 +9182,11 @@ impl Worker {
                 .flatten()
                 .map_or(0, |message| message.timestamp);
             let cache_id = card.map_or_else(|| id.clone(), |index| format!("{id}-card-{index}"));
-            download_organization::path(
+            download_organization::path_with_original_names(
                 folder,
                 self.download_organization,
                 self.descriptive_download_names,
+                self.automatic_exports.original_names,
                 download_organization::Metadata {
                     account: self.dirs.id.as_str(),
                     chat: &chat,
@@ -9380,7 +9472,10 @@ impl Worker {
             let background = self
                 .background_media
                 .contains(&(chat.clone(), id.clone(), job.card));
-            let export = if background {
+            let automatic =
+                self.automatic_media_exports
+                    .remove(&(chat.clone(), id.clone(), job.card));
+            let export = if background || automatic {
                 self.managed_export_destination(&job)
             } else {
                 Ok(None)
@@ -9400,6 +9495,11 @@ impl Worker {
         }
         self.background_media_finished(&chat, &id, card.map_or(-1, |card| card as i64), &result);
         self.downloads.remove(&(chat.clone(), id.clone(), card));
+        self.automatic_media_exports.remove(&(
+            chat.clone(),
+            id.clone(),
+            card.map_or(-1, |card| card as i64),
+        ));
         self.transfer_controls
             .remove(&(chat.clone(), id.clone(), card));
         let for_picker = self.sticker_downloads.remove(&(chat.clone(), id.clone()));
@@ -16222,6 +16322,9 @@ fn offline_worker(
         presence_subscribed: HashSet::new(),
         download_folder: None,
         download_organization: crate::settings::DownloadOrganization::Flat,
+        automatic_exports: Default::default(),
+        automatic_media_exports: HashSet::new(),
+        pending_backup_merge: None,
         descriptive_download_names: false,
         keep_chats_archived: true,
         online_wanted: false,
@@ -16270,6 +16373,8 @@ fn offline_worker(
         background_media_enabled: false,
         background_media_budget_mib: 20 * 1024,
         background_media_usage: None,
+        cache_retention_days: None,
+        cache_retention_next: None,
         background_media_cancelled: HashSet::new(),
         history_checkpoint_failed: false,
         background_media: HashSet::new(),
@@ -16280,7 +16385,10 @@ fn offline_worker(
         disappearing_pending: HashSet::new(),
         call_prepare_generation: 0,
         call_devices: Default::default(),
+        call_device_discovery: Default::default(),
+        stories: Default::default(),
         call_defaults: Default::default(),
+        call_camera: None,
         call_privacy_paused: false,
         sync_mode: Some(crate::settings::SyncMode::Recent),
         archive_only: false,

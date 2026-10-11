@@ -549,6 +549,11 @@ pub fn submenu<R>(
         ui.ctx(),
         egui::containers::menu::SubMenu::id_from_widget_id(response.id),
     );
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(egui::accesskit::Role::MenuItem);
+        node.set_has_popup(egui::accesskit::HasPopup::Menu);
+        node.set_expanded(open);
+    });
     if ui.is_rect_visible(rect) {
         if response.hovered() || open {
             ui.painter()
@@ -615,6 +620,12 @@ pub fn menu_item_enabled(
     theme::reveal_focus(&response);
     response.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled && ui.is_enabled(), label)
+    });
+    ui.ctx().accesskit_node_builder(ui.unique_id(), |node| {
+        node.set_role(egui::accesskit::Role::Menu)
+    });
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(egui::accesskit::Role::MenuItem)
     });
     if ui.is_rect_visible(rect) {
         if response.hovered() && enabled {

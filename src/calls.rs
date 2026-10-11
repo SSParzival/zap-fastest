@@ -173,6 +173,11 @@ pub struct AudioDevice {
 pub struct DeviceList {
     pub microphones: Vec<AudioDevice>,
     pub speakers: Vec<AudioDevice>,
+    pub cameras: Vec<crate::camera::CameraDevice>,
+    pub camera_error: Option<String>,
+    pub cameras_discovered: bool,
+    /// Internal discovery request identity; only the latest camera refresh may replace its list.
+    pub camera_discovery_generation: Option<u64>,
 }
 
 /// Which kind of call device a selection belongs to.
@@ -319,6 +324,7 @@ pub fn devices() -> DeviceList {
         } else {
             Vec::new()
         },
+        ..Default::default()
     }
 }
 
@@ -423,6 +429,17 @@ impl std::fmt::Debug for Call {
     }
 }
 
+/// Local camera preparation fails before the call offer/answer is sent. Keep its safe,
+/// actionable message distinct from protocol errors, which must not reach the interface raw.
+#[derive(Debug)]
+pub(crate) struct CameraSetupError(anyhow::Error);
+impl std::fmt::Display for CameraSetupError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(&self.0, f)
+    }
+}
+impl std::error::Error for CameraSetupError {}
+
 impl Call {
     /// Places an outgoing 1:1 call.
     pub async fn place(
@@ -431,7 +448,7 @@ impl Call {
         microphone: Option<String>,
         speaker: Option<String>,
     ) -> Result<Self> {
-        Self::place_mode(client, chat, microphone, speaker, false).await
+        Self::place_mode(client, chat, microphone, speaker, false, None).await
     }
 
     pub async fn place_mode(
@@ -440,6 +457,7 @@ impl Call {
         microphone: Option<String>,
         speaker: Option<String>,
         with_video: bool,
+        camera: Option<String>,
     ) -> Result<Self> {
         let peer: Jid = chat
             .parse()
@@ -453,7 +471,11 @@ impl Call {
             return Err(anyhow!("no {missing} is available; a call needs one"));
         }
         let video = if with_video {
-            Some(crate::camera::VideoSession::open().await?)
+            Some(
+                crate::camera::VideoSession::open(camera)
+                    .await
+                    .map_err(CameraSetupError)?,
+            )
         } else {
             None
         };
@@ -737,7 +759,8 @@ impl Call {
         microphone: Option<String>,
         speaker: Option<String>,
     ) -> Result<()> {
-        self.answer_mode(client, microphone, speaker, false).await
+        self.answer_mode(client, microphone, speaker, false, None)
+            .await
     }
 
     pub async fn answer_mode(
@@ -746,6 +769,7 @@ impl Call {
         microphone: Option<String>,
         speaker: Option<String>,
         with_video: bool,
+        camera: Option<String>,
     ) -> Result<()> {
         let Some(incoming) = self.incoming.clone() else {
             return Err(anyhow!("nothing is ringing"));
@@ -762,7 +786,11 @@ impl Call {
             return Err(anyhow!("no {missing} is available; a call needs one"));
         }
         let video = if with_video {
-            Some(crate::camera::VideoSession::open().await?)
+            Some(
+                crate::camera::VideoSession::open(camera)
+                    .await
+                    .map_err(CameraSetupError)?,
+            )
         } else {
             None
         };
@@ -1341,6 +1369,7 @@ mod tests {
                 id: "alsa_output.usb-Generic_USB_Headset-00.analog-stereo".to_owned(),
                 label: "USB Headset Stereo".to_owned(),
             }],
+            ..Default::default()
         }
     }
 
@@ -2086,6 +2115,21 @@ mod tests {
 #[cfg(test)]
 mod platform_tests {
     use super::*;
+
+    #[test]
+    fn camera_preparation_errors_keep_their_safe_failure_reason() {
+        let message = "The selected camera is unavailable. Choose another camera.";
+        let error: anyhow::Error = CameraSetupError(anyhow!(message)).into();
+        let local = error
+            .downcast_ref::<CameraSetupError>()
+            .expect("local camera error");
+        assert_eq!(local.to_string(), message);
+        assert!(
+            anyhow!("protocol failure")
+                .downcast_ref::<CameraSetupError>()
+                .is_none()
+        );
+    }
 
     /// The compile-time platform is what the interface is told.
     #[test]

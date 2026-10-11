@@ -18,11 +18,15 @@ mod badge_windows;
 #[cfg(target_os = "macos")]
 mod macos;
 #[cfg(target_os = "windows")]
+mod popups_windows;
+#[cfg(target_os = "windows")]
 mod windows;
 #[cfg(target_os = "linux")]
 pub use badge::Badge;
 #[cfg(target_os = "windows")]
 pub use badge_windows::{Badge, Taskbar};
+#[cfg(target_os = "windows")]
+pub(crate) use popups_windows::NativePopups;
 
 /// A no-op taskbar badge on platforms without a taskbar badge implementation.
 #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
@@ -132,6 +136,7 @@ pub struct Shown {
     pub body: String,
     pub picture: Option<PathBuf>,
     pub sound: NotificationSound,
+    pub sound_output: Option<String>,
 }
 
 impl Notifications {
@@ -284,6 +289,26 @@ impl Notifications {
         wake: impl Fn() + Send + 'static,
         limited: bool,
     ) {
+        self.show_on(
+            title, body, picture, sound, None, target, opened, wake, limited,
+        );
+    }
+
+    /// Custom sounds follow the originating account's playback device. Native
+    /// system sounds remain managed by the desktop, including macOS Focus.
+    #[expect(clippy::too_many_arguments)]
+    pub fn show_on(
+        &mut self,
+        title: String,
+        body: String,
+        picture: Option<PathBuf>,
+        sound: NotificationSound,
+        sound_output: Option<String>,
+        target: NotificationTarget,
+        opened: Arc<Mutex<Vec<NotificationTarget>>>,
+        wake: impl Fn() + Send + 'static,
+        limited: bool,
+    ) {
         let cancelled = self.register(&target.account, &target.chat);
         // A limited chat's wait ends again if the desktop does not show this.
         let failed: Box<dyn FnOnce() + Send> = if limited {
@@ -297,6 +322,7 @@ impl Notifications {
                 body,
                 picture,
                 sound,
+                sound_output,
             });
             return;
         }
@@ -322,7 +348,7 @@ impl Notifications {
                 #[cfg(not(target_os = "macos"))]
                 let native_sound: Option<String> = None;
                 #[cfg(not(target_os = "macos"))]
-                play_sound(sound);
+                play_sound_on(sound, sound_output);
                 deliver(
                     &title,
                     &body,
@@ -352,6 +378,10 @@ const ALERT: &[u8] = include_bytes!("../assets/sounds/alert.wav");
 /// Plays a notification sound on its own thread, for notifications and
 /// their preview in Settings. System sounds and silence play nothing here.
 pub fn play_sound(sound: NotificationSound) {
+    play_sound_on(sound, None);
+}
+
+pub fn play_sound_on(sound: NotificationSound, preferred: Option<String>) {
     let source: Box<dyn Fn() -> std::io::Result<Box<dyn ReadSeek>> + Send> = match sound {
         NotificationSound::Receive => Box::new(|| Ok(Box::new(std::io::Cursor::new(RECEIVE)))),
         NotificationSound::Alert => Box::new(|| Ok(Box::new(std::io::Cursor::new(ALERT)))),
@@ -368,7 +398,8 @@ pub fn play_sound(sound: NotificationSound) {
             let played = (|| -> Result<(), String> {
                 let reader = source().map_err(|error| error.to_string())?;
                 let decoder = rodio::Decoder::new(reader).map_err(|error| error.to_string())?;
-                let device = crate::audio::open_output().map_err(|error| error.to_string())?;
+                let device = crate::audio::open_output_on(preferred.as_deref())
+                    .map_err(|error| error.to_string())?;
                 let player = rodio::Player::connect_new(device.mixer());
                 player.append(decoder);
                 player.sleep_until_end();
@@ -598,6 +629,29 @@ fn deliver(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn notification_sound_retains_the_originating_accounts_selected_output() {
+        let mut notifications = Notifications::default();
+        notifications.show_on(
+            "Synthetic notification".into(),
+            "Invented message".into(),
+            None,
+            NotificationSound::Receive,
+            Some("Synthetic headset".into()),
+            NotificationTarget {
+                account: "1".into(),
+                chat: "fixture".into(),
+                message: "fixture".into(),
+            },
+            Arc::new(Mutex::new(Vec::new())),
+            || {},
+            false,
+        );
+        assert_eq!(
+            notifications.shown[0].sound_output.as_deref(),
+            Some("Synthetic headset")
+        );
+    }
     use super::*;
     use crate::model::AccountId;
 

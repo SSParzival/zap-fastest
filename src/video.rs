@@ -1718,20 +1718,25 @@ mod tests {
     }
 
     #[test]
-    fn the_sound_at_2x_lasts_half_as_long() {
-        let stretching =
-            Stretching::start(Path::new(SAMPLE), Duration::ZERO, 2.0, Waker::default());
-        let deadline = Instant::now() + Duration::from_secs(20);
-        let (samples, rate) = loop {
-            if let Some(done) = stretching.slot.lock().unwrap().take() {
-                break done;
-            }
-            assert!(Instant::now() < deadline, "the sped-up sound never arrived");
-            std::thread::sleep(Duration::from_millis(20));
-        };
-        let seconds = samples.len() as f64 / f64::from(rate.get());
-        // The three second clip's sound, in half the time.
-        assert!((seconds - 1.5).abs() < 0.1, "got {seconds} s");
+    fn the_sound_duration_follows_quarter_and_cycled_video_speeds() {
+        for factor in [1.25, 1.75, 2.0] {
+            let stretching =
+                Stretching::start(Path::new(SAMPLE), Duration::ZERO, factor, Waker::default());
+            let deadline = Instant::now() + Duration::from_secs(20);
+            let (samples, rate) = loop {
+                if let Some(done) = stretching.slot.lock().unwrap().take() {
+                    break done;
+                }
+                assert!(Instant::now() < deadline, "the sped-up sound never arrived");
+                std::thread::sleep(Duration::from_millis(20));
+            };
+            let seconds = samples.len() as f64 / f64::from(rate.get());
+            let expected = 3.0 / f64::from(factor);
+            assert!(
+                (seconds - expected).abs() < 0.1,
+                "at {factor}x got {seconds} s"
+            );
+        }
     }
 
     #[test]

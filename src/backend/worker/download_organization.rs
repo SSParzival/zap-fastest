@@ -171,10 +171,21 @@ pub(super) struct Metadata<'a> {
     pub original_name: Option<&'a str>,
 }
 
-pub(super) fn path(
+#[cfg(test)]
+fn path(
     root: &Path,
     organization: DownloadOrganization,
     descriptive: bool,
+    metadata: Metadata<'_>,
+) -> PathBuf {
+    path_with_original_names(root, organization, descriptive, false, metadata)
+}
+
+pub(super) fn path_with_original_names(
+    root: &Path,
+    organization: DownloadOrganization,
+    descriptive: bool,
+    original_names: bool,
     metadata: Metadata<'_>,
 ) -> PathBuf {
     let chat = format!(
@@ -199,6 +210,9 @@ pub(super) fn path(
                 |date| date.strftime("%Y-%m").to_string(),
             ));
         }
+    }
+    if original_names && let Some(name) = metadata.original_name.and_then(original_filename) {
+        return folder.join(name);
     }
     if !descriptive {
         return super::media_path(
@@ -229,9 +243,100 @@ pub(super) fn path(
     folder.join(format!("{date}-{chat}-{kind}{original}-{id}.{extension}"))
 }
 
+fn original_filename(value: &str) -> Option<String> {
+    let basename = value.rsplit(['/', '\\']).next()?.trim_matches([' ', '.']);
+    let mut bytes = 0;
+    let name: String = basename
+        .chars()
+        .map(|c| {
+            if c.is_control() || matches!(c, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*') {
+                '_'
+            } else {
+                c
+            }
+        })
+        .take_while(|c| {
+            bytes += c.len_utf8();
+            bytes <= 180
+        })
+        .collect();
+    let extension = Path::new(basename)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .filter(|extension| {
+            !extension.is_empty()
+                && extension.len() <= 16
+                && extension.chars().all(char::is_alphanumeric)
+        });
+    let name = if let Some(extension) = extension
+        && !name.ends_with(&format!(".{extension}"))
+    {
+        format!("{name}.{extension}")
+    } else {
+        name
+    };
+    let name = name.trim_end_matches([' ', '.']);
+    if name.is_empty() {
+        return None;
+    }
+    let stem = name.split('.').next()?.to_ascii_uppercase();
+    let reserved = matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || ["COM", "LPT"].iter().any(|prefix| {
+            stem.strip_prefix(*prefix).is_some_and(|suffix| {
+                matches!(
+                    suffix,
+                    "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
+                )
+            })
+        });
+    Some(if reserved {
+        format!("_{name}")
+    } else {
+        name.to_owned()
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn original_filename_policy_keeps_documents_readable_and_confined_to_the_chosen_folder() {
+        let root = Path::new("exports");
+        let path = path_with_original_names(
+            root,
+            DownloadOrganization::ByChatMonth,
+            true,
+            true,
+            Metadata {
+                account: "fixture-account",
+                chat: "fixture-chat",
+                chat_name: "Synthetic",
+                message: "fixture-message",
+                timestamp: 1_700_000_000,
+                mime: "application/pdf",
+                original_name: Some("Quarterly invoice.pdf"),
+            },
+        );
+        assert_eq!(path.file_name().unwrap(), "Quarterly invoice.pdf");
+        assert!(path.starts_with(root));
+        assert_eq!(
+            original_filename("../../invoice.pdf").unwrap(),
+            "invoice.pdf"
+        );
+        assert_eq!(
+            original_filename("C:\\private\\AUX.pdf").unwrap(),
+            "_AUX.pdf"
+        );
+        assert_eq!(
+            original_filename("invoice:final?.pdf").unwrap(),
+            "invoice_final_.pdf"
+        );
+        assert!(original_filename("..").is_none());
+        let long = original_filename(&format!("{}.pdf", "文件".repeat(90))).unwrap();
+        assert!(long.len() <= 200);
+        assert!(long.ends_with(".pdf"));
+    }
 
     #[test]
     fn organized_copies_are_atomic_non_overwriting_and_idempotent_after_restart() {

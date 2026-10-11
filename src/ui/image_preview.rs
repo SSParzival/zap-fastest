@@ -61,7 +61,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                         18.0,
                         palette.secondary,
                         palette.text,
-                        "Close preview (Esc)",
+                        &crate::i18n::gettext(app.locale, "Close preview (Esc)"),
                     )
                     .clicked()
                     {
@@ -73,7 +73,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                         18.0,
                         palette.secondary,
                         palette.text,
-                        "Open in another app",
+                        &crate::i18n::gettext(app.locale, "Open in another app"),
                     )
                     .clicked()
                     {

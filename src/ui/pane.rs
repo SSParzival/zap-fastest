@@ -239,9 +239,18 @@ fn search(app: &mut App, ui: &mut egui::Ui, overlay: bool) {
         .id_salt("chat-search-hits")
         .auto_shrink([false, false])
         .show(ui, |ui| {
+            super::accessibility::list(ui, "Message search results", hits.len());
             for (index, hit) in hits.iter().enumerate() {
                 let selected = app.chat_search_selected == Some(index);
-                if hit_row(app, ui, hit, &query, selected, scroll_to == Some(index)) {
+                if hit_row(
+                    app,
+                    ui,
+                    hit,
+                    &query,
+                    selected,
+                    scroll_to == Some(index),
+                    (index, hits.len()),
+                ) {
                     app.chat_search_selected = Some(index);
                     picked = true;
                 }
@@ -286,6 +295,13 @@ fn search(app: &mut App, ui: &mut egui::Ui, overlay: bool) {
 fn keyboard(app: &mut App, ui: &egui::Ui) -> (Option<usize>, bool) {
     let focused = ui.memory(|memory| memory.has_focus(field_id()));
     if !focused || app.chat_search_calendar {
+        if !app.chat_search_calendar && ui.is_enabled() && !egui::Popup::is_any_open(ui.ctx()) {
+            let ids: Vec<_> = app.chat_search_hits.iter().map(search_result_id).collect();
+            if let Some(index) = super::accessibility::navigate(ui.ctx(), &ids) {
+                app.chat_search_selected = Some(index);
+                return (Some(index), false);
+            }
+        }
         return (None, false);
     }
     // Taken before the field sees them: a single-line field would give up
@@ -549,10 +565,11 @@ fn hit_row(
     query: &str,
     selected: bool,
     scroll_to: bool,
+    position: (usize, usize),
 ) -> bool {
     let palette = app.palette;
-    let (rect, response) =
-        ui.allocate_exact_size(vec2(ui.available_width(), ROW_HEIGHT), Sense::click());
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_HEIGHT), Sense::hover());
+    let response = ui.interact(rect, search_result_id(hit), Sense::click());
     if scroll_to {
         response.scroll_to_me(None);
     }
@@ -586,6 +603,7 @@ fn hit_row(
         };
         egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, text)
     });
+    super::accessibility::item(&response, position.0, position.1);
     if ui.is_rect_visible(rect) {
         // Highlighted like a chat-list row; the cards keep hits apart, so
         // no rule runs between them.
@@ -639,6 +657,10 @@ fn hit_row(
         return true;
     }
     false
+}
+
+fn search_result_id(message: &Message) -> egui::Id {
+    egui::Id::new(("chat-search-result", &message.chat, &message.id))
 }
 
 /// The part of `line` a one-line preview shows, and where `query` sits in

@@ -9,6 +9,8 @@ pub enum Stop {
     Send,
     Attach,
     Emoji,
+    RecordCancel,
+    RecordSend,
     PhoneLink(u32),
     /// The chat header's Search, then the search pane's controls in reading
     /// order. The arrows walk its results from the field.
@@ -29,6 +31,7 @@ pub enum Stop {
     Favorites,
     Groups,
     Channels,
+    Statuses,
     Archived,
     Locked,
     /// One chip in the label row, by its position among the labels.
@@ -61,6 +64,8 @@ struct SectionMove {
 #[derive(Clone, Default)]
 struct Order {
     frame: Option<u64>,
+    toolbar_frame: Option<u64>,
+    toolbar_target: Option<Id>,
     controls: Vec<(Stop, Id)>,
     movement: Option<Move>,
     sections: Vec<(Section, Id)>,
@@ -81,7 +86,12 @@ pub(crate) fn section(response: &Response, section: Section) {
 fn stop_section(stop: Stop) -> Section {
     match stop {
         Stop::NotificationOpen(_) | Stop::NotificationDismiss(_) => Section::Notifications,
-        Stop::Composer | Stop::Send | Stop::Attach | Stop::Emoji => Section::Composer,
+        Stop::Composer
+        | Stop::Send
+        | Stop::Attach
+        | Stop::Emoji
+        | Stop::RecordCancel
+        | Stop::RecordSend => Section::Composer,
         Stop::PhoneLink(_)
         | Stop::ChatSearch
         | Stop::ChatSearchClose
@@ -124,7 +134,7 @@ impl TabStop for Response {
     fn tab_stop(self, stop: Stop) -> Self {
         if matches!(
             stop,
-            Stop::Composer | Stop::Search | Stop::NotificationOpen(_)
+            Stop::Composer | Stop::RecordCancel | Stop::Search | Stop::NotificationOpen(_)
         ) {
             section(&self, stop_section(stop));
         }
@@ -174,6 +184,69 @@ pub(crate) fn control(ctx: &Context, stop: Stop) -> Option<Id> {
 /// Intercept Tab before any widgets are registered. Merely consuming the key
 /// is insufficient: egui already chose a focus direction during begin_pass.
 pub fn begin(ctx: &Context, active: bool) {
+    let frame = ctx.cumulative_frame_nr();
+    let toolbar_replay = ctx.data(|data| {
+        data.get_temp::<Order>(order_id())
+            .and_then(|order| (order.toolbar_frame == Some(frame)).then_some(order.toolbar_target))
+    });
+    if let Some(target) = toolbar_replay {
+        if active && let Some(target) = target {
+            ctx.memory_mut(|memory| {
+                memory.move_focus(FocusDirection::None);
+                memory.request_focus(target);
+            });
+        }
+    } else {
+        let mut toolbar_target = None;
+        if active && !ctx.text_edit_focused() {
+            let focused = ctx.memory(|memory| memory.focused());
+            let controls = ctx
+                .data(|data| {
+                    data.get_temp::<Order>(order_id())
+                        .map(|order| order.controls)
+                })
+                .unwrap_or_default();
+            if let Some((stop, _)) = controls.iter().find(|(_, id)| Some(*id) == focused)
+                && let Some(group) = toolbar_group(*stop)
+            {
+                let step = ctx.input_mut(|input| {
+                    if super::keys::take_plain(input, egui::Key::ArrowRight) {
+                        1
+                    } else if super::keys::take_plain(input, egui::Key::ArrowLeft) {
+                        -1
+                    } else {
+                        0
+                    }
+                });
+                let group_controls: Vec<_> = controls
+                    .iter()
+                    .copied()
+                    .filter(|(stop, _)| toolbar_group(*stop) == Some(group))
+                    .collect();
+                if step != 0
+                    && let Some(target) = next(
+                        &group_controls,
+                        Move {
+                            from: Some(*stop),
+                            steps: step,
+                        },
+                    )
+                {
+                    toolbar_target = Some(target);
+                    ctx.data_mut(|data| data.insert_temp(crate::theme::keyboard_focus_id(), true));
+                    ctx.memory_mut(|memory| {
+                        memory.move_focus(FocusDirection::None);
+                        memory.request_focus(target);
+                    });
+                }
+            }
+        }
+        ctx.data_mut(|data| {
+            let order = data.get_temp_mut_or_default::<Order>(order_id());
+            order.toolbar_frame = Some(frame);
+            order.toolbar_target = toolbar_target;
+        });
+    }
     let mut pressed = false;
     let mut steps = 0;
     let mut section_steps = 0;
@@ -238,9 +311,9 @@ pub fn begin(ctx: &Context, active: bool) {
         let target = active
             .then(|| {
                 next_section(order).or_else(|| {
-                    order
-                        .movement
-                        .and_then(|movement| next(&order.controls, movement))
+                    order.movement.and_then(|movement| {
+                        next(&tab_controls(&order.controls, movement.from), movement)
+                    })
                 })
             })
             .flatten();
@@ -267,7 +340,7 @@ pub fn finish(ctx: &Context, active: bool) {
         next_section(order).or_else(|| {
             order
                 .movement
-                .and_then(|movement| next(&order.controls, movement))
+                .and_then(|movement| next(&tab_controls(&order.controls, movement.from), movement))
         })
     });
     if active
@@ -304,6 +377,49 @@ fn next(controls: &[(Stop, Id)], movement: Move) -> Option<Id> {
     Some(controls[index.rem_euclid(controls.len() as i32) as usize].1)
 }
 
+fn toolbar_group(stop: Stop) -> Option<u8> {
+    match stop {
+        Stop::Send | Stop::Attach | Stop::Emoji | Stop::RecordCancel | Stop::RecordSend => Some(0),
+        Stop::Back | Stop::Profile | Stop::ChatSearch => Some(1),
+        Stop::Sidebar | Stop::NewChat | Stop::Settings => Some(2),
+        Stop::All
+        | Stop::Unread
+        | Stop::Private
+        | Stop::Favorites
+        | Stop::Groups
+        | Stop::Channels
+        | Stop::Statuses
+        | Stop::Archived
+        | Stop::Locked
+        | Stop::Label(_)
+        | Stop::ManageLabels => Some(3),
+        Stop::PhoneLink(_) => Some(4),
+        _ => None,
+    }
+}
+
+fn tab_controls(controls: &[(Stop, Id)], from: Option<Stop>) -> Vec<(Stop, Id)> {
+    let mut result = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for &(stop, id) in controls {
+        if let Some(group) = toolbar_group(stop) {
+            if !seen.insert(group) {
+                continue;
+            }
+            let current = from.and_then(|from| {
+                controls
+                    .iter()
+                    .copied()
+                    .find(|(stop, _)| *stop == from && toolbar_group(*stop) == Some(group))
+            });
+            result.push(current.unwrap_or((stop, id)));
+        } else {
+            result.push((stop, id));
+        }
+    }
+    result
+}
+
 #[cfg(test)]
 pub fn stops(ctx: &Context) -> Vec<(Stop, Id)> {
     ctx.data(|data| {
@@ -316,6 +432,35 @@ pub fn stops(ctx: &Context) -> Vec<(Stop, Id)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn toolbars_have_one_tab_stop_and_keep_the_roved_control() {
+        let controls = [
+            Stop::Composer,
+            Stop::Send,
+            Stop::Attach,
+            Stop::Emoji,
+            Stop::Search,
+            Stop::All,
+            Stop::Unread,
+        ]
+        .map(|stop| (stop, Id::new(format!("toolbar-{stop:?}"))));
+        let tabs = tab_controls(&controls, Some(Stop::Emoji));
+        assert_eq!(
+            tabs.iter().map(|(stop, _)| *stop).collect::<Vec<_>>(),
+            [Stop::Composer, Stop::Emoji, Stop::Search, Stop::All]
+        );
+        assert_eq!(
+            next(
+                &tabs,
+                Move {
+                    from: Some(Stop::Emoji),
+                    steps: 1
+                }
+            ),
+            Some(controls[4].1)
+        );
+    }
 
     #[test]
     fn f6_cycles_real_sections_in_both_directions_without_advancing_on_relayout() {
@@ -399,6 +544,50 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn a_relayout_does_not_advance_toolbar_arrows_twice() {
+        let ctx = Context::default();
+        let draw = |ui: &mut egui::Ui| {
+            begin(ui.ctx(), true);
+            for stop in [Stop::Send, Stop::Attach, Stop::Emoji] {
+                ui.button(format!("{stop:?}")).tab_stop(stop);
+            }
+            finish(ui.ctx(), true);
+        };
+        let mut output = ctx.run_ui(egui::RawInput::default(), draw);
+        output.textures_delta.clear();
+        let controls = stops(&ctx);
+        for (key, source, target) in [(egui::Key::ArrowRight, 0, 1), (egui::Key::ArrowLeft, 2, 1)] {
+            ctx.memory_mut(|memory| memory.request_focus(controls[source].1));
+            let mut passes = 0;
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    events: vec![egui::Event::Key {
+                        key,
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers: egui::Modifiers::NONE,
+                    }],
+                    ..Default::default()
+                },
+                |ui| {
+                    draw(ui);
+                    passes += 1;
+                    if passes == 1 {
+                        ui.ctx().request_discard("toolbar arrow fixture relayout");
+                    }
+                },
+            );
+            output.textures_delta.clear();
+            assert_eq!(passes, 2);
+            assert_eq!(
+                ctx.memory(|memory| memory.focused()),
+                Some(controls[target].1)
+            );
+        }
     }
 
     #[test]

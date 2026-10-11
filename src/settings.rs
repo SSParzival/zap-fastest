@@ -506,6 +506,8 @@ pub struct Settings {
     pub custom_font: Option<std::path::PathBuf>,
     /// Renderer applied before any emoji are used at startup.
     pub emoji_renderer: EmojiRenderer,
+    /// Process-owned colour bitmap emoji font, applied on the next start.
+    pub custom_emoji_font: Option<std::path::PathBuf>,
     /// Interface language. `None` follows the operating system's locale.
     pub interface_language: Option<crate::i18n::Locale>,
     /// Filename of the selected local JSON palette.
@@ -656,6 +658,7 @@ impl Default for Settings {
             font: FontChoice::System,
             custom_font: None,
             emoji_renderer: EmojiRenderer::System,
+            custom_emoji_font: None,
             interface_language: None,
             custom_theme: None,
             custom_theme_cache: None,
@@ -919,6 +922,21 @@ pub enum SyncMode {
     Full,
 }
 
+/// Automatic copies into the user folder; private archive recovery has its own policy.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AutomaticExportPolicy {
+    pub enabled: bool,
+    pub since: Option<i64>,
+    pub include_older: bool,
+    pub original_names: bool,
+}
+
+impl AutomaticExportPolicy {
+    pub fn includes(self, timestamp: i64) -> bool {
+        self.enabled && (self.include_older || self.since.is_some_and(|since| timestamp >= since))
+    }
+}
+
 /// Preferences that belong to one WhatsApp account.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -929,6 +947,8 @@ pub struct AccountSettings {
     pub archive_only: bool,
     pub call_microphone: Option<String>,
     pub call_speaker: Option<String>,
+    /// Native camera identity, used only after an explicit video action.
+    pub call_camera: Option<String>,
     /// None means a new, unpaired account still needs its setup choice.
     pub sync_mode: Option<SyncMode>,
     /// Fetch attachments into the managed account archive without opening chats.
@@ -936,6 +956,8 @@ pub struct AccountSettings {
     /// Background archival downloads pause at this size, without deleting files.
     /// Zero means unlimited. Applies only to the account's managed media folder.
     pub background_media_budget_mib: u32,
+    /// Explicit age policy for unreferenced managed cache files only. None keeps all files.
+    pub cache_retention_days: Option<u32>,
     /// Maximum automatic full-history requests per UTC day; saved across restarts.
     pub history_requests_per_day: u32,
     /// Recover a bounded amount of phone history without opening each chat.
@@ -944,6 +966,11 @@ pub struct AccountSettings {
     pub send_typing: bool,
     #[serde(alias = "auto_download_images")]
     pub auto_download: bool,
+    /// Automatic user-folder copies start here; None establishes a cutoff on first resume.
+    pub automatic_download_since: Option<i64>,
+    /// Historical archival recovery remains independent of automatic user-folder copies.
+    pub download_older_files: bool,
+    pub preserve_original_download_names: bool,
     pub last_chat: Option<String>,
     pub notifications: bool,
     /// Local notification cards in the visible window, off unless requested.
@@ -975,13 +1002,18 @@ impl Default for AccountSettings {
             archive_only: false,
             call_microphone: None,
             call_speaker: None,
+            call_camera: None,
             archive_media: false,
             background_media_budget_mib: 20 * 1024,
+            cache_retention_days: None,
             history_requests_per_day: 1000,
             background_history: false,
             send_read_receipts: true,
             send_typing: true,
             auto_download: true,
+            automatic_download_since: None,
+            download_older_files: false,
+            preserve_original_download_names: false,
             last_chat: None,
             notifications: true,
             in_app_notifications: false,
@@ -1002,6 +1034,15 @@ impl Default for AccountSettings {
 }
 
 impl AccountSettings {
+    pub fn automatic_export_policy(&self) -> AutomaticExportPolicy {
+        AutomaticExportPolicy {
+            enabled: self.auto_download,
+            since: self.automatic_download_since,
+            include_older: self.download_older_files,
+            original_names: self.preserve_original_download_names,
+        }
+    }
+
     pub fn from_legacy(settings: &Settings) -> Self {
         Self {
             cli_access: false,
@@ -1009,13 +1050,18 @@ impl AccountSettings {
             archive_only: false,
             call_microphone: None,
             call_speaker: None,
+            call_camera: None,
             archive_media: false,
             background_media_budget_mib: 20 * 1024,
+            cache_retention_days: None,
             history_requests_per_day: 1000,
             background_history: false,
             send_read_receipts: settings.send_read_receipts,
             send_typing: settings.send_typing,
             auto_download: settings.auto_download,
+            automatic_download_since: None,
+            download_older_files: false,
+            preserve_original_download_names: false,
             last_chat: settings.last_chat.clone(),
             notifications: settings.notifications,
             in_app_notifications: false,
@@ -1058,6 +1104,28 @@ impl AccountSettings {
 #[cfg(test)]
 mod list_preference_tests {
     use super::*;
+
+    #[test]
+    fn automatic_export_cutoff_and_historical_opt_in_survive_settings_round_trip() {
+        let old: AccountSettings = serde_json::from_str(r#"{"auto_download":true}"#).unwrap();
+        assert_eq!(old.automatic_download_since, None);
+        assert!(!old.download_older_files);
+        assert!(!old.automatic_export_policy().includes(100));
+        let settings = AccountSettings {
+            automatic_download_since: Some(100),
+            preserve_original_download_names: true,
+            ..Default::default()
+        };
+        let mut restored: AccountSettings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert_eq!(restored, settings);
+        assert!(!restored.automatic_export_policy().includes(99));
+        assert!(restored.automatic_export_policy().includes(100));
+        restored.download_older_files = true;
+        assert!(restored.automatic_export_policy().includes(99));
+        restored.auto_download = false;
+        assert!(!restored.automatic_export_policy().includes(100));
+    }
 
     #[test]
     fn old_and_unknown_filter_preferences_preserve_other_account_settings() {
@@ -1178,12 +1246,28 @@ mod tests {
     fn emoji_renderer_defaults_to_system_and_persists_noto() {
         let older: Settings = serde_json::from_str(r#"{}"#).expect("old settings load");
         assert_eq!(older.emoji_renderer, EmojiRenderer::System);
+        assert!(older.custom_emoji_font.is_none());
 
         let chosen: Settings =
             serde_json::from_str(r#"{"emoji_renderer":"noto"}"#).expect("choice loads");
         assert_eq!(chosen.emoji_renderer, EmojiRenderer::Noto);
         let saved = serde_json::to_value(&chosen).expect("choice serializes");
         assert_eq!(saved["emoji_renderer"], "noto");
+    }
+
+    #[test]
+    fn custom_emoji_font_round_trips_without_changing_builtin_renderer() {
+        let settings: Settings = serde_json::from_str(
+            r#"{"emoji_renderer":"noto","custom_emoji_font":"/fixture/emoji.ttf"}"#,
+        )
+        .unwrap();
+        assert_eq!(settings.emoji_renderer, EmojiRenderer::Noto);
+        assert_eq!(
+            settings.custom_emoji_font.as_deref(),
+            Some(std::path::Path::new("/fixture/emoji.ttf"))
+        );
+        let saved = serde_json::to_value(settings).unwrap();
+        assert_eq!(saved["custom_emoji_font"], "/fixture/emoji.ttf");
     }
 
     /// Settings written before the font could be chosen draw with the
@@ -1718,5 +1802,23 @@ mod automation_settings_tests {
                 .unwrap()
                 .cli_access
         );
+    }
+
+    #[test]
+    fn camera_and_cache_policy_are_account_local_and_legacy_defaults_preserve_files() {
+        let old: AccountSettings = serde_json::from_str("{}").unwrap();
+        assert!(old.call_camera.is_none());
+        assert!(old.cache_retention_days.is_none());
+        let first = AccountSettings {
+            call_camera: Some("synthetic-camera-identity".into()),
+            cache_retention_days: Some(30),
+            ..Default::default()
+        };
+        let restored: AccountSettings =
+            serde_json::from_str(&serde_json::to_string(&first).unwrap()).unwrap();
+        assert_eq!(restored.call_camera, first.call_camera);
+        assert_eq!(restored.cache_retention_days, Some(30));
+        assert!(AccountSettings::default().call_camera.is_none());
+        assert!(AccountSettings::default().cache_retention_days.is_none());
     }
 }

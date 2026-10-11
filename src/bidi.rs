@@ -114,7 +114,8 @@ pub fn base_rtl(text: &str) -> bool {
 
 /// Whether the first strong character, in any paragraph, is right to left.
 ///
-/// This picks the side a multi-line message is aligned to.
+/// This picks the side of the message's ancillary controls. Each paragraph's
+/// text alignment is resolved independently in `reorder_rtl_runs`.
 pub fn message_rtl(text: &str) -> bool {
     unicode_bidi::get_base_direction_full(text) == unicode_bidi::Direction::Rtl
 }
@@ -129,7 +130,15 @@ pub fn reorder_rtl_runs(galley: &mut Galley) {
     if galley
         .rows
         .iter()
-        .all(|placed| placed.row.glyphs.is_empty() || already_visual(&placed.row.glyphs))
+        .any(|placed| already_visual(&placed.row.glyphs))
+        && galley.rows.iter().all(|placed| {
+            already_visual(&placed.row.glyphs)
+                || !placed
+                    .row
+                    .glyphs
+                    .iter()
+                    .any(|glyph| is_strong_rtl(glyph.chr))
+        })
     {
         return;
     }
@@ -152,9 +161,7 @@ pub fn reorder_rtl_runs(galley: &mut Galley) {
         let row = Arc::make_mut(&mut placed.row);
         reorder_row(row, &text, &decorated, &mut paragraph, overflow);
     }
-    if message_rtl(&text) {
-        align_right(galley);
-    }
+    align_paragraphs(galley, &text);
     refresh_bounds(galley);
 }
 
@@ -502,12 +509,10 @@ fn rtl_run_end(glyphs: &[Glyph], start: usize) -> Option<usize> {
     Some(end)
 }
 
-/// Right-aligns every row, including left-to-right paragraphs.
-///
-/// Official WhatsApp aligns a message to the side of its first strong
-/// character while each paragraph keeps its own base direction, so an English
-/// line inside a Hebrew message still reads left to right, flush right.
-fn align_right(galley: &mut Galley) {
+/// Right-aligns RTL paragraphs within the message's shared width. LTR and blank
+/// paragraphs retain their left edge. Wrapped rows inherit the direction of
+/// the entire paragraph, even if a continuation starts with an English word.
+fn align_paragraphs(galley: &mut Galley, text: &str) {
     // Align the ink, not `row.size.x`. Shaping can leave the row box a fraction
     // of a pixel wider than the last glyph, and that slack depends on the font.
     let width = galley
@@ -518,7 +523,14 @@ fn align_right(galley: &mut Galley) {
     if width <= 0.0 {
         return;
     }
+    let mut paragraph = None;
     for placed in &mut galley.rows {
+        let Some((start, end)) = line_span(&placed.row.glyphs, text) else {
+            continue;
+        };
+        if !line_levels(&mut paragraph, text, start, end).1 {
+            continue;
+        }
         let row = Arc::make_mut(&mut placed.row);
         let delta = width - content_right(&row.glyphs);
         if delta > 0.01 {
@@ -796,20 +808,36 @@ fn ink_leans_right(atlas: &egui::ColorImage, glyph: &Glyph) -> bool {
     middle > tips
 }
 
-/// Every row's ink ends at the same right edge.
+/// RTL paragraphs meet the shared right edge; LTR paragraphs start at the left.
 #[cfg(test)]
-pub(crate) fn assert_right_aligned(galley: &Galley) {
-    let edges: Vec<f32> = galley
+pub(crate) fn assert_paragraph_aligned(galley: &Galley) {
+    let widest = galley
         .rows
         .iter()
-        .filter(|placed| !placed.row.glyphs.is_empty())
         .map(|placed| content_right(&placed.row.glyphs))
-        .collect();
-    let widest = edges.iter().copied().fold(0.0_f32, f32::max);
-    for (index, edge) in edges.iter().enumerate() {
+        .fold(0.0_f32, f32::max);
+    for (index, placed) in galley.rows.iter().enumerate() {
+        let Some((start, _)) = line_span(&placed.row.glyphs, galley.text()) else {
+            continue;
+        };
+        let text = galley.text();
+        let paragraph_start = text[..start].rfind('\n').map_or(0, |at| at + 1);
+        let paragraph_end = text[start..].find('\n').map_or(text.len(), |at| start + at);
+        let rtl = base_rtl(&text[paragraph_start..paragraph_end]);
+        let edge = if rtl {
+            content_right(&placed.row.glyphs)
+        } else {
+            placed
+                .row
+                .glyphs
+                .iter()
+                .map(|glyph| glyph.pos.x)
+                .fold(f32::INFINITY, f32::min)
+        };
+        let expected = if rtl { widest } else { 0.0 };
         assert!(
-            (widest - edge).abs() < 1.0,
-            "row {index} ends at {edge}, not the right edge {widest}"
+            (expected - edge).abs() < 1.0,
+            "row {index} (rtl={rtl}) aligns at {edge}, expected {expected}"
         );
     }
 }
@@ -999,6 +1027,147 @@ mod tests {
             right(1),
             right(0)
         );
+    }
+
+    #[test]
+    fn mixed_newline_paragraphs_align_independently() {
+        for text in [
+            "שלום עולם\nHello\n\nمرحبا بالعالم\nhttps://example.com\nקצר",
+            "English starts this message\nשלום\n\nمرحبا\nA short end",
+            "\n\nשלום\nHello\n\nمرحبا\n",
+        ] {
+            let (galley, atlas) = layout_with_atlas(text);
+            assert_eq!(galley.text(), text);
+            assert_rows_follow_uba(&galley, &atlas);
+            assert_paragraph_aligned(&galley);
+            for placed in &galley.rows {
+                assert!(
+                    placed
+                        .row
+                        .glyphs
+                        .windows(2)
+                        .all(|pair| pair[0].cluster <= pair[1].cluster)
+                );
+                if placed.row.glyphs.is_empty() {
+                    assert_eq!(
+                        placed.row.size.x, 0.0,
+                        "blank paragraphs should not gain width"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn wrapped_rows_align_to_their_full_paragraph_direction() {
+        let text = "שלום English words keep wrapping across several narrow lines\nEnglish שלום עולם הכלב הגדול קפץ מעל החתול והמשיך לרוץ\n\nمرحبا https://example.com English words keep wrapping";
+        let ctx = egui::Context::default();
+        let mut galley = layout_raw_width(&ctx, text, 90.0);
+        reorder_rtl_runs(&mut galley);
+        assert!(galley.rows.len() > 6, "fixture must wrap");
+        assert_rows_follow_uba(&galley, &ctx.fonts(|fonts| fonts.image()));
+        assert_paragraph_aligned(&galley);
+        let mut rtl_with_ltr_continuation = false;
+        let mut ltr_with_rtl_continuation = false;
+        for placed in &galley.rows {
+            let Some((start, end)) = line_span(&placed.row.glyphs, text) else {
+                continue;
+            };
+            let paragraph_start = text[..start].rfind('\n').map_or(0, |at| at + 1);
+            let paragraph_end = text[start..].find('\n').map_or(text.len(), |at| start + at);
+            let paragraph_rtl = base_rtl(&text[paragraph_start..paragraph_end]);
+            let row_rtl = base_rtl(&text[start..end]);
+            rtl_with_ltr_continuation |= paragraph_rtl && !row_rtl;
+            ltr_with_rtl_continuation |= !paragraph_rtl && row_rtl;
+        }
+        assert!(
+            rtl_with_ltr_continuation,
+            "fixture needs an LTR continuation of an RTL paragraph"
+        );
+        assert!(
+            ltr_with_rtl_continuation,
+            "fixture needs an RTL continuation of an LTR paragraph"
+        );
+    }
+
+    #[test]
+    fn mixed_paragraph_alignment_preserves_meshes_and_selection_bounds_on_repeat() {
+        assert_repeat_preserves_selection(
+            "שלום *עולם* 🙂\nHello\n\nمرحبا\nhttps://example.com\n~קצר~",
+            150.0,
+        );
+        // LTR-only continuation rows of an RTL paragraph carry no RTL glyph
+        // marker. They must still be recognized as part of a completed galley.
+        assert_repeat_preserves_selection(
+            "שלום English words keep wrapping across several narrow lines 🙂\nHello\n\nمرحبا\nhttps://example.com\n~קצר~",
+            65.0,
+        );
+    }
+
+    fn assert_repeat_preserves_selection(text: &str, width: f32) {
+        let (galley, atlas) = bubble(text, width);
+        assert_rows_follow_uba(&galley, &atlas);
+        assert_paragraph_aligned(&galley);
+        let mut repeated = (*galley).clone();
+        // The selectable message body widens its galley after layout. A later
+        // reorder must preserve that selection viewport as well as every mesh.
+        repeated.rect.max.x += 50.0;
+        let before = repeated.clone();
+        reorder_rtl_runs(&mut repeated);
+        assert_eq!(repeated.rect, before.rect);
+        assert_eq!(repeated.mesh_bounds, before.mesh_bounds);
+        assert_eq!(repeated.text(), before.text());
+        for (after, before) in repeated.rows.iter().zip(&before.rows) {
+            assert_eq!(after.pos, before.pos);
+            assert_eq!(after.row.size, before.row.size);
+            assert_eq!(
+                after.row.visuals.mesh.vertices,
+                before.row.visuals.mesh.vertices
+            );
+            assert_eq!(
+                after.row.visuals.mesh.indices,
+                before.row.visuals.mesh.indices
+            );
+            assert_eq!(
+                after.row.visuals.mesh_bounds,
+                before.row.visuals.mesh_bounds
+            );
+            let glyphs = |row: &egui::epaint::text::Row| {
+                row.glyphs
+                    .iter()
+                    .map(|glyph| {
+                        (
+                            glyph.cluster,
+                            glyph.chr,
+                            glyph.pos,
+                            glyph.rtl,
+                            glyph.first_vertex,
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(glyphs(&after.row), glyphs(&before.row));
+        }
+    }
+
+    #[test]
+    fn a_link_in_a_later_rtl_paragraph_keeps_its_logical_hit_range() {
+        let text = "An English opening with several words\nשלום\nקצר https://example.com\nمرحبا";
+        let galley = layout_fixed(text);
+        let start = text.find("https://example.com").expect("URL");
+        let start_chars = text[..start].chars().count();
+        let end_chars = start_chars + "https://example.com".chars().count();
+        let bounds = char_bounds_by_row(&galley, start_chars, end_chars);
+        assert_eq!(bounds.len(), 1, "unwrapped URL belongs to one row");
+        let hit = galley
+            .cursor_from_pos(bounds[0].1.center().to_vec2())
+            .index
+            .0;
+        assert!(
+            (start_chars..end_chars).contains(&hit),
+            "hit {hit} outside the later URL's logical range {start_chars}..{end_chars}"
+        );
+        assert_paragraph_aligned(&galley);
     }
 
     #[test]
@@ -1305,7 +1474,7 @@ mod tests {
         for galley in galleys.into_inner() {
             assert!(galley.rows.len() > 1, "each sample is a multi-line message");
             assert_rows_follow_uba(&galley, &atlas);
-            assert_right_aligned(&galley);
+            assert_paragraph_aligned(&galley);
         }
     }
 
@@ -1389,6 +1558,10 @@ mod tests {
     }
 
     fn layout_raw(ctx: &egui::Context, text: &str) -> Galley {
+        layout_raw_width(ctx, text, f32::INFINITY)
+    }
+
+    fn layout_raw_width(ctx: &egui::Context, text: &str, width: f32) -> Galley {
         install_fonts(ctx);
         let galley = std::cell::RefCell::new(None);
         let mut output = ctx.run_ui(
@@ -1398,6 +1571,7 @@ mod tests {
             },
             |ui| {
                 let mut job = LayoutJob::default();
+                job.wrap.max_width = width;
                 job.append(
                     text,
                     0.0,

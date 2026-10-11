@@ -5,7 +5,7 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
@@ -1741,11 +1741,13 @@ pub struct Gif {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Dialog {
+    Statuses,
     Shortcuts,
     About,
     ArchiveBackup {
         restore: bool,
     },
+    ConfirmBackupMerge,
     ResumeRestoredAccount(AccountId),
     ConfirmUnlink,
     ConfirmRemoveAccount(AccountId),
@@ -1934,6 +1936,17 @@ pub struct Toast {
     pub message: String,
     pub kind: ToastKind,
     pub created: Instant,
+    pub undo: Option<u64>,
+}
+
+impl Toast {
+    pub fn lifetime(&self) -> Duration {
+        if self.undo.is_some() {
+            crate::undo::GRACE
+        } else {
+            crate::app::INFO_TOAST_LIFETIME
+        }
+    }
 }
 
 /// A scroll request for the open chat's message list, from the keyboard.
@@ -1989,6 +2002,8 @@ pub enum Action {
     SetCallVideo(bool),
     SetCallMicrophone(Option<String>),
     SetCallSpeaker(Option<String>),
+    SetCallCamera(Option<String>),
+    SetCacheRetention(Option<u32>),
     RefreshAudioDevices,
     /// Save the account's history choice before requesting its pairing code.
     ChooseSync(crate::settings::SyncMode),
@@ -2142,6 +2157,8 @@ pub enum Action {
     ToggleVideoSound,
     /// Plays videos at the next of 1x, 1.5x and 2x.
     CycleVideoSpeed,
+    /// Selects a video speed directly, including 1.25x and 1.75x.
+    SetVideoSpeed(f32),
     /// Shows a downloaded video over the whole window, starting it if it is
     /// not the one loaded.
     ExpandVideo {
@@ -2180,6 +2197,7 @@ pub enum Action {
     ZoomImageOut,
     FitImage,
     CloseImagePreview,
+    DownloadStatus(String),
     /// Shows a downloaded sticker with a favorite toggle.
     PreviewSticker(PathBuf),
     CloseStickerPreview,
@@ -2204,6 +2222,7 @@ pub enum Action {
     CopyImage(PathBuf),
     /// Closes the toast at this index. Only errors wait to be dismissed.
     DismissToast(usize),
+    UndoToast(u64),
     /// Starts a reply to a message in the open chat.
     Reply(String),
     /// Opens the group sender's direct chat with this message quoted.
@@ -2435,6 +2454,8 @@ pub enum Action {
     DeleteLabel(String),
     /// Shows or leaves the archived chats.
     ShowArchived(bool),
+    /// Expand or collapse a known community in this account's chat list.
+    ToggleCommunity(ChatId),
     /// Shows or hides the starred messages in the left panel.
     ToggleStarred,
     LoadMoreStarred,
@@ -2479,6 +2500,11 @@ pub enum Action {
     SetCustomFont(PathBuf),
     /// Chooses the emoji source to use after restarting Zap Faster.
     SetEmojiRenderer(crate::settings::EmojiRenderer),
+    PickCustomEmojiFont,
+    SetCustomEmojiFont {
+        path: PathBuf,
+        request: u64,
+    },
     SetInterfaceLanguage(Option<crate::i18n::Locale>),
     SetCustomTheme(String),
     SetWallpaperColor(crate::settings::WallpaperColor),
@@ -2543,6 +2569,9 @@ pub enum Action {
     SetDownloadFolder(Option<PathBuf>),
     ExportArchiveBackup(crate::archive::backup::BackupPassphrase),
     RestoreArchiveBackup(crate::archive::backup::BackupPassphrase),
+    PrepareBackupMerge(crate::archive::backup::BackupPassphrase),
+    ConfirmBackupMerge,
+    CancelBackupMerge,
     ResumeRestoredAccount(AccountId),
     SetDownloadOrganization {
         organization: crate::settings::DownloadOrganization,

@@ -31,6 +31,7 @@ pub struct Account {
     pub call_preparing: bool,
     pub call_devices: crate::calls::DeviceList,
     pub call_records: Vec<crate::archive::CallRecord>,
+    pub statuses: Vec<Message>,
     pub call_log_open: bool,
     pub me: Option<String>,
     pub me_lid: Option<String>,
@@ -98,7 +99,10 @@ pub struct Account {
     pub archive_progress: Option<crate::model::ArchiveRecoveryProgress>,
     pub backup_busy: bool,
     pub backup_status: Option<String>,
+    pub backup_merge_preview: Option<crate::archive::merge::MergePreview>,
     pub show_archived: bool,
+    /// Expansion belongs to this account; it never changes phone membership.
+    pub collapsed_communities: HashSet<ChatId>,
     /// Starred messages, newest star first, and whether the left panel lists
     /// them instead of the chats.
     pub starred: Vec<crate::archive::Starred>,
@@ -129,6 +133,7 @@ pub struct Account {
     pub group_saving: HashSet<ChatId>,
     pub(crate) reported_online: Option<bool>,
     pub(crate) reported_history: Option<(bool, bool, bool, u32, u32, Option<crate::model::ChatId>)>,
+    pub(crate) reported_exports: Option<crate::settings::AutomaticExportPolicy>,
     /// Chats this account may pin; WhatsApp Plus raises it once known.
     pub pin_limit: usize,
 }
@@ -154,6 +159,12 @@ impl Account {
         backend.send(crate::backend::Command::SetCallSpeaker(
             settings.call_speaker.clone(),
         ));
+        backend.send(crate::backend::Command::SetCallCamera(
+            settings.call_camera.clone(),
+        ));
+        backend.send(crate::backend::Command::SetCacheRetention(
+            settings.cache_retention_days,
+        ));
         Self {
             id,
             dirs,
@@ -167,6 +178,7 @@ impl Account {
             call_preparing: false,
             call_devices: Default::default(),
             call_records: Vec::new(),
+            statuses: Vec::new(),
             call_log_open: false,
             me: None,
             me_lid: None,
@@ -225,7 +237,9 @@ impl Account {
             archive_progress: None,
             backup_busy: false,
             backup_status: None,
+            backup_merge_preview: None,
             show_archived: false,
+            collapsed_communities: HashSet::new(),
             starred: Vec::new(),
             show_starred: false,
             starred_more: false,
@@ -246,6 +260,7 @@ impl Account {
             group_saving: HashSet::new(),
             reported_online: None,
             reported_history: None,
+            reported_exports: None,
             pin_limit: crate::backend::PINNED_CHATS,
         }
     }

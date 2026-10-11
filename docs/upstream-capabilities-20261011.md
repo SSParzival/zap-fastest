@@ -10,13 +10,20 @@ statements about whether a currently supported API can unblock the backlog.
 
 | Repository/ref | Revision | Relationship to tested input |
 | --- | --- | --- |
-| oxidezap/whatsapp-rust HEAD and main | `94c53e833805c58c9f5966b08d08c990650a651e` | Same as Cargo.toml |
+| oxidezap/whatsapp-rust HEAD | `6b29f52b8f3f0c1b7c7614b99ab3a86cb2a5554d` | One commit ahead of the retained Cargo.toml pin `94c53e8` |
 | crmne/egui apps-0.36 | `ba6790fe7cf46e58e8d27ce1524cbfdee745e938` | Same as Cargo.toml |
 | crmne/winit apps-0.30 | `ed7caa9023f10b397f5b6ec8284a840cbd8a6f65` | Same as Cargo.toml |
 | crmne/fastframe HEAD | `bb79dbddef01e660f9cfc37ccd9dff1c299a8d47` | Latest source inspected separately; application remains on v0.4.1 |
 | crmne/fastframe v0.4.1 tag object | `a1fe11d036c0b491c6665ad99a308c404ffd9a06` | Cargo checkout resolves to `23d87e0` |
 
 ## Required capabilities
+
+Fresh continuation read-back finds exactly one additional official protocol
+commit: [share immutable signing keys independently](https://github.com/oxidezap/whatsapp-rust/commit/6b29f52b8f3f0c1b7c7614b99ab3a86cb2a5554d).
+The compare API lists only `wacore/libsignal/src/protocol/sender_keys.rs` as
+changed. It does not change any of the capability APIs assessed below. The
+egui/winit/fastframe refs remain unchanged. No dependency upgrade or build was
+performed for this read-only reassessment.
 
 | Backlog | Current evidence | What unblocks implementation |
 | --- | --- | --- |

@@ -308,12 +308,15 @@ impl Worker {
         }
     }
 
-    pub(super) fn begin_call_device_discovery(&self) {
+    pub(super) fn begin_call_device_discovery(&mut self) {
+        self.call_device_discovery.cancel();
+        let generation = self.call_device_discovery.generation;
         let commands = self.commands.clone();
-        tokio::spawn(async move {
-            let devices = discover_devices().await;
+        self.call_device_discovery.task = Some(tokio::spawn(async move {
+            let mut devices = discover_devices().await;
+            devices.camera_discovery_generation = Some(generation);
             let _ = commands.send(Command::CallDevicesDiscovered(devices));
-        });
+        }));
     }
 
     pub(super) fn load_call_log(&mut self) {
@@ -331,17 +334,30 @@ impl Worker {
     // Command entry points
     // -----------------------------------------------------------------------
 
-    /// Hands the call screen the microphones and speakers it can offer, and keeps them: they are
-    /// how a device that goes away is named by the description the user saw.
-    pub(super) async fn emit_call_devices(&mut self) -> calls::DeviceList {
-        let devices = discover_devices().await;
-        self.publish_call_devices(devices.clone());
-        devices
+    fn begin_call_audio_device_discovery(&self) {
+        let commands = self.commands.clone();
+        tokio::spawn(async move {
+            let devices = discover_audio_devices().await;
+            let _ = commands.send(Command::CallDevicesDiscovered(devices));
+        });
     }
 
     /// Stores and publishes a device list, so the pickers and the fallback naming share one
     /// snapshot of the machine.
-    pub(super) fn publish_call_devices(&mut self, devices: calls::DeviceList) {
+    pub(super) fn publish_call_devices(&mut self, mut devices: calls::DeviceList) {
+        if devices
+            .camera_discovery_generation
+            .is_some_and(|generation| generation != self.call_device_discovery.generation)
+        {
+            return;
+        }
+        // Request provenance is only for accepting the result, not replaying the cached snapshot.
+        devices.camera_discovery_generation = None;
+        if !devices.cameras_discovered {
+            devices.cameras = self.call_devices.cameras.clone();
+            devices.camera_error = self.call_devices.camera_error.clone();
+            devices.cameras_discovered = self.call_devices.cameras_discovered;
+        }
         self.call_devices = devices.clone();
         self.emit(Event::CallDevices(Box::new(devices)));
     }
@@ -443,6 +459,7 @@ impl Worker {
         // switched off since the last call falls back to the system default and says so, instead of
         // opening a stream that can never deliver a frame.
         let wanted = self.call_defaults.clone();
+        let camera = self.call_camera.clone();
         self.call_preparing_signals.clear();
         let commands = self.commands.clone();
         self.call_prepare_generation = self.call_prepare_generation.wrapping_add(1);
@@ -452,7 +469,7 @@ impl Worker {
             generation,
             tokio::spawn(async move {
                 let result = tokio::time::timeout(Duration::from_secs(45), async {
-                    let devices = discover_devices().await;
+                    let devices = discover_audio_devices().await;
                     let resolved =
                         calls::resolve_devices(&devices, wanted.microphone, wanted.speaker);
                     let _ = commands.send(Command::CallDevicesDiscovered(devices));
@@ -462,12 +479,11 @@ impl Worker {
                         resolved.microphone,
                         resolved.speaker,
                         with_video,
+                        camera,
                     )
                     .await
-                    .map_err(|_| {
-                        "The call could not be started. Check your connection and audio devices."
-                            .to_owned()
-                    })?;
+                    .map_err(|error| call_preparation_error(error,
+                        "The call could not be started. Check your connection and audio devices."))?;
                     call.set_lost_devices(resolved.lost_devices);
                     Ok(Box::new(call))
                 })
@@ -560,6 +576,7 @@ impl Worker {
         let Some(mut call) = runtime.call.prepare_answer() else {
             return;
         };
+        let camera = self.call_camera.clone();
         let commands = self.commands.clone();
         self.call_prepare_generation = self.call_prepare_generation.wrapping_add(1);
         let generation = self.call_prepare_generation;
@@ -568,20 +585,17 @@ impl Worker {
             generation,
             tokio::spawn(async move {
                 let result = tokio::time::timeout(Duration::from_secs(45), async {
-                    let devices = discover_devices().await;
+                    let devices = discover_audio_devices().await;
                     let (microphone, speaker) = call.selections();
                     let resolved = calls::resolve_devices(&devices, microphone, speaker);
                     let _ = commands.send(Command::CallDevicesDiscovered(devices));
-                    if call
-                        .answer_mode(&client, resolved.microphone, resolved.speaker, with_video)
+                    if let Err(error) = call
+                        .answer_mode(&client, resolved.microphone, resolved.speaker, with_video, camera)
                         .await
-                        .is_err()
                     {
                         call.cleanup();
-                        return Err(
-                        "The call could not be answered. Check your connection and audio devices."
-                            .to_owned(),
-                    );
+                        return Err(call_preparation_error(error,
+                            "The call could not be answered. Check your connection and audio devices."));
                     }
                     call.set_lost_devices(resolved.lost_devices);
                     Ok(Box::new(call))
@@ -681,13 +695,14 @@ impl Worker {
         let update = runtime.call.update();
         self.emit_call(update);
         let commands = self.commands.clone();
+        let camera = self.call_camera.clone();
         self.call_video_preparing = Some((
             generation,
             tokio::spawn(async move {
                 let result = tokio::time::timeout(Duration::from_secs(30), async {
-                    let mut video = crate::camera::VideoSession::open().await.map_err(|_| {
-                        "Camera access failed. Check its permissions and availability.".to_owned()
-                    })?;
+                    let mut video = crate::camera::VideoSession::open(camera)
+                        .await
+                        .map_err(|error| error.to_string())?;
                     video.handle = Some(handle.clone());
                     let result = if let Some(request) = request {
                         handle
@@ -872,7 +887,7 @@ impl Worker {
         let call = Call::ringing(chat, Box::new(incoming.clone()), self.call_defaults.clone());
         let update = call.update();
         self.call = Some(CallRuntime::new(call));
-        self.emit_call_devices().await;
+        self.begin_call_device_discovery();
         self.emit_call(update);
     }
 
@@ -945,7 +960,7 @@ impl Worker {
         // Discovery opens every audio device to name it, so it runs on a blocking thread rather
         // than on the worker's async loop: a slow device must not hold up message handling or the
         // call's own events.
-        self.begin_call_device_discovery();
+        self.begin_call_audio_device_discovery();
         let devices = self.call_devices.clone();
         // Read before the fresh list replaces it: a device that just went away is still named in
         // here by the description the user saw.
@@ -996,13 +1011,57 @@ impl Worker {
     }
 }
 
+fn call_preparation_error(error: anyhow::Error, fallback: &'static str) -> String {
+    error
+        .downcast_ref::<calls::CameraSetupError>()
+        .map_or_else(|| fallback.to_owned(), ToString::to_string)
+}
+
+/// Account-owned discovery: refreshing and dropping the worker cancel the native helper future.
+#[derive(Default)]
+pub(super) struct DeviceDiscovery {
+    generation: u64,
+    task: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl DeviceDiscovery {
+    fn cancel(&mut self) {
+        self.generation = self.generation.wrapping_add(1);
+        if let Some(task) = self.task.take() {
+            task.abort();
+        }
+    }
+}
+
+impl Drop for DeviceDiscovery {
+    fn drop(&mut self) {
+        self.cancel();
+    }
+}
+
 /// Device discovery off the worker thread: enumerating opens every audio device to name it, so it
 /// runs on a blocking thread rather than on the async loop, where a slow device would hold up
 /// message handling and the call's own events.
-async fn discover_devices() -> calls::DeviceList {
+async fn discover_audio_devices() -> calls::DeviceList {
     tokio::task::spawn_blocking(calls::devices)
         .await
         .unwrap_or_default()
+}
+
+async fn discover_devices() -> calls::DeviceList {
+    let (audio, cameras) = tokio::join!(
+        tokio::task::spawn_blocking(calls::devices),
+        crate::camera::devices(),
+    );
+    let mut devices = audio.unwrap_or_default();
+    devices.cameras_discovered = true;
+    match cameras {
+        Ok(cameras) => devices.cameras = cameras,
+        Err(_) => {
+            devices.camera_error = Some("Camera discovery failed. Try refreshing devices.".into())
+        }
+    }
+    devices
 }
 
 /// Whether a chat can be called at all.
@@ -1055,6 +1114,100 @@ pub(super) fn message_content(call: &wa::message::CallLogMessage) -> Content {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn call_preparation_keeps_protocol_details_out_of_interface_errors() {
+        assert_eq!(
+            call_preparation_error(
+                anyhow::anyhow!("private protocol diagnostic"),
+                "Could not start the call"
+            ),
+            "Could not start the call"
+        );
+    }
+
+    #[test]
+    fn audio_refresh_preserves_camera_snapshot_and_explicit_empty_camera_refresh_clears_it() {
+        let (mut worker, _events, _commands, _runtime) =
+            super::super::offline_worker("15550000000@s.whatsapp.net");
+        let camera = crate::camera::CameraDevice {
+            id: "invented-device".into(),
+            label: "Invented camera".into(),
+        };
+        worker.publish_call_devices(calls::DeviceList {
+            cameras: vec![camera.clone()],
+            cameras_discovered: true,
+            ..Default::default()
+        });
+        worker.publish_call_devices(calls::DeviceList::default());
+        assert_eq!(worker.call_devices.cameras, vec![camera]);
+        assert!(worker.call_devices.cameras_discovered);
+        worker.publish_call_devices(calls::DeviceList {
+            cameras_discovered: true,
+            ..Default::default()
+        });
+        assert!(worker.call_devices.cameras.is_empty());
+        assert!(worker.call_devices.cameras_discovered);
+    }
+
+    #[test]
+    fn superseded_camera_discovery_cannot_replace_the_latest_device_snapshot() {
+        let (mut worker, _events, _commands, _runtime) =
+            super::super::offline_worker("15550000000@s.whatsapp.net");
+        worker.call_device_discovery.cancel();
+        let old_generation = worker.call_device_discovery.generation;
+        worker.call_device_discovery.cancel();
+        let camera = crate::camera::CameraDevice {
+            id: "latest-device".into(),
+            label: "Latest synthetic camera".into(),
+        };
+        worker.publish_call_devices(calls::DeviceList {
+            cameras: vec![camera.clone()],
+            cameras_discovered: true,
+            camera_discovery_generation: Some(worker.call_device_discovery.generation),
+            ..Default::default()
+        });
+        worker.publish_call_devices(calls::DeviceList {
+            cameras_discovered: true,
+            camera_discovery_generation: Some(old_generation),
+            ..Default::default()
+        });
+        assert_eq!(worker.call_devices.cameras, vec![camera]);
+        assert_eq!(worker.call_devices.camera_discovery_generation, None);
+        // Cached snapshots remain replayable while another refresh is pending.
+        let cached = worker.call_devices.clone();
+        worker.call_device_discovery.cancel();
+        worker.publish_call_devices(cached);
+        assert!(!worker.call_devices.cameras.is_empty());
+    }
+
+    #[tokio::test]
+    async fn dropping_account_discovery_cancels_its_pending_task() {
+        struct Cancelled(Option<tokio::sync::oneshot::Sender<()>>);
+        impl Drop for Cancelled {
+            fn drop(&mut self) {
+                if let Some(sender) = self.0.take() {
+                    let _ = sender.send(());
+                }
+            }
+        }
+        let (started, running) = tokio::sync::oneshot::channel();
+        let (cancelled, stopped) = tokio::sync::oneshot::channel();
+        let discovery = DeviceDiscovery {
+            task: Some(tokio::spawn(async move {
+                let _guard = Cancelled(Some(cancelled));
+                let _ = started.send(());
+                std::future::pending::<()>().await;
+            })),
+            ..Default::default()
+        };
+        running.await.unwrap();
+        drop(discovery);
+        tokio::time::timeout(Duration::from_secs(1), stopped)
+            .await
+            .unwrap()
+            .unwrap();
+    }
 
     #[test]
     fn synced_calls_use_creator_direction_and_start_time_without_live_side_effects() {

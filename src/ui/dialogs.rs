@@ -8,6 +8,11 @@ use crate::theme::{self, Icon};
 
 /// Draws the active dialog and queues its actions for application after the frame.
 pub fn show(app: &mut App, ctx: &egui::Context) {
+    if ctx.data(|data| data.get_temp::<u64>(egui::Id::new("chat-info-docked-frame")))
+        == Some(ctx.cumulative_frame_nr())
+    {
+        return;
+    }
     let Some(dialog) = app.dialog.clone() else {
         return;
     };
@@ -25,7 +30,12 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             ui.set_width(match dialog {
                 Dialog::Shortcuts => shortcuts_width(ui.ctx().content_rect().width()),
                 Dialog::About => 380.0,
-                Dialog::ArchiveBackup { .. } | Dialog::ResumeRestoredAccount(_) => 420.0,
+                Dialog::Statuses => {
+                    400.0_f32.min((ui.ctx().content_rect().width() - 64.0).max(180.0))
+                }
+                Dialog::ArchiveBackup { .. }
+                | Dialog::ResumeRestoredAccount(_)
+                | Dialog::ConfirmBackupMerge => 420.0,
                 Dialog::ConfirmUnlink => 380.0,
                 Dialog::ConfirmRemoveAccount(_) => 380.0,
                 Dialog::ConfirmLeaveGroup(_) => 380.0,
@@ -76,7 +86,9 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 Dialog::Labels => super::labels::manager(app, ui, &palette),
                 Dialog::Shortcuts => shortcuts(app, ui),
                 Dialog::About => about(app, ui),
+                Dialog::Statuses => super::statuses::show(app, ui),
                 Dialog::ArchiveBackup { restore } => super::archive_backup::show(app, ui, restore),
+                Dialog::ConfirmBackupMerge => super::archive_backup::confirm_merge(app, ui),
                 Dialog::ResumeRestoredAccount(id) => resume_restored_account(app, ui, id),
                 Dialog::ConfirmUnlink => confirm_unlink(app, ui),
                 Dialog::ConfirmRemoveAccount(id) => confirm_remove(app, ui, id),
@@ -126,6 +138,46 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             app.actions.push(Action::CloseDialog);
         }
     }
+}
+
+/// Keep the info panel beside a usable conversation. Small windows retain the
+/// existing modal, including its focus containment and gallery back behavior.
+pub(crate) fn uses_side_panel(app: &App, ctx: &egui::Context) -> bool {
+    app.page == crate::model::Page::Chats
+        && ctx.content_rect().width() >= 1040.0_f32.max(app.settings.sidebar_width + 680.0)
+        && matches!(&app.dialog, Some(Dialog::ChatInfo(id)) if app.gallery_accessible(id))
+}
+
+pub(crate) fn side_panel(app: &mut App, ui: &mut egui::Ui) {
+    if !uses_side_panel(app, ui.ctx()) || ui.available_width() < 620.0 {
+        return;
+    }
+    let Some(Dialog::ChatInfo(id)) = app.dialog.clone() else {
+        return;
+    };
+    let palette = app.palette;
+    let frame_number = ui.ctx().cumulative_frame_nr();
+    ui.ctx()
+        .data_mut(|data| data.insert_temp(egui::Id::new("chat-info-docked-frame"), frame_number));
+    let panel = egui::Panel::right("chat-info-side-panel")
+        .resizable(true)
+        .default_size(360.0)
+        .size_range(280.0..=480.0)
+        .frame(
+            Frame::new()
+                .fill(palette.panel)
+                .inner_margin(Margin::same(16)),
+        )
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 8.0;
+            chat_info(app, ui, &id);
+        });
+    ui.ctx().data_mut(|data| {
+        data.insert_temp(
+            egui::Id::new("chat-info-side-panel-bounds"),
+            panel.response.rect,
+        )
+    });
 }
 
 fn reaction_results(app: &mut App, ui: &mut egui::Ui, chat: &str, id: &str) {
@@ -2905,6 +2957,40 @@ pub(super) fn danger_button(ui: &mut egui::Ui, app: &mut App, label: &str) -> bo
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn chat_info_docks_only_when_the_conversation_has_room_and_is_accessible() {
+        let root = std::env::temp_dir().join(format!("zapfast-docked-info-{}", std::process::id()));
+        let (mut app, _) = crate::app::App::headless(
+            crate::paths::AppDirs::under(&root),
+            crate::settings::Settings::default(),
+        );
+        let id = "synthetic-info@s.whatsapp.net".to_owned();
+        app.chats
+            .push(crate::model::Chat::new(id.clone(), "Synthetic info".into()));
+        app.dialog = Some(crate::model::Dialog::ChatInfo(id));
+        let ctx = egui::Context::default();
+        for (width, expected) in [(800.0, false), (1400.0, true)] {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(width, 900.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| {
+                    assert_eq!(super::uses_side_panel(&app, ui.ctx()), expected);
+                },
+            );
+            output.textures_delta.clear();
+        }
+        app.chats[0].locked = true;
+        assert!(!super::uses_side_panel(&app, &ctx));
+        app.chats[0].locked = false;
+        app.page = crate::model::Page::Settings;
+        assert!(!super::uses_side_panel(&app, &ctx));
+    }
+
     #[test]
     fn chinese_delete_body_is_neutral_for_one_or_multiple_selected_messages() {
         for count in [1, 2] {

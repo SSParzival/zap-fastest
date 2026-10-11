@@ -92,7 +92,7 @@ name or description, in the interface language or in English.
 - **Theme**: dark, light, follow the system, or a local JSON palette from the
   themes folder. See [Making a theme]({{ '/themes/' | relative_url }}).
 - **Interface font**: the system typeface or Inter.
-- **Emoji style**: use the platform emoji font (with bundled Noto fallback), or bundled Noto Color Emoji only. Restart Zap Faster after changing this setting. The choice affects rendering on this computer and does not change the emoji sent in messages.
+- **Emoji style**: use the platform emoji font (with bundled Noto fallback), bundled Noto Color Emoji only, or import a local colour bitmap emoji font you are allowed to use. Custom fonts must use CBDT or sbix bitmaps and be at most 256 MiB; only the first face of a collection is used. COLR/SVG-only fonts and folders of emoji images are unsupported. Custom fonts have no Noto fallback for missing emoji. Zap Faster keeps its own copy under `emoji-fonts` in the application state directory; selecting System or Noto removes imported copies. Restart Zap Faster to apply any change. If a custom file cannot load, Settings shows the error and the selected built-in style is used. This changes rendering on this computer, not the emoji sent in messages.
 - **Wallpaper**: WhatsApp's light and dark chat wallpaper colours, with or
   without doodles.
 - **Zoom**: interface scale, also `Ctrl+Plus`, `Ctrl+Minus` and `Ctrl+0`.

@@ -4,6 +4,14 @@ use super::*;
 use crate::archive::MediaJob;
 
 impl Worker {
+    pub(super) fn automatic_export_allowed(&self, chat: &str, id: &str) -> bool {
+        self.archive
+            .message(chat, id)
+            .ok()
+            .flatten()
+            .is_some_and(|message| self.automatic_exports.includes(message.timestamp))
+    }
+
     pub(super) fn managed_export_destination(
         &self,
         job: &MediaJob,
@@ -11,12 +19,10 @@ impl Worker {
         let Some(root) = self.download_folder.as_ref() else {
             return Ok(None);
         };
-        if !self.background_media_enabled
-            || !self.privacy_ready
+        if !self.privacy_ready
             || self.background_history.paused
             || self.logout_cleanup_blocked
-            || (self.download_organization == crate::settings::DownloadOrganization::Flat
-                && !self.descriptive_download_names)
+            || !self.automatic_export_allowed(&job.chat, &job.id)
         {
             return Ok(None);
         }
@@ -108,10 +114,11 @@ impl Worker {
         } else {
             job.id.clone()
         };
-        let destination = download_organization::path(
+        let destination = download_organization::path_with_original_names(
             root,
             self.download_organization,
             self.descriptive_download_names,
+            self.automatic_exports.original_names,
             download_organization::Metadata {
                 account: self.dirs.id.as_str(),
                 chat: &job.chat,
@@ -130,8 +137,8 @@ impl Worker {
     }
 
     async fn pump_managed_exports(&mut self) {
-        if !self.background_media_enabled
-            || !self.privacy_ready
+        if !self.privacy_ready
+            || !self.automatic_exports.enabled
             || self.background_history.paused
             || self.logout_cleanup_blocked
             || !self.status.is_connected()
@@ -348,6 +355,11 @@ impl Worker {
                     .and_then(|media| media.path.as_ref())
             };
             if path.is_some_and(|path| path.is_file()) {
+                if path.is_some_and(|path| path.starts_with(self.dirs.media_cache_dir()))
+                    && let Ok(Some((root, destination))) = self.managed_export_destination(&job)
+                {
+                    let _ = self.archive.queue_managed_export(&job, &root, &destination);
+                }
                 if self
                     .archive
                     .finish_media_job(&job, now, true, false)
@@ -435,6 +447,11 @@ impl Worker {
                             return;
                         }
                     }
+                } else if path.as_ref().is_some_and(|path| path.starts_with(&root))
+                    && let Ok(Some((root, destination))) = self.managed_export_destination(&job)
+                {
+                    // Historical opt-in can copy an already retained file without fetching it again.
+                    let _ = self.archive.queue_managed_export(&job, &root, &destination);
                 }
             }
             if self.archive.advance_completed_media_audit(rowid).is_err() {
@@ -588,6 +605,17 @@ mod tests {
         assert!(worker.managed_export_destination(&job).unwrap().is_none());
         worker.download_folder = Some(PathBuf::from("selected-user-folder"));
         assert!(worker.managed_export_destination(&job).unwrap().is_none());
+        worker.automatic_exports = crate::settings::AutomaticExportPolicy {
+            enabled: true,
+            since: Some(101),
+            ..Default::default()
+        };
+        assert!(worker.managed_export_destination(&job).unwrap().is_none());
+        worker.automatic_exports.include_older = true;
+        assert!(worker.managed_export_destination(&job).unwrap().is_some());
+        worker.automatic_exports.include_older = false;
+        worker.automatic_exports.since = Some(100);
+        assert!(worker.managed_export_destination(&job).unwrap().is_some());
         worker.descriptive_download_names = true;
         let (root, destination) = worker.managed_export_destination(&job).unwrap().unwrap();
         assert!(destination.starts_with(root));
@@ -610,6 +638,11 @@ mod tests {
         let (mut worker, _, _, _) = super::super::offline_worker("me@s.whatsapp.net");
         let chat = "fixture@s.whatsapp.net";
         worker.background_media_enabled = true;
+        worker.automatic_exports = crate::settings::AutomaticExportPolicy {
+            enabled: true,
+            since: Some(0),
+            ..Default::default()
+        };
         worker.privacy_ready = true;
         worker.download_folder = Some(PathBuf::from("selected-user-folder"));
         worker.descriptive_download_names = true;

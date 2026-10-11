@@ -11,6 +11,28 @@ impl Worker {
             return;
         }
         let chat = pending.request.chat().to_owned();
+        let collection = match pending.request.base() {
+            Request::Chats { after, limit, .. } => Some(self.archive.cli_chat_page(after.as_deref(), *limit).map(|rows| {
+                let next = rows.last().map(|row| row.id.clone());
+                let rows:Vec<_> = rows.into_iter().filter(|row| !row.locked && row.disappearing_timer().is_none()).map(|row|serde_json::json!({"id":row.id,"name":row.name,"kind":row.kind,"unread":row.unread,"last_activity":row.last_activity})).collect();
+                serde_json::json!({"chats":rows,"cursor":next}).to_string()
+            })),
+            Request::Contacts { all, after, limit, .. } => Some(self.archive.cli_contact_page(*all,after.as_deref(),*limit).map(|rows| {
+                let next = rows.last().map(|row|row.id.clone());
+                let rows:Vec<_> = rows.into_iter().filter(|row| match self.archive.chat(&self.canonical_str(&row.id)) { Ok(Some(chat)) => !chat.locked && chat.disappearing_timer().is_none(), Ok(None) => true, Err(_) => false }).map(|row|serde_json::json!({"id":row.id,"full_name":row.full_name,"push_name":row.push_name,"address_book":row.full_name.as_ref().is_some_and(|name|!name.is_empty())})).collect();
+                serde_json::json!({"contacts":rows,"cursor":next}).to_string()
+            })),
+            Request::WatchAccount { since, after, limit, .. } => Some(self.archive.cli_watch_account(*since,*after,*limit).map(|(rows,cursor)|serde_json::json!({"messages":self.cli_message_values(rows),"cursor":cursor}).to_string())),
+            Request::Search { text, before, limit, .. } => Some(self.archive.cli_search_page(&chat,text,*before,*limit).map(|(rows,cursor)|serde_json::json!({"messages":self.cli_message_values(rows),"cursor":cursor}).to_string())),
+            _ => None,
+        };
+        if let Some(reply) = collection {
+            self.cli_answer(
+                &pending,
+                reply.unwrap_or_else(|_| error("Could not read archive")),
+            );
+            return;
+        }
         let known = match self.archive.chat(&chat) {
             Ok(Some(known)) => known,
             _ => {
@@ -24,7 +46,18 @@ impl Worker {
             ));
             return;
         }
-        let reply = match &pending.request {
+        let reply = match pending.request.base() {
+            Request::Fragment { .. }
+            | Request::Chats { .. }
+            | Request::Contacts { .. }
+            | Request::Search { .. }
+            | Request::WatchAccount { .. } => unreachable!("collection handled above"),
+            Request::SendFiles {
+                request_id,
+                text,
+                files,
+                ..
+            } => self.cli_send_files(&pending, &chat, request_id, text, files),
             Request::Read { before, limit, .. } => self
                 .archive
                 .messages(
@@ -77,25 +110,172 @@ impl Worker {
                 }
             }
             Request::Status { request_id, .. } => {
-                match self.archive.cli_existing_send(request_id, &chat, None) {
-                    Ok(Some(id)) => self.cli_status(&chat, request_id, &id),
-                    Ok(None) => serde_json::json!({"request_id":request_id,"status":"not_found"})
-                        .to_string(),
-                    Err(_) => error("Request id belongs to another conversation"),
+                if let Ok(Some(ids)) = self.archive.cli_existing_batch(request_id, &chat, None) {
+                    self.cli_batch_status(&chat, request_id, &ids)
+                } else {
+                    match self.archive.cli_existing_send(request_id, &chat, None) {
+                        Ok(Some(id)) => self.cli_status(&chat, request_id, &id),
+                        Ok(None) => {
+                            serde_json::json!({"request_id":request_id,"status":"not_found"})
+                                .to_string()
+                        }
+                        Err(_) => error("Request id belongs to another conversation"),
+                    }
                 }
             }
         };
-        pending.answer(if reply.len() > 12 * 1024 {
-            error("Response too large; use a smaller page")
-        } else {
-            reply
-        });
+        self.cli_answer(&pending, reply);
+    }
+    fn cli_answer(&self, pending: &Pending, reply: String) {
+        pending.answer(reply);
     }
     fn cli_rows(&self, chat: &str, rows: Vec<Message>) -> String {
         let before = rows.first().map(|row| (row.timestamp, row.id.clone()));
-        let rows:Vec<_>=rows.into_iter().filter(|row| !matches!(row.content,Content::PhoneOnly{..}) && self.archive.cli_exportable(chat,&row.id).unwrap_or(false))
-            .map(|row|serde_json::json!({"id":row.id,"timestamp":row.timestamp,"from_me":row.from_me,"text":row.content.full_summary(),"status":row.status})).collect();
+        let _ = chat;
+        let rows = self.cli_message_values(rows);
         serde_json::json!({"messages":rows,"next_before":before}).to_string()
+    }
+    fn cli_message_values(&self, rows: Vec<Message>) -> Vec<serde_json::Value> {
+        rows.into_iter().filter(|row| !matches!(row.content,Content::PhoneOnly{..}) && self.archive.cli_exportable(&row.chat,&row.id).unwrap_or(false)
+            && self.archive.chat(&row.chat).ok().flatten().is_some_and(|chat|!chat.locked && chat.disappearing_timer().is_none()))
+            .map(|row| {
+                let kind = serde_json::to_value(&row.content).ok().and_then(|value|value.get("kind").cloned());
+                let text = match &row.content {
+                    Content::Text { text,.. } | Content::Interactive { text,.. } => text.clone(),
+                    Content::Image { caption,.. } | Content::Video { caption,.. } | Content::Document { caption,.. } => caption.clone().unwrap_or_default(),
+                    _ => row.content.full_summary(),
+                };
+                serde_json::json!({"chat":row.chat,"id":row.id,"sender":row.sender,"sender_name":row.sender_name,"timestamp":row.timestamp,"from_me":row.from_me,"kind":kind,"text":text,"status":row.status})
+            }).collect()
+    }
+    fn cli_batch_status(&self, chat: &str, request: &str, ids: &[String]) -> String {
+        let rows: Vec<_> = ids
+            .iter()
+            .map(|id| {
+                serde_json::from_str::<serde_json::Value>(&self.cli_status(chat, request, id))
+                    .unwrap_or_default()
+            })
+            .collect();
+        serde_json::json!({"request_id":request,"messages":rows}).to_string()
+    }
+    fn cli_send_files(
+        &mut self,
+        pending: &Pending,
+        chat: &str,
+        request: &str,
+        text: &str,
+        files: &[crate::automation::Attachment],
+    ) -> String {
+        use sha2::{Digest, Sha256};
+        let digest = Sha256::digest(serde_json::to_vec(&(text, files)).unwrap_or_default())
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        match self
+            .archive
+            .cli_existing_batch(request, chat, Some(&digest))
+        {
+            Ok(Some(ids)) => return self.cli_batch_status(chat, request, &ids),
+            Err(_) => return error("Request id already belongs to different content"),
+            _ => {}
+        }
+        if self.archive.cli_existing_send(request, chat, None).is_err()
+            || self
+                .archive
+                .cli_existing_send(request, chat, None)
+                .ok()
+                .flatten()
+                .is_some()
+        {
+            return error("Request id already belongs to different content");
+        }
+        if self.archive_only
+            || !self.link_up()
+            || !self.destination_writable(chat)
+            || pending.blocked()
+        {
+            return error("Account offline, locked or conversation read-only");
+        }
+        let Some(client) = self.client.clone() else {
+            return error("Account offline");
+        };
+        let ids: Vec<_> = files
+            .iter()
+            .map(|_| client.generate_message_id().into_string())
+            .collect();
+        if pending.permit.execute(|| {
+            !pending.expired()
+                && self
+                    .archive
+                    .cli_reserve_batch(request, chat, &digest, &ids)
+                    .is_ok()
+        }) != Some(true)
+        {
+            return error("Could not reserve attachment send");
+        }
+        for (index, (file, id)) in files.iter().cloned().zip(ids.iter().cloned()).enumerate() {
+            let client = client.clone();
+            let commands = self.commands.clone();
+            let chat = chat.to_owned();
+            let me = self.me();
+            let dir = self.dirs.media_cache_dir();
+            let caption = (index == 0 && !text.trim().is_empty()).then(|| text.to_owned());
+            let permit = pending.permit.clone();
+            let locked = pending.locked.clone();
+            self.spawn_upload(chat.clone(), async move {
+                let allowed =
+                    || !permit.blocked() && !locked.load(std::sync::atomic::Ordering::SeqCst);
+                if !allowed() {
+                    return;
+                }
+                let outcome = async {
+                    use tokio::io::AsyncReadExt;
+                    let source = tokio::fs::File::open(&file.path).await.map_err(|_| ())?;
+                    let metadata = source.metadata().await.map_err(|_| ())?;
+                    if !metadata.is_file() || metadata.len() != file.size {
+                        return Err(());
+                    }
+                    let mut bytes = Vec::new();
+                    source
+                        .take(crate::automation::FILE_LIMIT + 1)
+                        .read_to_end(&mut bytes)
+                        .await
+                        .map_err(|_| ())?;
+                    let actual = Sha256::digest(&bytes)
+                        .iter()
+                        .map(|byte| format!("{byte:02x}"))
+                        .collect::<String>();
+                    if bytes.len() as u64 != file.size || actual != file.sha256 || !allowed() {
+                        return Err(());
+                    }
+                    // Documents preserve captions for every file type, including audio.
+                    let name = file.path.file_name().and_then(|name| name.to_str());
+                    let prepared =
+                        prepare_media(&client, bytes, "application/octet-stream", name, false)
+                            .await
+                            .map_err(|_| ())?;
+                    if !allowed() {
+                        return Err(());
+                    }
+                    file_outbound(&client, &chat, &me, &dir, prepared, caption, Vec::new())
+                        .await
+                        .map_err(|_| ())
+                }
+                .await;
+                if let Ok((mut row, raw)) = outcome {
+                    row.id = id;
+                    let _ = commands.send(Command::AutomationOutbound {
+                        permit,
+                        locked,
+                        chat,
+                        row: Box::new(row),
+                        raw,
+                        upload: transfers::upload_token(),
+                    });
+                }
+            });
+        }
+        self.cli_batch_status(chat, request, &ids)
     }
     fn cli_status(&self, chat: &str, request: &str, id: &str) -> String {
         let status = self
@@ -112,6 +292,80 @@ impl Worker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn account_collection_pages_filter_private_rows_and_advance_raw_cursors() {
+        let (mut worker, _, _, _) = super::super::offline_worker("fixture@s.whatsapp.net");
+        for (chat, id, text) in [
+            ("1@s.whatsapp.net", "visible", "Synthetic visible"),
+            ("2@s.whatsapp.net", "hidden", "Synthetic secret"),
+        ] {
+            worker
+                .archive
+                .ensure_chat(chat, "Synthetic contact")
+                .unwrap();
+            let mut row = crate::archive::tests::message(chat, id, 10, false);
+            row.content = Content::text(text);
+            worker.archive.insert_message(&row, None).unwrap();
+        }
+        worker.archive.set_locked("2@s.whatsapp.net", true).unwrap();
+        let (pending, received) = request(Request::Chats {
+            account: "1".into(),
+            after: None,
+            limit: 25,
+        });
+        worker.automation(pending);
+        let value: serde_json::Value = serde_json::from_str(&received.recv().unwrap()).unwrap();
+        assert_eq!(value["chats"].as_array().unwrap().len(), 1);
+        assert_eq!(value["cursor"], "2@s.whatsapp.net");
+        let (pending, received) = request(Request::Search {
+            account: "1".into(),
+            chat: String::new(),
+            text: "Synthetic".into(),
+            before: None,
+            limit: 25,
+        });
+        worker.automation(pending);
+        let reply = received.recv().unwrap();
+        assert!(reply.contains("Synthetic visible"));
+        assert!(!reply.contains("Synthetic secret"));
+        let (pending, received) = request(Request::WatchAccount {
+            account: "1".into(),
+            since: 0,
+            after: Some(1),
+            limit: 1,
+        });
+        worker.automation(pending);
+        let value: serde_json::Value = serde_json::from_str(&received.recv().unwrap()).unwrap();
+        assert!(value["messages"].as_array().unwrap().is_empty());
+        assert_eq!(value["cursor"], 2);
+    }
+    #[tokio::test]
+    async fn attachment_outbound_is_refused_after_permit_revocation() {
+        let (mut worker, _, _, _) = super::super::offline_worker("fixture@s.whatsapp.net");
+        let chat = "1@s.whatsapp.net";
+        worker.archive.ensure_chat(chat, "Synthetic").unwrap();
+        let mut row = crate::archive::tests::message(chat, "revoked-file", 10, true);
+        row.sender = worker.me();
+        let permit = std::sync::Arc::new(crate::automation::Permit::allowed());
+        permit.revoke();
+        worker
+            .handle_command(Command::AutomationOutbound {
+                permit,
+                locked: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                chat: chat.into(),
+                row: Box::new(row),
+                raw: Vec::new(),
+                upload: None,
+            })
+            .await;
+        assert!(
+            worker
+                .archive
+                .message(chat, "revoked-file")
+                .unwrap()
+                .is_none()
+        );
+    }
     fn request(request: Request) -> (Pending, std::sync::mpsc::Receiver<String>) {
         let (reply, received) = std::sync::mpsc::channel();
         (

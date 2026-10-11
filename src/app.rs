@@ -427,6 +427,8 @@ pub struct App {
     pub wallpaper_image: crate::wallpaper::CustomImage,
     custom_font_request: u64,
     custom_font_pending: Option<crate::custom_font::PendingPick>,
+    custom_emoji_request: u64,
+    custom_emoji_pending: Option<crate::custom_emoji::PendingPick>,
 
     /// A sent message moves its chat up, so the chat list goes to the top.
     pub scroll_chats_to_top: bool,
@@ -639,6 +641,8 @@ pub struct App {
     /// Chats opened from the Unread list, kept there until the filter changes.
     unread_kept: HashSet<ChatId>,
     pub toasts: Vec<Toast>,
+    pub(crate) undo: crate::undo::Queue,
+    pub(crate) accessibility_announcements: Vec<String>,
     pub actions: Vec<Action>,
     /// Actions queued by a backend event, applied on that account after the frame.
     deferred_account_actions: Vec<(AccountId, Action)>,
@@ -718,6 +722,10 @@ pub struct App {
     notification_opens: std::sync::Arc<std::sync::Mutex<Vec<crate::notify::NotificationTarget>>>,
     notifications: crate::notify::Notifications,
     pub(crate) in_app_notifications: Vec<crate::ui::notification_overlay::Notification>,
+    #[cfg(target_os = "windows")]
+    pub(crate) native_notifications: Option<crate::notify::NativePopups>,
+    #[cfg(target_os = "windows")]
+    native_notifications_tried: bool,
     next_in_app_notification: u64,
     /// Unread count on the taskbar icon, where the desktop reads it. `None`
     /// for demo and test runs, which must not touch the real taskbar.
@@ -1170,6 +1178,8 @@ impl App {
             wallpaper_image: crate::wallpaper::CustomImage::default(),
             custom_font_request: 0,
             custom_font_pending: None,
+            custom_emoji_request: 0,
+            custom_emoji_pending: None,
             scroll_chats_to_top: false,
             composer: String::new(),
             emoticon_undo: None,
@@ -1282,6 +1292,8 @@ impl App {
             label_editing: None,
             unread_kept: HashSet::new(),
             toasts: Vec::new(),
+            undo: Default::default(),
+            accessibility_announcements: Vec::new(),
             actions: Vec::new(),
             deferred_account_actions: Vec::new(),
             events_hidden: false,
@@ -1324,6 +1336,10 @@ impl App {
             notification_opens: Default::default(),
             notifications: Default::default(),
             in_app_notifications: Vec::new(),
+            #[cfg(target_os = "windows")]
+            native_notifications: None,
+            #[cfg(target_os = "windows")]
+            native_notifications_tried: false,
             next_in_app_notification: 0,
             badge: None,
             app_lock,
@@ -1458,6 +1474,7 @@ impl App {
             (self.adding_account && !self.is_linked()).then(|| self.account().id.clone());
         self.park_composer();
         self.clear_account_ui();
+        self.accessibility_announcements.clear();
         self.active = index;
         self.adding_account = false;
         if let Some(abandoned) = abandoned {
@@ -1752,6 +1769,7 @@ impl App {
     /// folders. The last account is only unlinked: the window always shows
     /// one, even if it is waiting to be linked.
     fn remove_account(&mut self, id: AccountId) {
+        self.undo.forget_account(&id);
         let Some(index) = self.accounts.iter().position(|account| account.id == id) else {
             return;
         };
@@ -1911,13 +1929,35 @@ impl App {
                 && self.accounts.iter().any(|known| {
                     known.id.as_str() == account
                         && known.settings.cli_access
-                        && known.chats.iter().any(|known| {
-                            known.id == chat
-                                && !known.locked
-                                && known.disappearing_timer().is_none()
-                        })
+                        && (chat.is_empty()
+                            || known.chats.iter().any(|known| {
+                                known.id == chat
+                                    && !known.locked
+                                    && known.disappearing_timer().is_none()
+                            }))
                 })
         });
+        server.permits.sync_collection_scopes(|id| {
+            (!locked).then_some(())?;
+            let account = self
+                .accounts
+                .iter()
+                .find(|account| account.id.as_str() == id && account.settings.cli_access)?;
+            Some(Self::automation_scope(account))
+        });
+    }
+
+    fn automation_scope(account: &Account) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut chats: Vec<_> = account
+            .chats
+            .iter()
+            .map(|chat| (&chat.id, chat.locked, chat.disappearing_timer()))
+            .collect();
+        chats.sort_unstable_by(|a, b| a.0.cmp(b.0));
+        let mut scope = std::collections::hash_map::DefaultHasher::new();
+        chats.hash(&mut scope);
+        scope.finish()
     }
 
     fn handle_automation(&mut self) {
@@ -1970,13 +2010,20 @@ impl App {
                 ));
                 continue;
             }
-            if matches!(request.request, crate::automation::Request::Send { .. })
+            if request.request.is_send()
                 && (account.settings.archive_only || !matches!(account.link, LinkStatus::Connected))
             {
                 request.answer(crate::automation::error("Account is offline"));
                 continue;
             }
-            if !server.permits.authorize(&request) {
+            let authorized = if request.request.chat().is_empty() {
+                server
+                    .permits
+                    .authorize_collection(&request, Self::automation_scope(account))
+            } else {
+                server.permits.authorize(&request)
+            };
+            if !authorized {
                 request.answer(crate::automation::error(
                     "Request expired or authorization revoked",
                 ));
@@ -2182,7 +2229,7 @@ impl App {
             is_group,
             for_us && identity_visible,
         );
-        if self.account().settings.in_app_notifications && !self.window_hidden {
+        if self.account().settings.in_app_notifications {
             let now = std::time::Instant::now();
             self.in_app_notifications
                 .retain(|notification| notification.expires > now);
@@ -2203,11 +2250,12 @@ impl App {
                 self.in_app_notifications.remove(0);
             }
         }
-        self.notifications.show(
+        self.notifications.show_on(
             title,
             body,
             picture,
             sound,
+            self.account().settings.call_speaker.clone(),
             crate::notify::NotificationTarget {
                 account: self.account().id.clone(),
                 chat: chat_id.to_owned(),
@@ -2231,11 +2279,12 @@ impl App {
         let (title, body) = crate::notify::locked_lines(self.locale);
         let sound = notification_sound(&self.settings, None, is_group, false);
         let waker = self.waker.clone();
-        self.notifications.show(
+        self.notifications.show_on(
             title,
             body,
             None,
             sound,
+            self.account().settings.call_speaker.clone(),
             crate::notify::NotificationTarget {
                 account: self.account().id.clone(),
                 chat: chat_id.to_owned(),
@@ -3374,11 +3423,12 @@ impl App {
                     };
                     let account = self.account().id.clone();
                     let waker = self.waker.clone();
-                    self.notifications.show(
+                    self.notifications.show_on(
                         title,
                         "Incoming voice call".into(),
                         None,
                         crate::settings::NotificationSound::System,
+                        self.account().settings.call_speaker.clone(),
                         crate::notify::NotificationTarget {
                             account,
                             chat,
@@ -3394,8 +3444,22 @@ impl App {
             Event::CallPreparing(preparing) => self.call_preparing = preparing,
             Event::CallDevices(devices) => self.call_devices = *devices,
             Event::CallLog(records) => self.call_records = records,
+            Event::Statuses(rows) => self.statuses = rows,
 
-            Event::Link(status) => self.handle_link(status, live),
+            Event::Link(status) => {
+                if live && status != self.link {
+                    let text = match &status {
+                        LinkStatus::Connected => "Connected to WhatsApp",
+                        LinkStatus::Disconnected { .. } => "WhatsApp connection lost, reconnecting",
+                        LinkStatus::LoggedOut => "WhatsApp device unlinked",
+                        LinkStatus::Failed(_) => "Could not connect to WhatsApp",
+                        LinkStatus::Connecting | LinkStatus::Starting => "Connecting to WhatsApp",
+                        LinkStatus::Unlinked { .. } => "Waiting for device linking",
+                    };
+                    self.announce_accessibility(text);
+                }
+                self.handle_link(status, live);
+            }
             Event::Me {
                 id,
                 lid,
@@ -3638,6 +3702,9 @@ impl App {
                 }
             }
             Event::Incoming { chat, message } => {
+                if live && !message.from_me && self.open_chat.as_deref() == Some(chat.as_str()) {
+                    self.announce_accessibility("New message in the open conversation");
+                }
                 self.maybe_notify(&chat, &message);
                 if self.settings.auto_transcribe_voice
                     && !message.from_me
@@ -3699,6 +3766,16 @@ impl App {
                 sender,
                 composing,
             } => {
+                if live
+                    && composing
+                    && self.open_chat.as_deref() == Some(chat.as_str())
+                    && !self
+                        .typing
+                        .get(&chat)
+                        .is_some_and(|typers| typers.iter().any(|(who, _)| *who == sender))
+                {
+                    self.announce_accessibility("Someone is typing in the open conversation");
+                }
                 let typers = self.typing.entry(chat).or_default();
                 typers.retain(|(who, _)| *who != sender);
                 if composing {
@@ -4045,7 +4122,12 @@ impl App {
                 }
             }
             Event::ChatSoundPicked { chat, path } => {
-                crate::notify::play_sound(crate::settings::NotificationSound::Custom(path.clone()));
+                if live {
+                    crate::notify::play_sound_on(
+                        crate::settings::NotificationSound::Custom(path.clone()),
+                        self.account().settings.call_speaker.clone(),
+                    );
+                }
                 self.actions.push(Action::SetChatSound {
                     chat,
                     sound: Some(crate::settings::NotificationSound::Custom(path)),
@@ -4084,9 +4166,10 @@ impl App {
             }
             Event::NotificationSoundPicked { mention, path } => {
                 if live {
-                    crate::notify::play_sound(crate::settings::NotificationSound::Custom(
-                        path.clone(),
-                    ));
+                    crate::notify::play_sound_on(
+                        crate::settings::NotificationSound::Custom(path.clone()),
+                        self.account().settings.call_speaker.clone(),
+                    );
                     self.actions.push(Action::SetNotificationSound {
                         mention,
                         sound: crate::settings::NotificationSound::Custom(path),
@@ -4168,6 +4251,38 @@ impl App {
             }
             Event::ArchiveProgress(progress) => {
                 self.archive_progress = Some(progress);
+            }
+            Event::BackupMergePreview(result) => {
+                self.backup_busy = false;
+                match result {
+                    Ok(preview) => {
+                        self.backup_merge_preview = preview;
+                        if self.backup_merge_preview.is_some() && !self.events_hidden {
+                            self.actions
+                                .push(Action::ShowDialog(Dialog::ConfirmBackupMerge));
+                        }
+                    }
+                    Err(error) => self.toast_error(error),
+                }
+            }
+            Event::BackupMergeFinished(result) => {
+                self.backup_busy = false;
+                self.backup_merge_preview = None;
+                match result {
+                    Ok(preview) => {
+                        self.backup_status = Some(crate::i18n::gettext(self.locale,
+                            "Backup merged: {added} messages added, {edited} edited snapshots updated, {removed} confirmed deletions applied, {conflicts} alternatives retained for review.")
+                            .replace("{added}",&preview.added.to_string()).replace("{edited}",&preview.edited.to_string())
+                            .replace("{removed}",&preview.removed.to_string()).replace("{conflicts}",&preview.conflicts.to_string()));
+                        self.reload_lists();
+                        if !self.events_hidden
+                            && let Some(chat) = self.open_chat.clone()
+                        {
+                            self.backend.send(Command::LoadChat { chat, before: None });
+                        }
+                    }
+                    Err(error) => self.toast_error(error),
+                }
             }
             Event::ArchiveBackupFinished(result) => {
                 self.backup_busy = false;
@@ -4510,6 +4625,7 @@ impl App {
                 }
             }
             LinkStatus::LoggedOut => {
+                self.statuses.clear();
                 // Account-scoped lookup results are discarded by the worker.
                 // End their UI requests too, so a later account can retry.
                 self.new_contact_request = None;
@@ -5523,10 +5639,18 @@ impl App {
     }
 
     fn open_chat(&mut self, id: ChatId) {
+        if self.open_chat.as_ref() != Some(&id) {
+            self.accessibility_announcements.clear();
+        }
         // Notifications and stale actions must not open a locked chat from
         // outside the authenticated folder.
         if self.chat(&id).is_some_and(|chat| chat.locked) && !self.locked_folder_open() {
             return;
+        }
+        if let Some(crate::model::CommunityRole::Member { parent, .. }) =
+            self.chat(&id).and_then(|chat| chat.community.clone())
+        {
+            self.collapsed_communities.remove(&parent);
         }
         if self.locked_folder && self.chat(&id).is_some_and(|chat| !chat.locked) {
             self.close_locked_folder();
@@ -6039,7 +6163,7 @@ impl App {
         }
         self.typing.retain(|_, typers| !typers.is_empty());
         self.toasts.retain(|toast| {
-            toast.kind == ToastKind::Error || toast.created.elapsed() < INFO_TOAST_LIFETIME
+            toast.kind == ToastKind::Error || toast.created.elapsed() < toast.lifetime()
         });
         if self.settings.check_for_updates
             && !self.backend.is_offline()
@@ -6496,6 +6620,17 @@ impl App {
                 self.account_mut().settings.call_speaker = device.clone();
                 self.account_mut().mark_settings_dirty();
                 self.backend.send(Command::SetCallSpeaker(device));
+            }
+            Action::SetCallCamera(device) => {
+                self.account_mut().settings.call_camera = device.clone();
+                self.account_mut().mark_settings_dirty();
+                self.backend.send(Command::SetCallCamera(device));
+            }
+            Action::SetCacheRetention(days) => {
+                let days = days.filter(|days| (1..=3650).contains(days));
+                self.account_mut().settings.cache_retention_days = days;
+                self.account_mut().mark_settings_dirty();
+                self.backend.send(Command::SetCacheRetention(days));
             }
 
             Action::Open(page) => {
@@ -6967,6 +7102,9 @@ impl App {
                 if let Some(preview) = &mut self.image_preview {
                     preview.actual_size();
                 }
+            }
+            Action::DownloadStatus(key) => {
+                self.backend.send(Command::DownloadStatus(key));
             }
             Action::CloseImagePreview => {
                 self.video.stop();
@@ -7449,9 +7587,12 @@ impl App {
             Action::DeleteForMe { chat, id } => {
                 // The message stays until WhatsApp accepts the deletion.
                 // `Event::MessageDeleted` removes it and prunes the selection.
-                self.backend.send(Command::DeleteLocal { chat, id });
-                self.reload_lists();
+                self.schedule_undo(
+                    crate::undo::Operation::DeleteMessage { chat, id },
+                    "Deletion scheduled",
+                );
             }
+            Action::UndoToast(token) => self.undo_toast(token),
             Action::Attach => {
                 if let Some(chat) = self.open_chat.clone() {
                     self.backend.send(Command::PickFiles(chat));
@@ -7578,6 +7719,7 @@ impl App {
             Action::SeekVideo { message, fraction } => self.video.seek(&message, fraction),
             Action::ToggleVideoSound => self.video.toggle_mute(),
             Action::CycleVideoSpeed => self.video.cycle_speed(),
+            Action::SetVideoSpeed(speed) => self.video.set_speed(speed),
             Action::ExpandVideo { message, path } => {
                 if self.video.message() != Some(message.as_str()) {
                     self.video.set_expanded(true);
@@ -8039,13 +8181,25 @@ impl App {
                 self.backend.send(Command::LeaveGroup { chat, archive });
             }
             Action::SetArchived(chat, archived) => {
+                let before = self.chat(&chat).is_some_and(|chat| chat.archived);
                 if let Some(known) = self.chat_mut(&chat) {
                     known.archived = archived;
                 }
                 if archived && self.open_chat.as_deref() == Some(chat.as_str()) {
                     self.actions.push(Action::CloseChat);
                 }
-                self.backend.send(Command::SetArchived(chat, archived));
+                self.schedule_undo(
+                    crate::undo::Operation::ArchiveChat {
+                        chat,
+                        before,
+                        after: archived,
+                    },
+                    if archived {
+                        "Archive scheduled"
+                    } else {
+                        "Unarchive scheduled"
+                    },
+                );
             }
             // The chat leaves the list once the phone confirmed, through
             // `Event::ChatRemoved`.
@@ -8106,6 +8260,9 @@ impl App {
                 self.backend.send(Command::SetFavorite(chat, favorite));
             }
             Action::ShowDialog(dialog) => {
+                if dialog == Dialog::Statuses {
+                    self.backend.send(Command::Statuses);
+                }
                 if let Dialog::ChatInfo(chat) = &dialog {
                     self.gallery.tab = None;
                     if self.gallery_accessible(chat) {
@@ -8324,6 +8481,15 @@ impl App {
                 }
                 self.show_archived = show;
                 self.unread_kept.clear();
+            }
+            Action::ToggleCommunity(id) => {
+                if self.chat(&id).is_some_and(|chat| {
+                    !chat.locked
+                        && matches!(chat.community, Some(crate::model::CommunityRole::Parent))
+                }) && !self.collapsed_communities.remove(&id)
+                {
+                    self.collapsed_communities.insert(id);
+                }
             }
             Action::RefreshMessagePins(chat) => {
                 self.backend.send(Command::LoadPins(chat));
@@ -8565,7 +8731,41 @@ impl App {
             }
             Action::SetEmojiRenderer(choice) => {
                 self.settings.emoji_renderer = choice;
+                self.settings.custom_emoji_font = None;
+                self.custom_emoji_request = self.custom_emoji_request.wrapping_add(1);
+                crate::custom_emoji::claim(self.custom_emoji_request);
+                let _ = crate::custom_emoji::cleanup(
+                    self.dirs.clone(),
+                    None,
+                    self.custom_emoji_request,
+                );
                 self.mark_settings_dirty();
+            }
+            Action::PickCustomEmojiFont => {
+                self.custom_emoji_request = self.custom_emoji_request.wrapping_add(1);
+                crate::custom_emoji::claim(self.custom_emoji_request);
+                match crate::custom_emoji::pick(
+                    self.dirs.clone(),
+                    self.custom_emoji_request,
+                    ctx.clone(),
+                ) {
+                    Ok(pending) => self.custom_emoji_pending = Some(pending),
+                    Err(error) => {
+                        self.toast_error(format!("Could not open the emoji font picker: {error}"))
+                    }
+                }
+            }
+            Action::SetCustomEmojiFont { path, request } => {
+                if request != self.custom_emoji_request {
+                    return;
+                }
+                self.settings.custom_emoji_font = Some(path.clone());
+                self.mark_settings_dirty();
+                let _ = crate::custom_emoji::cleanup(
+                    self.dirs.clone(),
+                    Some(path),
+                    self.custom_emoji_request,
+                );
             }
             Action::SetInterfaceLanguage(choice) => {
                 self.settings.interface_language = choice;
@@ -8676,7 +8876,9 @@ impl App {
                 self.backend
                     .send(Command::PickNotificationSound { mention });
             }
-            Action::PreviewSound(sound) => crate::notify::play_sound(sound),
+            Action::PreviewSound(sound) => {
+                crate::notify::play_sound_on(sound, self.account().settings.call_speaker.clone())
+            }
             Action::PickDownloadFolder => self.backend.send(Command::PickDownloadFolder),
             Action::SetProfile { name, about } => {
                 self.backend.send(Command::SetProfile { name, about });
@@ -8779,6 +8981,23 @@ impl App {
                 }
             }
             Action::RestoreArchiveBackup(passphrase) => self.begin_archive_restore(passphrase),
+            Action::PrepareBackupMerge(passphrase) => {
+                if !self.backup_busy {
+                    self.backup_busy = true;
+                    self.backup_merge_preview = None;
+                    self.backend.send(Command::PrepareBackupMerge(passphrase));
+                }
+            }
+            Action::ConfirmBackupMerge => {
+                if self.backup_merge_preview.is_some() && !self.backup_busy {
+                    self.backup_busy = true;
+                    self.backend.send(Command::ConfirmBackupMerge);
+                }
+            }
+            Action::CancelBackupMerge => {
+                self.backup_merge_preview = None;
+                self.backend.send(Command::CancelBackupMerge);
+            }
             Action::ResumeRestoredAccount(id) => {
                 if let Some(index) = self.accounts.iter().position(|account| account.id == id) {
                     let account = &mut self.accounts[index];
@@ -9040,6 +9259,7 @@ impl App {
             message: message.into(),
             kind: ToastKind::Info,
             created: Instant::now(),
+            undo: None,
         });
         while self
             .toasts
@@ -9058,7 +9278,78 @@ impl App {
         }
     }
 
+    fn schedule_undo(&mut self, operation: crate::undo::Operation, label: &'static str) {
+        let (token, superseded) =
+            self.undo
+                .schedule(self.account().id.clone(), operation, Instant::now());
+        if let Some(old) = superseded {
+            self.toasts.retain(|toast| toast.undo != Some(old));
+        }
+        self.toast(crate::i18n::gettext(self.locale, label).into_owned());
+        if let Some(toast) = self.toasts.last_mut() {
+            toast.undo = Some(token);
+        }
+    }
+
+    fn undo_toast(&mut self, token: u64) {
+        let Some(pending) = self.undo.cancel(token) else {
+            return;
+        };
+        self.toasts.retain(|toast| toast.undo != Some(token));
+        if let crate::undo::Operation::ArchiveChat {
+            chat,
+            before,
+            after,
+        } = pending.operation
+            && let Some(account) = self
+                .accounts
+                .iter_mut()
+                .find(|account| account.id == pending.account)
+            && let Some(known) = account.chats.iter_mut().find(|known| known.id == chat)
+            && known.archived == after
+        {
+            known.archived = before;
+        }
+    }
+
+    fn flush_undo(&mut self, now: Instant, ctx: &egui::Context) {
+        for pending in self.undo.due(now) {
+            self.toasts
+                .retain(|toast| toast.undo != Some(pending.token));
+            let Some(account) = self
+                .accounts
+                .iter()
+                .find(|account| account.id == pending.account)
+            else {
+                continue;
+            };
+            if matches!(account.link, LinkStatus::LoggedOut) {
+                continue;
+            }
+            match pending.operation {
+                crate::undo::Operation::DeleteMessage { chat, id } => {
+                    account.backend.send(Command::DeleteLocal { chat, id })
+                }
+                crate::undo::Operation::ArchiveChat {
+                    chat,
+                    before,
+                    after,
+                } if before != after => account.backend.send(Command::SetArchived(chat, after)),
+                crate::undo::Operation::ArchiveChat { .. } => {}
+            }
+        }
+        if let Some(deadline) = self.undo.next_deadline() {
+            ctx.request_repaint_after(deadline.saturating_duration_since(now));
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn expire_undo_for_test(&mut self, ctx: &egui::Context) {
+        self.flush_undo(Instant::now() + crate::undo::GRACE, ctx);
+    }
+
     pub fn toast_error(&mut self, message: impl Into<String>) {
+        self.announce_accessibility("An operation failed. Review the error notification.");
         let message = message.into();
         log::warn!("an operation failed; details are shown in the window");
         // Errors stay until dismissed: a repeat moves to the end instead of
@@ -9083,7 +9374,18 @@ impl App {
             message,
             kind: ToastKind::Error,
             created: Instant::now(),
+            undo: None,
         });
+    }
+
+    fn announce_accessibility(&mut self, message: &str) {
+        if !self.app_lock.is_locked()
+            && !self.events_hidden
+            && !self.window_hidden
+            && self.accessibility_announcements.len() < 8
+        {
+            self.accessibility_announcements.push(message.to_owned());
+        }
     }
 
     /// Starts the quote a starred row asked for, once the message it points at
@@ -9143,6 +9445,25 @@ impl App {
     fn report_background_history(&mut self) {
         let paused = self.app_lock.is_locked();
         for account in &mut self.accounts {
+            if account.settings.auto_download && account.settings.automatic_download_since.is_none()
+            {
+                let mut settings = account.settings.clone();
+                settings.automatic_download_since = Some(crate::util::now());
+                // Commit the enable boundary before authorizing any automatic user-folder copy.
+                if settings.save(&account.dirs.settings_file()).is_ok() {
+                    account.settings = settings;
+                } else {
+                    log::warn!("automatic export cutoff could not be saved; exports remain paused");
+                }
+            }
+            let mut exports = account.settings.automatic_export_policy();
+            exports.enabled &= exports.since.is_some();
+            if account.reported_exports != Some(exports) {
+                account.reported_exports = Some(exports);
+                account
+                    .backend
+                    .send(Command::SetAutomaticExportPolicy(exports));
+            }
             let policy = (
                 account.settings.background_history,
                 account.settings.archive_media,
@@ -9168,6 +9489,33 @@ impl App {
 
     /// Processes app state shared by windowed and headless modes.
     pub fn background_frame(&mut self, ctx: &egui::Context) {
+        self.flush_undo(Instant::now(), ctx);
+        if let Some(pending) = &self.custom_emoji_pending {
+            let request = pending.request;
+            match pending.receiver.try_recv() {
+                Ok(result) => {
+                    self.custom_emoji_pending = None;
+                    if request == self.custom_emoji_request {
+                        match result {
+                            Some(Ok(path)) => self
+                                .actions
+                                .push(Action::SetCustomEmojiFont { path, request }),
+                            Some(Err(error)) => {
+                                self.toast_error(format!("Could not use this emoji font: {error}"))
+                            }
+                            None => {}
+                        }
+                    }
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.custom_emoji_pending = None;
+                    if request == self.custom_emoji_request {
+                        self.toast_error("The emoji font picker closed unexpectedly");
+                    }
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            }
+        }
         if let Some(pending) = &self.custom_font_pending {
             let request = pending.request;
             match pending.receiver.try_recv() {
@@ -9261,6 +9609,38 @@ impl App {
         self.follow_receipts();
         self.sync_badge();
         self.request_attention(ctx);
+        #[cfg(target_os = "windows")]
+        self.sync_native_notifications(ctx);
+    }
+
+    #[cfg(target_os = "windows")]
+    fn sync_native_notifications(&mut self, ctx: &egui::Context) {
+        let enabled = self
+            .accounts
+            .iter()
+            .any(|account| account.settings.notifications && account.settings.in_app_notifications);
+        if !enabled {
+            self.native_notifications = None;
+            self.native_notifications_tried = false;
+            return;
+        }
+        if !self.native_notifications_tried {
+            self.native_notifications_tried = true;
+            self.native_notifications = crate::notify::NativePopups::start(self.waker.clone());
+        }
+        let snapshots = if self.window_focused && !self.window_hidden {
+            Vec::new()
+        } else {
+            crate::ui::notification_overlay::snapshots(self)
+        };
+        let Some(native) = self.native_notifications.as_mut() else {
+            return;
+        };
+        self.actions.extend(native.drain());
+        if !native.sync(snapshots) {
+            self.native_notifications = None;
+        }
+        self.apply_actions(ctx);
     }
 
     /// Highlights the taskbar entry for a message that notified while the
@@ -9332,6 +9712,7 @@ impl App {
                 .store(true, std::sync::atomic::Ordering::SeqCst);
         }
         self.app_lock.lock();
+        self.accessibility_announcements.clear();
         self.in_app_notifications.clear();
         self.window_focused = false;
         self.flush_open_draft();
@@ -9843,6 +10224,12 @@ impl App {
         }
         crate::ui::show(self, ui);
         self.apply_actions(ctx);
+        let title = self.accessible_window_title();
+        let title_id = egui::Id::new("native-window-title");
+        if ctx.data(|data| data.get_temp::<String>(title_id)).as_ref() != Some(&title) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
+            ctx.data_mut(|data| data.insert_temp(title_id, title));
+        }
         self.refresh_storage_stats(ctx);
         // The old colours, if a change is being revealed, go over everything.
         self.theme_transition.paint(ctx);
@@ -9856,6 +10243,30 @@ impl App {
         {
             ctx.request_repaint_after(Duration::from_millis(120));
         }
+    }
+
+    pub(crate) fn accessible_window_title(&self) -> String {
+        if self.app_lock.is_locked()
+            || self
+                .settings
+                .screen_privacy
+                .hides(crate::settings::ScreenPrivacyWhat::Name, false)
+            || self.page != Page::Chats
+        {
+            return "Zap Faster".into();
+        }
+        self.current_chat().filter(|chat| !chat.locked).map_or_else(
+            || "Zap Faster".into(),
+            |chat| {
+                let name: String = self
+                    .chat_title(chat)
+                    .chars()
+                    .filter(|character| !character.is_control())
+                    .take(120)
+                    .collect();
+                format!("{name}, Zap Faster")
+            },
+        )
     }
 
     /// Inserts text at the composer cursor or end.
@@ -10430,6 +10841,7 @@ fn allowed_while_locked(action: &Action) -> bool {
             | Action::SetChatSound { .. }
             | Action::SetNotificationSound { .. }
             | Action::SetCustomFont(_)
+            | Action::SetCustomEmojiFont { .. }
             | Action::SetDownloadFolder(_)
     )
 }
@@ -10464,12 +10876,199 @@ fn notification_eligible(chat: &Chat, now: i64, message_at: i64) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn undo_cancels_before_transport_and_expiry_sends_only_once() {
+        let mut app = app();
+        let (backend, mut commands) = crate::backend::Backend::recording();
+        app.backend = backend;
+        let operation = crate::undo::Operation::DeleteMessage {
+            chat: "fixture".into(),
+            id: "synthetic".into(),
+        };
+        app.schedule_undo(operation.clone(), "Deletion scheduled");
+        assert!(commands.try_recv().is_err());
+        let token = app.toasts.last().unwrap().undo.unwrap();
+        app.undo_toast(token);
+        app.flush_undo(
+            std::time::Instant::now() + crate::undo::GRACE,
+            &egui::Context::default(),
+        );
+        assert!(commands.try_recv().is_err());
+        app.schedule_undo(operation, "Deletion scheduled");
+        let now = std::time::Instant::now() + crate::undo::GRACE;
+        app.flush_undo(now, &egui::Context::default());
+        assert!(matches!(
+            commands.try_recv().unwrap(),
+            crate::backend::Command::DeleteLocal { .. }
+        ));
+        app.flush_undo(now, &egui::Context::default());
+        assert!(commands.try_recv().is_err());
+    }
+
     use super::*;
     use crate::model::{ChatKind, Content, Dialog, Media, MediaState, ReplyTarget, ToastKind};
+
+    #[test]
+    fn accessibility_announces_live_open_chat_events_but_never_locked_or_hidden_accounts() {
+        let mut app = app();
+        app.account_mut().settings.notifications = false;
+        app.open_chat = Some("synthetic-open".into());
+        let mut incoming = message("synthetic-open", "incoming-a11y", 1);
+        incoming.from_me = false;
+        app.apply_backend_event(
+            Event::Incoming {
+                chat: "synthetic-open".into(),
+                message: Box::new(incoming.clone()),
+            },
+            true,
+        );
+        assert_eq!(
+            app.accessibility_announcements,
+            ["New message in the open conversation"]
+        );
+        app.accessibility_announcements.clear();
+        for (live, chat) in [(false, "synthetic-open"), (true, "synthetic-other")] {
+            app.apply_backend_event(
+                Event::Incoming {
+                    chat: chat.into(),
+                    message: Box::new(incoming.clone()),
+                },
+                live,
+            );
+            assert!(app.accessibility_announcements.is_empty());
+        }
+        app.apply_backend_event(
+            Event::Typing {
+                chat: "synthetic-open".into(),
+                sender: "synthetic-sender".into(),
+                composing: true,
+            },
+            true,
+        );
+        assert_eq!(app.accessibility_announcements.len(), 1);
+        app.apply_backend_event(
+            Event::Typing {
+                chat: "synthetic-open".into(),
+                sender: "synthetic-sender".into(),
+                composing: true,
+            },
+            true,
+        );
+        assert_eq!(
+            app.accessibility_announcements.len(),
+            1,
+            "typing repeats must not chatter"
+        );
+        app.accessibility_announcements.clear();
+        app.events_hidden = true;
+        app.toast_error("Synthetic hidden error");
+        assert!(app.accessibility_announcements.is_empty());
+        app.events_hidden = false;
+        app.app_lock.lock();
+        app.apply_backend_event(
+            Event::Incoming {
+                chat: "synthetic-open".into(),
+                message: Box::new(incoming),
+            },
+            true,
+        );
+        app.apply_backend_event(
+            Event::Link(LinkStatus::Disconnected {
+                reason: "Synthetic disconnect".into(),
+            }),
+            true,
+        );
+        app.toast_error("Synthetic locked error");
+        assert!(app.accessibility_announcements.is_empty());
+    }
+
+    #[test]
+    fn emoji_import_cannot_open_a_picker_while_locked() {
+        assert!(!allowed_while_locked(&Action::PickCustomEmojiFont));
+        assert!(allowed_while_locked(&Action::SetCustomEmojiFont {
+            path: "synthetic-emoji.ttf".into(),
+            request: 1,
+        }));
+    }
+
+    #[test]
+    fn a_stale_emoji_import_result_cannot_change_preferences() {
+        let mut app = app();
+        app.custom_emoji_request = 2;
+        app.apply(
+            Action::SetCustomEmojiFont {
+                path: "stale-emoji.ttf".into(),
+                request: 1,
+            },
+            &egui::Context::default(),
+        );
+        assert!(app.settings.custom_emoji_font.is_none());
+    }
 
     fn app() -> App {
         let root = std::env::temp_dir().join(format!("zapfast-app-{}", std::process::id()));
         App::headless(AppDirs::under(&root), Settings::default()).0
+    }
+
+    #[test]
+    fn window_title_follows_chat_and_hides_private_names() {
+        let mut app = app();
+        let id = "synthetic-title@s.whatsapp.net".to_owned();
+        app.chats
+            .push(Chat::new(id.clone(), "Synthetic\nname".into()));
+        app.open_chat = Some(id);
+        assert_eq!(app.accessible_window_title(), "Syntheticname, Zap Faster");
+        app.chats[0].locked = true;
+        assert_eq!(app.accessible_window_title(), "Zap Faster");
+        app.chats[0].locked = false;
+        app.settings.screen_privacy.enabled = true;
+        app.settings.screen_privacy.blur_names = true;
+        assert_eq!(app.accessible_window_title(), "Zap Faster");
+        app.settings.screen_privacy.enabled = false;
+        app.page = Page::Settings;
+        assert_eq!(app.accessible_window_title(), "Zap Faster");
+    }
+
+    #[test]
+    fn automation_collection_scope_changes_only_with_privacy_membership() {
+        let mut app = app();
+        app.chats
+            .push(Chat::new("synthetic-a@s.whatsapp.net".into(), "A".into()));
+        app.chats
+            .push(Chat::new("synthetic-b@s.whatsapp.net".into(), "B".into()));
+        let initial = App::automation_scope(app.account());
+        app.chats.reverse();
+        app.chats[0].unread = 8;
+        assert_eq!(initial, App::automation_scope(app.account()));
+        app.chats[0].locked = true;
+        assert_ne!(initial, App::automation_scope(app.account()));
+        app.chats[0].locked = false;
+        app.chats[0].ephemeral_expiration = Some(60);
+        assert_ne!(initial, App::automation_scope(app.account()));
+    }
+
+    #[test]
+    fn community_expansion_is_local_and_navigation_reveals_a_child() {
+        let mut app = app();
+        let parent = "synthetic-parent@g.us".to_owned();
+        let child = "synthetic-child@g.us".to_owned();
+        let mut community = Chat::new(parent.clone(), "Synthetic community".into());
+        community.community = Some(crate::model::CommunityRole::Parent);
+        let mut member = Chat::new(child.clone(), "Synthetic member".into());
+        member.community = Some(crate::model::CommunityRole::Member {
+            parent: parent.clone(),
+            announcement: false,
+            general: true,
+        });
+        app.chats.extend([community, member]);
+        let ctx = egui::Context::default();
+        app.apply(Action::ToggleCommunity(parent.clone()), &ctx);
+        assert!(app.collapsed_communities.contains(&parent));
+        app.apply(Action::OpenChat(child), &ctx);
+        assert!(!app.collapsed_communities.contains(&parent));
+        app.chats[0].locked = true;
+        app.apply(Action::ToggleCommunity(parent), &ctx);
+        assert!(app.collapsed_communities.is_empty());
     }
 
     fn gallery_fixture(app: &mut App) -> (String, crate::model::ChatMedia) {
@@ -19186,6 +19785,55 @@ mod tests {
 
         app.apply(Action::SetVoiceSpeed(4.0), &ctx);
         assert_eq!(app.settings.voice_speed, crate::audio::SPEEDS[4]);
+    }
+
+    #[test]
+    fn video_menu_speeds_apply_without_changing_the_remembered_voice_speed() {
+        let mut app = app();
+        let ctx = egui::Context::default();
+        app.apply(Action::SetVoiceSpeed(1.5), &ctx);
+        for speed in crate::audio::SPEEDS {
+            app.apply(Action::SetVideoSpeed(speed), &ctx);
+            assert_eq!(app.video.speed(), speed);
+            assert_eq!(app.player.speed(), 1.5);
+            assert_eq!(app.settings.voice_speed, 1.5);
+        }
+        app.apply(Action::SetVideoSpeed(1.25), &ctx);
+        app.apply(Action::CycleVideoSpeed, &ctx);
+        assert_eq!(app.video.speed(), 1.5);
+        app.apply(Action::SetVideoSpeed(1.75), &ctx);
+        app.apply(Action::CycleVideoSpeed, &ctx);
+        assert_eq!(app.video.speed(), 2.0);
+        app.apply(Action::CycleVideoSpeed, &ctx);
+        assert_eq!(app.video.speed(), 1.0);
+    }
+
+    #[test]
+    fn automatic_export_migration_persists_one_cutoff_and_keeps_full_archive_recovery() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = App::headless(AppDirs::under(root.path()), Settings::default()).0;
+        app.account_mut().settings.automatic_download_since = None;
+        app.account_mut().settings.background_history = true;
+        app.account_mut().settings.archive_media = true;
+        app.report_background_history();
+        let cutoff = app.account().settings.automatic_download_since.unwrap();
+        let saved = crate::settings::AccountSettings::load(&app.account().dirs.settings_file());
+        assert_eq!(saved.automatic_download_since, Some(cutoff));
+        assert!(saved.background_history);
+        assert!(saved.archive_media);
+        app.report_background_history();
+        assert_eq!(
+            app.account().settings.automatic_download_since,
+            Some(cutoff)
+        );
+        app.account_mut().settings.auto_download = false;
+        app.report_background_history();
+        assert_eq!(
+            app.account().settings.automatic_download_since,
+            Some(cutoff)
+        );
+        assert!(!app.account().reported_exports.unwrap().enabled);
+        assert!(app.account().settings.archive_media);
     }
 
     #[test]

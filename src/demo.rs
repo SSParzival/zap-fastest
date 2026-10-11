@@ -1951,6 +1951,12 @@ fn call_sample(app: &mut App, scenario: &str) {
             id: "fixture-speaker".into(),
             label: "Synthetic speaker".into(),
         }],
+        cameras: vec![crate::camera::CameraDevice {
+            id: "fixture-camera".into(),
+            label: "Synthetic camera".into(),
+        }],
+        cameras_discovered: true,
+        ..Default::default()
     };
     app.call_preparing = scenario == "call-preparing";
     if app.call_preparing {
@@ -2035,6 +2041,39 @@ pub fn apply_flags(app: &mut App, page: Option<&str>) {
             | "call-video-waiting"
             | "call-video"
             | "call-history" => call_sample(app, part),
+            "statuses" => {
+                let now = crate::util::now();
+                let mut text = message(
+                    SAMPLES[0].id,
+                    "synthetic-status-text",
+                    false,
+                    now - 600,
+                    Content::text("Taking the scenic route today."),
+                );
+                text.sender_name = Some("Synthetic traveller".into());
+                let mut photo = message(
+                    SAMPLES[1].id,
+                    "synthetic-status-photo",
+                    false,
+                    now - 300,
+                    Content::Image {
+                        caption: Some("A quiet afternoon.".into()),
+                        motion: None,
+                        media: Media {
+                            mime: "image/jpeg".into(),
+                            size: 512,
+                            width: Some(400),
+                            height: Some(300),
+                            album: None,
+                            path: None,
+                            state: crate::model::MediaState::Idle,
+                        },
+                    },
+                );
+                photo.thumbnail = Some(sample_thumbnail(4));
+                app.statuses = vec![text, photo];
+                app.dialog = Some(Dialog::Statuses);
+            }
             "archive-backup" => app.dialog = Some(Dialog::ArchiveBackup { restore: false }),
             "archive-restore" => app.dialog = Some(Dialog::ArchiveBackup { restore: true }),
             "archive-resume" => {
@@ -2503,6 +2542,13 @@ pub fn apply_flags(app: &mut App, page: Option<&str>) {
                 app.scroll_to_bottom = true;
             }
             "settings" => app.page = Page::Settings,
+            "custom-emoji" => {
+                app.page = Page::Settings;
+                app.settings_search = "Emoji style".into();
+                // Synthetic selected preference, pending restart, no real fonts read.
+                app.settings.custom_emoji_font =
+                    Some(app.dirs.state.join("emoji-fonts/fixture/Noto-example.ttf"));
+            }
             "background-history" => {
                 app.page = Page::Settings;
                 app.settings_search = "Recover older history".into();
@@ -4027,7 +4073,7 @@ mod tests {
                 .find(|(_, galley)| galley.text().starts_with(first_line))
                 .unwrap_or_else(|| panic!("painted body starting {first_line:?}"));
             crate::bidi::assert_rows_follow_uba(body, &atlas);
-            crate::bidi::assert_right_aligned(body);
+            crate::bidi::assert_paragraph_aligned(body);
             let body_right = body
                 .rows
                 .iter()
@@ -5611,9 +5657,8 @@ mod tests {
                                     "{size:?}, light={light}: {label} must be visible without scrolling"
                                 );
                             }
-                            assert_eq!(
-                                labels.get("System default"),
-                                Some(&2),
+                            assert!(
+                                labels.get("System default").copied().unwrap_or(0) >= 2,
                                 "{scenario}, {size:?}, light={light}: both audio selectors must be visible without scrolling"
                             );
                             for kind in [
@@ -5658,6 +5703,21 @@ mod tests {
                                 "{size:?}, light={light}, scale={scale}: {label} must remain reachable"
                             );
                         }
+                        assert!(
+                            labels.contains_key("Camera"),
+                            "camera control remains reachable"
+                        );
+                        let (selector, clip) = ctx
+                            .data(|data| {
+                                data.get_temp::<(egui::Rect, egui::Rect)>(
+                                    crate::ui::call::camera_bounds_id(&call_account),
+                                )
+                            })
+                            .expect("the actual camera selector response is registered");
+                        assert!(
+                            clip.contains_rect(selector) && screen.contains_rect(selector),
+                            "{scenario}, {size:?}, light={light}, scale={scale}: camera selector {selector:?} is clipped by {clip:?}"
+                        );
                         assert!(
                             app.actions.is_empty(),
                             "drawing and scrolling queue no call actions"
@@ -5896,6 +5956,7 @@ mod tests {
             "disappearing-direct,info",
             "disappearing-off,info",
             "settings",
+            "custom-emoji",
             "background-history",
             "settings-search=Notifications",
             "settings-search=System",
@@ -6936,12 +6997,20 @@ mod tests {
                                 _ => None,
                             }
                         }
-                        let frame = shapes
-                            .iter()
-                            .find_map(|shape| dialog_frame(&shape.shape))
-                            .expect("the group dialog frame is drawn");
+                        let panel = ctx.data(|data| {
+                            data.get_temp::<egui::Rect>(egui::Id::new(
+                                "chat-info-side-panel-bounds",
+                            ))
+                        });
+                        let frame = panel.unwrap_or_else(|| {
+                            shapes
+                                .iter()
+                                .find_map(|shape| dialog_frame(&shape.shape))
+                                .expect("the group dialog frame is drawn")
+                        });
+                        let edge = if panel.is_some() { 0.0 } else { 16.0 };
                         assert!(
-                            frame.top() >= 16.0 && frame.bottom() <= height - 16.0,
+                            frame.top() >= edge && frame.bottom() <= height - edge,
                             "the dialog leaves space at both window edges: {page}, {width}x{height}: {frame:?}"
                         );
                         fn footer(shape: &egui::Shape) -> Option<&egui::epaint::TextShape> {
@@ -7295,6 +7364,42 @@ mod tests {
                 app.settings.voice_speed, option,
                 "choosing {option}x from the menu reaches App and settings"
             );
+        }
+    }
+
+    #[test]
+    fn the_video_message_menu_selects_every_speed_without_changing_voice_speed() {
+        let mut app = app();
+        let ctx = egui::Context::default();
+        app.attach(&ctx);
+        video_sample(&mut app, None);
+        let chat = sample_ids()[0].to_owned();
+        app.player.set_speed(1.5);
+        app.settings.voice_speed = 1.5;
+        for option in crate::audio::SPEEDS {
+            app.open_message_menu = Some("demo-video".into());
+            render(&mut app, &ctx);
+            let choice = crate::ui::conversation::speed_button_id(&chat, "demo-video", option);
+            let pos = ctx
+                .data(|data| data.get_temp::<egui::Rect>(choice))
+                .expect("the video speed option is on screen")
+                .center();
+            let press = |pressed| egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            frame_with(
+                &mut app,
+                &ctx,
+                vec![egui::Event::PointerMoved(pos), press(true)],
+            );
+            frame_with(&mut app, &ctx, vec![press(false)]);
+            frame_with(&mut app, &ctx, Vec::new());
+            assert_eq!(app.video.speed(), option);
+            assert_eq!(app.player.speed(), 1.5);
+            assert_eq!(app.settings.voice_speed, 1.5);
         }
     }
 
@@ -9819,6 +9924,16 @@ mod tests {
                     "local removal waits for WhatsApp acknowledgement"
                 );
             }
+            if !for_everyone {
+                assert!(
+                    !std::iter::from_fn(|| commands.try_recv().ok()).any(|command| matches!(
+                        command,
+                        crate::backend::Command::DeleteLocal { .. }
+                    )),
+                    "delete-for-me waits for the undo deadline"
+                );
+                app.expire_undo_for_test(&ctx);
+            }
             let requested: Vec<_> = std::iter::from_fn(|| commands.try_recv().ok())
                 .filter_map(|command| match command {
                     crate::backend::Command::DeleteLocal { chat: target, id }
@@ -9902,7 +10017,7 @@ mod tests {
         let find = |prefix: &str| {
             nodes
                 .iter()
-                .find(|(label, _, _)| label.starts_with(prefix))
+                .find(|(label, role, _)| label.starts_with(prefix) && *role == Role::MenuItem)
                 .unwrap_or_else(|| panic!("no {prefix} row"))
                 .clone()
         };
@@ -9912,9 +10027,9 @@ mod tests {
                 "the menu has no {status}row"
             );
         }
-        assert_eq!(find("Message info").1, Role::Button);
+        assert_eq!(find("Message info").1, Role::MenuItem);
         let (_, role, copy) = find("Copy message ID");
-        assert_eq!(role, Role::Button);
+        assert_eq!(role, Role::MenuItem);
 
         let click = |app: &mut App, pos: egui::Pos2| {
             let press = |pressed| egui::Event::PointerButton {
@@ -10201,6 +10316,14 @@ mod tests {
                     app.conversations[&chat].message("local-menu").is_some(),
                     "wait for backend-confirmed local deletion"
                 );
+                assert!(
+                    !std::iter::from_fn(|| commands.try_recv().ok()).any(|command| matches!(
+                        command,
+                        crate::backend::Command::DeleteLocal { .. }
+                    )),
+                    "delete-for-me waits for the undo deadline"
+                );
+                app.expire_undo_for_test(&ctx);
                 assert!(std::iter::from_fn(|| commands.try_recv().ok()).any(|command| matches!(command,
                     crate::backend::Command::DeleteLocal { chat: target, id } if target == chat && id == "local-menu"
                 )));
@@ -11369,6 +11492,14 @@ mod tests {
                     row.is_some(),
                     "{page}: the message waits for sync acceptance"
                 );
+                assert!(
+                    !std::iter::from_fn(|| commands.try_recv().ok()).any(|command| matches!(
+                        command,
+                        crate::backend::Command::DeleteLocal { .. }
+                    )),
+                    "delete-for-me waits for the undo deadline"
+                );
+                app.expire_undo_for_test(&ctx);
                 assert!(std::iter::from_fn(|| commands.try_recv().ok()).any(
                     |command| matches!(command, crate::backend::Command::DeleteLocal { chat, id }
                         if chat == SAMPLES[0].id && id == message)
@@ -11436,6 +11567,14 @@ mod tests {
                 );
             } else {
                 assert!(row.is_some(), "{page}: the message waits in its own chat");
+                assert!(
+                    !std::iter::from_fn(|| commands.try_recv().ok()).any(|command| matches!(
+                        command,
+                        crate::backend::Command::DeleteLocal { .. }
+                    )),
+                    "delete-for-me waits for the undo deadline"
+                );
+                app.expire_undo_for_test(&ctx);
                 assert!(std::iter::from_fn(|| commands.try_recv().ok()).any(
                     |command| matches!(command, crate::backend::Command::DeleteLocal { chat, id }
                         if chat == own_chat && id == message)
@@ -14448,10 +14587,18 @@ mod tests {
         render(&mut app, &ctx);
         let bubble = crate::ui::conversation::bubble_id(&group, "plain-group-message");
         assert!(!ctx.read_response(bubble).unwrap().sense.is_focusable());
-        for _ in 0..2 {
-            frame_sized(&mut app, &ctx, 780.0, tab());
-            render(&mut app, &ctx);
-        }
+        frame_sized(&mut app, &ctx, 780.0, tab());
+        render(&mut app, &ctx);
+        assert_eq!(focused_stop(&ctx), Some(crate::ui::focus::Stop::Send));
+        // The composer toolbar has one Tab stop. Its other buttons are
+        // reached with arrows, without visiting passive message controls.
+        frame_sized(
+            &mut app,
+            &ctx,
+            780.0,
+            vec![key(egui::Key::ArrowRight, egui::Modifiers::NONE)],
+        );
+        render(&mut app, &ctx);
         assert_eq!(focused_stop(&ctx), Some(crate::ui::focus::Stop::Attach));
         assert!(ring(&ctx).is_some());
         frame_with(
@@ -15220,6 +15367,7 @@ mod tests {
                 Stop::Favorites,
                 Stop::Groups,
                 Stop::Channels,
+                Stop::Statuses,
                 Stop::Archived,
                 Stop::Locked,
             ]
@@ -15237,6 +15385,66 @@ mod tests {
                     .collect::<Vec<_>>(),
                 expected
             );
+            for toolbar in [
+                vec![Stop::Send, Stop::Attach, Stop::Emoji],
+                vec![Stop::ChatSearch, Stop::Profile],
+                vec![Stop::Sidebar, Stop::NewChat, Stop::Settings],
+                vec![
+                    Stop::All,
+                    Stop::Unread,
+                    Stop::Private,
+                    Stop::Favorites,
+                    Stop::Groups,
+                    Stop::Channels,
+                    Stop::Statuses,
+                    Stop::Archived,
+                    Stop::Locked,
+                ],
+            ] {
+                let toolbar: Vec<_> = toolbar
+                    .into_iter()
+                    .filter(|stop| expected.contains(stop))
+                    .collect();
+                let first = crate::ui::focus::control(&ctx, toolbar[0]).unwrap();
+                for backwards in [false, true] {
+                    ctx.memory_mut(|memory| memory.request_focus(first));
+                    for step in 1..=toolbar.len() {
+                        let arrow = if backwards {
+                            egui::Key::ArrowLeft
+                        } else {
+                            egui::Key::ArrowRight
+                        };
+                        frame_sized(
+                            &mut app,
+                            &ctx,
+                            780.0,
+                            vec![key(arrow, egui::Modifiers::NONE)],
+                        );
+                        let shapes = frame_sized(&mut app, &ctx, 780.0, Vec::new());
+                        let index = if backwards {
+                            (toolbar.len() - step % toolbar.len()) % toolbar.len()
+                        } else {
+                            step % toolbar.len()
+                        };
+                        assert_eq!(
+                            focused_stop(&ctx),
+                            Some(toolbar[index]),
+                            "toolbar {toolbar:?}, step {step}, backwards {backwards}"
+                        );
+                        assert_single_focus_border(&app, &ctx, &shapes);
+                    }
+                }
+            }
+            // All controls remain registered and operable, but a toolbar
+            // contributes one stop to the primary Tab cycle.
+            let expected = [
+                Stop::Composer,
+                Stop::Send,
+                Stop::ChatSearch,
+                Stop::Sidebar,
+                Stop::Search,
+                Stop::All,
+            ];
             let last = &app.conversations[&group].messages.last().unwrap().id;
             let bubble_rect = crate::ui::conversation::bubble_id(&group, last).with("rect");
             let initial_rect = ctx
@@ -15280,7 +15488,7 @@ mod tests {
             assert!(ctx.read_response(row).unwrap().sense.is_focusable());
             for (modifiers, expected_stop) in [
                 (egui::Modifiers::NONE, Stop::Composer),
-                (egui::Modifiers::SHIFT, Stop::Locked),
+                (egui::Modifiers::SHIFT, Stop::All),
             ] {
                 ctx.memory_mut(|memory| memory.request_focus(row));
                 frame_sized(&mut app, &ctx, 780.0, vec![key(egui::Key::Tab, modifiers)]);
@@ -15333,6 +15541,34 @@ mod tests {
                     ]
                 );
             }
+            let header_stop = controls
+                .iter()
+                .find(|(stop, _)| matches!(stop, Stop::ChatSearch | Stop::Back | Stop::Profile))
+                .map(|(stop, _)| *stop);
+            let controls: Vec<_> = controls
+                .into_iter()
+                .filter(|(stop, _)| {
+                    !matches!(
+                        stop,
+                        Stop::Attach
+                            | Stop::Emoji
+                            | Stop::RecordSend
+                            | Stop::NewChat
+                            | Stop::Settings
+                            | Stop::Unread
+                            | Stop::Private
+                            | Stop::Favorites
+                            | Stop::Groups
+                            | Stop::Channels
+                            | Stop::Statuses
+                            | Stop::Archived
+                            | Stop::Locked
+                            | Stop::Label(_)
+                            | Stop::ManageLabels
+                    ) && (!matches!(stop, Stop::ChatSearch | Stop::Profile | Stop::Back)
+                        || Some(*stop) == header_stop)
+                })
+                .collect();
             for backwards in [false, true] {
                 ctx.memory_mut(|memory| memory.request_focus(controls[0].1));
                 for step in 1..=controls.len() {
@@ -15350,7 +15586,8 @@ mod tests {
                     assert_eq!(
                         ctx.memory(|memory| memory.focused()),
                         Some(controls[index].1),
-                        "{page}, step {step}"
+                        "{page}, step {step}, backwards {backwards}, controls {controls:?}, focused stop {:?}",
+                        focused_stop(&ctx)
                     );
                 }
             }
@@ -17042,17 +17279,26 @@ mod independent_text_scale_tests {
                     for _ in 0..4 {
                         shapes = frame(&mut app, &ctx, size);
                     }
-                    let rect = shapes
-                        .iter()
-                        .find_map(|shape| modal(&shape.shape))
-                        .expect("the synthetic group info modal is drawn");
+                    let docked = ctx.data(|data| {
+                        data.get_temp::<egui::Rect>(egui::Id::new("chat-info-side-panel-bounds"))
+                    });
+                    let rect = docked
+                        .or_else(|| shapes.iter().find_map(|shape| modal(&shape.shape)))
+                        .expect("the synthetic group info panel or modal is drawn");
+                    let inset = if docked.is_some() { 0.0 } else { 16.0 };
                     assert!(
-                        rect.left() >= 16.0
-                            && rect.right() <= size.x - 16.0
-                            && rect.top() >= 16.0
-                            && rect.bottom() <= size.y - 16.0,
+                        rect.left() >= inset
+                            && rect.right() <= size.x - inset
+                            && rect.top() >= inset
+                            && rect.bottom() <= size.y - inset,
                         "modal {rect:?}, scale {scale}, {size:?}, light {light}"
                     );
+                    if docked.is_some() {
+                        assert!(
+                            rect.left() >= app.settings.sidebar_width + 300.0,
+                            "the docked panel must leave room for the conversation"
+                        );
+                    }
                     assert!((ctx.zoom_factor() - 1.0).abs() < 0.001);
                 }
             }

@@ -22,6 +22,7 @@ mod encryption;
 mod gallery;
 pub mod history_capture;
 mod media_jobs;
+pub mod merge;
 pub mod storage;
 pub use call_log::CallRecord;
 pub use media_jobs::MediaJob;

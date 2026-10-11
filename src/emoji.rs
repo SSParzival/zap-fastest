@@ -27,9 +27,39 @@ fn setup_for(renderer: crate::settings::EmojiRenderer) -> fastframe_emoji::Emoji
 
 /// Installs Zap Faster's configured emoji source before any renderer can initialize.
 pub fn setup(renderer: crate::settings::EmojiRenderer) {
+    setup_with_font(renderer, None);
+}
+
+static STARTUP_ERROR: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+
+/// Why a configured custom font was replaced by the selected built-in renderer.
+pub fn startup_error() -> Option<&'static str> {
+    STARTUP_ERROR.get().and_then(|error| error.as_deref())
+}
+
+/// Installs one validated user-supplied bitmap font for this process's lifetime.
+/// The public renderer API accepts static bytes and cannot change after startup.
+pub fn setup_with_font(renderer: crate::settings::EmojiRenderer, custom: Option<&std::path::Path>) {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
-        setup_for(renderer).install();
+        let (setup, error) = match custom.map(crate::custom_emoji::load) {
+            Some(Ok(bytes)) => {
+                // Once for the lifetime of the process, matching fastframe's
+                // static renderer. Rejected imports never retain allocations.
+                let bytes = Box::leak(bytes.into_boxed_slice());
+                (
+                    fastframe_emoji::EmojiSetup::default()
+                        .system(false)
+                        .bundled(bytes)
+                        .synchronous(cfg!(any(test, feature = "demo"))),
+                    None,
+                )
+            }
+            Some(Err(error)) => (setup_for(renderer), Some(error)),
+            None => (setup_for(renderer), None),
+        };
+        let _ = STARTUP_ERROR.set(error);
+        setup.install();
     });
 }
 

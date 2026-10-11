@@ -4,7 +4,8 @@
 
 use anyhow::{Result, anyhow};
 use nokhwa::utils::{
-    CameraFormat, CameraIndex, FrameFormat, RequestedFormat, RequestedFormatType, Resolution,
+    ApiBackend, CameraFormat, CameraIndex, CameraInfo, FrameFormat, RequestedFormat,
+    RequestedFormatType, Resolution,
 };
 use nokhwa::{Camera, pixel_format::RgbFormat};
 use openh264::encoder::{BitRate, Encoder, EncoderConfig, FrameRate, Profile};
@@ -20,6 +21,157 @@ const WIDTH: u32 = 640;
 const HEIGHT: u32 = 480;
 const FPS: u32 = 15;
 const MAX_AU: usize = 2 * 1024 * 1024;
+const MAX_DEVICE_LIST: usize = 64 * 1024;
+const MAX_SELECTION: usize = 4096;
+
+/// The platform identity stays local to the account's settings and the helper pipe.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct CameraDevice {
+    pub id: String,
+    pub label: String,
+}
+
+fn camera_id(info: &CameraInfo) -> String {
+    // Windows symbolic links and macOS uniqueIDs survive enumeration order changes.
+    let native_id = info.misc();
+    if !native_id.is_empty() {
+        format!("native:{native_id}")
+    } else {
+        // V4L exposes a node index rather than a stable hardware ID. Include its name so a
+        // differently named replacement at the same node is never selected silently.
+        serde_json::to_string(&(
+            info.index().as_string(),
+            info.human_name(),
+            info.description(),
+        ))
+        .expect("camera identity consists only of strings")
+    }
+}
+
+fn camera_devices(infos: &[CameraInfo]) -> Vec<CameraDevice> {
+    infos
+        .iter()
+        .map(|info| CameraDevice {
+            id: camera_id(info),
+            label: info.human_name(),
+        })
+        .collect()
+}
+
+fn selected_index(infos: &[CameraInfo], selected: Option<&str>) -> Result<CameraIndex> {
+    match selected {
+        None => Ok(CameraIndex::Index(0)),
+        Some(id) => infos
+            .iter()
+            .find(|info| camera_id(info) == id)
+            .map(|info| {
+                let native_id = info.misc();
+                if native_id.is_empty() {
+                    info.index().clone()
+                } else {
+                    CameraIndex::String(native_id)
+                }
+            })
+            .ok_or_else(|| anyhow!("The selected camera is unavailable. Choose another camera.")),
+    }
+}
+
+fn helper_command(argument: &str) -> Result<Command> {
+    let mut command = Command::new(std::env::current_exe()?);
+    command
+        .arg(argument)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000);
+    }
+    Ok(command)
+}
+
+struct HelperChild(Option<Child>);
+impl HelperChild {
+    fn process(&mut self) -> &mut Child {
+        self.0
+            .as_mut()
+            .expect("helper child exists until handed to session")
+    }
+    fn into_process(mut self) -> Child {
+        self.0
+            .take()
+            .expect("helper child exists until handed to session")
+    }
+}
+impl Drop for HelperChild {
+    fn drop(&mut self) {
+        if let Some(mut child) = self.0.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
+
+fn write_bounded(output: &mut impl Write, bytes: &[u8], limit: usize) -> std::io::Result<()> {
+    if bytes.len() > limit {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "camera metadata too large",
+        ));
+    }
+    output.write_all(&(bytes.len() as u32).to_le_bytes())?;
+    output.write_all(bytes)?;
+    output.flush()
+}
+
+fn read_bounded(input: &mut impl Read, limit: usize) -> std::io::Result<Vec<u8>> {
+    let mut size = [0; 4];
+    input.read_exact(&mut size)?;
+    let size = u32::from_le_bytes(size) as usize;
+    if size > limit {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "camera metadata too large",
+        ));
+    }
+    let mut bytes = vec![0; size];
+    input.read_exact(&mut bytes)?;
+    Ok(bytes)
+}
+
+/// Enumeration never opens a camera stream. A stuck native query is killed after ten seconds;
+/// cancellation also kills the child instead of leaving a blocking driver on the worker.
+pub async fn devices() -> Result<Vec<CameraDevice>> {
+    let mut child = HelperChild(Some(helper_command("--camera-list-helper")?.spawn()?));
+    let mut output = child
+        .process()
+        .stdout
+        .take()
+        .ok_or_else(|| anyhow!("camera list pipe unavailable"))?;
+    let (sender, result) = async_channel::bounded(1);
+    std::thread::Builder::new()
+        .name("camera-list".into())
+        .spawn(move || {
+            let listed = read_bounded(&mut output, MAX_DEVICE_LIST)
+                .map_err(anyhow::Error::from)
+                .and_then(|bytes| Ok(serde_json::from_slice::<Vec<CameraDevice>>(&bytes)?));
+            let _ = sender.send_blocking(listed);
+        })?;
+    tokio::time::timeout(Duration::from_secs(10), result.recv())
+        .await
+        .map_err(|_| anyhow!("Camera discovery timed out. Try refreshing devices."))?
+        .map_err(|_| anyhow!("Camera discovery failed. Try refreshing devices."))?
+}
+
+/// Intercept before regular application startup. No settings or account storage is opened.
+pub fn run_list_helper() {
+    if let Ok(infos) = nokhwa::query(ApiBackend::Auto)
+        && let Ok(bytes) = serde_json::to_vec(&camera_devices(&infos))
+    {
+        let _ = write_bounded(&mut std::io::stdout().lock(), &bytes, MAX_DEVICE_LIST);
+    }
+}
 
 #[derive(Default)]
 struct Frames {
@@ -102,34 +254,32 @@ pub struct VideoSession {
 impl VideoSession {
     /// Called only after an explicit video action. Device/permission errors are returned without
     /// upgrading the call. Slow native camera operations run outside the WhatsApp worker.
-    pub async fn open() -> Result<Self> {
+    pub async fn open(selected: Option<String>) -> Result<Self> {
         let stop = Arc::new(AtomicBool::new(false));
         let view = VideoView::default();
         let (encoded, source) = async_channel::bounded(2);
         let (sink, peer) = async_channel::bounded::<VideoFrame>(2);
         let (ready, opened) = async_channel::bounded(1);
-        let mut command = Command::new(std::env::current_exe()?);
-        command
-            .arg("--camera-helper")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null());
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            command.creation_flags(0x0800_0000);
-        }
-        let mut process = command.spawn()?;
+        let mut command = helper_command("--camera-helper")?;
+        let mut process = HelperChild(Some(command.spawn()?));
         let mut output = process
+            .process()
             .stdout
             .take()
             .ok_or_else(|| anyhow!("camera helper has no output pipe"))?;
         let mut input = process
+            .process()
             .stdin
             .take()
             .ok_or_else(|| anyhow!("camera helper has no control pipe"))?;
+        let selection = serde_json::to_vec(&selected)?;
+        if selection.len() > MAX_SELECTION {
+            return Err(anyhow!(
+                "The saved camera selection is invalid. Choose another camera."
+            ));
+        }
         let (control, requests) = async_channel::bounded::<()>(1);
-        let child = Arc::new(Mutex::new(Some(process)));
+        let child = Arc::new(Mutex::new(Some(process.into_process())));
         let session = Self {
             handle: None,
             stop: stop.clone(),
@@ -142,6 +292,11 @@ impl VideoSession {
         std::thread::Builder::new()
             .name("camera-keyframe-control".into())
             .spawn(move || {
+                // Pipe writes can block before a newly spawned helper starts reading. Keep this
+                // off the runtime, with the session already owning the kill-on-cancel guard.
+                if write_bounded(&mut input, &selection, MAX_SELECTION).is_err() {
+                    return;
+                }
                 while requests.recv_blocking().is_ok() {
                     if input.write_all(&[1]).is_err() {
                         break;
@@ -174,6 +329,12 @@ impl VideoSession {
                             if encoded.try_send(payload).is_err() {
                                 request_keyframe(&control);
                             }
+                        }
+                        3 => {
+                            let _ = ready.try_send(Err(
+                                "The selected camera is unavailable. Choose another camera.",
+                            ));
+                            break;
                         }
                         _ => break,
                     }
@@ -296,6 +457,13 @@ fn request_keyframe(control: &async_channel::Sender<()>) {
 /// Internal entry point, intercepted before settings, logging, sessions, or the archive open.
 /// The helper communicates only through inherited private pipes and never logs media.
 pub fn run_helper() {
+    let mut input = std::io::stdin();
+    let selected = read_bounded(&mut input, MAX_SELECTION)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Option<String>>(&bytes).ok());
+    let Some(selected) = selected else {
+        return;
+    };
     let stop = Arc::new(AtomicBool::new(false));
     let keyframe = Arc::new(AtomicBool::new(true));
     let command_stop = stop.clone();
@@ -313,7 +481,7 @@ pub fn run_helper() {
             command_stop.store(true, Ordering::Release);
         });
     let mut output = std::io::stdout().lock();
-    if capture(&stop, &keyframe, &mut output).is_err() {
+    if capture(selected.as_deref(), &stop, &keyframe, &mut output).is_err() {
         let _ = write_packet(&mut output, 2, &[]);
     }
 }
@@ -335,7 +503,7 @@ fn read_packet(input: &mut impl Read) -> std::io::Result<(u8, Vec<u8>)> {
     let mut header = [0_u8; 5];
     input.read_exact(&mut header)?;
     let size = u32::from_le_bytes(header[1..].try_into().expect("fixed header")) as usize;
-    if size > MAX_AU || header[0] > 2 || (header[0] != 1 && size != 0) {
+    if size > MAX_AU || header[0] > 3 || (header[0] != 1 && size != 0) {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             "invalid camera helper frame",
@@ -346,7 +514,12 @@ fn read_packet(input: &mut impl Read) -> std::io::Result<(u8, Vec<u8>)> {
     Ok((header[0], payload))
 }
 
-fn capture(stop: &AtomicBool, keyframe: &AtomicBool, output: &mut impl Write) -> Result<()> {
+fn capture(
+    selected: Option<&str>,
+    stop: &AtomicBool,
+    keyframe: &AtomicBool,
+    output: &mut impl Write,
+) -> Result<()> {
     if stop.load(Ordering::Acquire) {
         return Ok(());
     }
@@ -369,7 +542,18 @@ fn capture(stop: &AtomicBool, keyframe: &AtomicBool, output: &mut impl Write) ->
     let requested = RequestedFormat::new::<RgbFormat>(RequestedFormatType::Closest(
         CameraFormat::new(Resolution::new(WIDTH, HEIGHT), FrameFormat::MJPEG, FPS),
     ));
-    let mut camera = Camera::new(CameraIndex::Index(0), requested)?;
+    let index = if selected.is_some() {
+        match selected_index(&nokhwa::query(ApiBackend::Auto)?, selected) {
+            Ok(index) => index,
+            Err(error) => {
+                write_packet(output, 3, &[])?;
+                return Err(error);
+            }
+        }
+    } else {
+        CameraIndex::Index(0)
+    };
+    let mut camera = Camera::new(index, requested)?;
     if stop.load(Ordering::Acquire) {
         return Ok(());
     }
@@ -399,11 +583,12 @@ fn capture(stop: &AtomicBool, keyframe: &AtomicBool, output: &mut impl Write) ->
         if rgb.width() == 0 || rgb.height() == 0 || rgb.width() > 4096 || rgb.height() > 4096 {
             return Err(anyhow!("unsupported camera dimensions"));
         }
+        let (width, height) = encoding_dimensions(rgb.width(), rgb.height())?;
         let rgb =
-            image::imageops::resize(&rgb, WIDTH, HEIGHT, image::imageops::FilterType::Triangle);
+            image::imageops::resize(&rgb, width, height, image::imageops::FilterType::Triangle);
         let yuv = YUVBuffer::from_rgb8_source(RgbSliceU8::new(
             rgb.as_raw(),
-            (WIDTH as usize, HEIGHT as usize),
+            (width as usize, height as usize),
         ));
         if keyframe.swap(false, Ordering::AcqRel) || number.is_multiple_of(u64::from(FPS) * 2) {
             encoder.force_intra_frame();
@@ -425,6 +610,17 @@ fn capture(stop: &AtomicBool, keyframe: &AtomicBool, output: &mut impl Write) ->
     Ok(())
 }
 
+// H.264 needs even dimensions. Bound the longest side and retain portrait/landscape shape,
+// allowing only the subpixel rounding needed by the chroma plane, never a fixed 4:3 stretch.
+fn encoding_dimensions(width: u32, height: u32) -> Result<(u32, u32)> {
+    if width < 2 || height < 2 || width > 4096 || height > 4096 {
+        return Err(anyhow!("unsupported camera dimensions"));
+    }
+    let scale = (640.0 / f64::from(width.max(height))).min(1.0);
+    let even = |value: u32| ((f64::from(value) * scale).round() as u32 / 2 * 2).max(2);
+    Ok((even(width), even(height)))
+}
+
 fn encoder() -> Result<Encoder> {
     let config = EncoderConfig::new()
         .bitrate(BitRate::from_bps(600_000))
@@ -440,16 +636,78 @@ fn encoder() -> Result<Encoder> {
 mod tests {
     use super::*;
     #[test]
+    fn camera_selection_survives_reordering_and_refuses_a_missing_device() {
+        let a = CameraInfo::new("Front", "", "device-a", CameraIndex::Index(0));
+        let b = CameraInfo::new("Rear", "", "device-b", CameraIndex::Index(1));
+        let chosen = camera_id(&b);
+        let reordered = CameraInfo::new("Rear", "", "device-b", CameraIndex::Index(0));
+        assert_eq!(
+            selected_index(&[reordered, a.clone()], Some(&chosen)).unwrap(),
+            CameraIndex::String("device-b".into())
+        );
+        assert!(selected_index(&[a], Some(&chosen)).is_err());
+        assert_eq!(selected_index(&[], None).unwrap(), CameraIndex::Index(0));
+    }
+
+    #[test]
+    fn replacement_at_the_same_v4l_node_does_not_match_the_saved_camera() {
+        let previous = CameraInfo::new("Front", "/dev/video0", "", CameraIndex::Index(0));
+        let replacement = CameraInfo::new("Other", "/dev/video0", "", CameraIndex::Index(0));
+        assert!(selected_index(&[replacement], Some(&camera_id(&previous))).is_err());
+    }
+
+    #[test]
+    fn metadata_pipe_round_trips_and_rejects_oversized_or_truncated_input() {
+        let device = CameraDevice {
+            id: "invented-device".into(),
+            label: "Invented camera".into(),
+        };
+        let mut bytes = Vec::new();
+        write_bounded(
+            &mut bytes,
+            &serde_json::to_vec(&vec![device.clone()]).unwrap(),
+            MAX_DEVICE_LIST,
+        )
+        .unwrap();
+        let payload = read_bounded(&mut bytes.as_slice(), MAX_DEVICE_LIST).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<Vec<CameraDevice>>(&payload).unwrap(),
+            vec![device]
+        );
+        bytes.pop();
+        assert!(read_bounded(&mut bytes.as_slice(), MAX_DEVICE_LIST).is_err());
+        assert!(
+            read_bounded(
+                &mut ((MAX_DEVICE_LIST + 1) as u32).to_le_bytes().as_slice(),
+                MAX_DEVICE_LIST
+            )
+            .is_err()
+        );
+        assert!(write_bounded(&mut Vec::new(), &[0; 5], 4).is_err());
+    }
+
+    #[test]
+    fn camera_encoding_keeps_portrait_and_landscape_shape() {
+        assert_eq!(encoding_dimensions(1920, 1080).unwrap(), (640, 360));
+        assert_eq!(encoding_dimensions(1080, 1920).unwrap(), (360, 640));
+        assert_eq!(encoding_dimensions(640, 480).unwrap(), (640, 480));
+        assert_eq!(encoding_dimensions(320, 240).unwrap(), (320, 240));
+        assert!(encoding_dimensions(0, 480).is_err());
+        assert!(encoding_dimensions(5000, 480).is_err());
+    }
+
+    #[test]
     fn synthetic_camera_picture_round_trips_through_h264_without_a_device() {
         use openh264::formats::YUVSource;
-        let rgb = vec![100_u8; WIDTH as usize * HEIGHT as usize * 3];
-        let yuv =
-            YUVBuffer::from_rgb8_source(RgbSliceU8::new(&rgb, (WIDTH as usize, HEIGHT as usize)));
-        let access = encoder().unwrap().encode(&yuv).unwrap().to_vec();
-        assert!(access.len() < MAX_AU);
-        let mut decoder = openh264::decoder::Decoder::new().unwrap();
-        let decoded = decoder.decode(&access).unwrap().unwrap();
-        assert_eq!(decoded.dimensions(), (WIDTH as usize, HEIGHT as usize));
+        for (width, height) in [(WIDTH as usize, HEIGHT as usize), (360, 640)] {
+            let rgb = vec![100_u8; width * height * 3];
+            let yuv = YUVBuffer::from_rgb8_source(RgbSliceU8::new(&rgb, (width, height)));
+            let access = encoder().unwrap().encode(&yuv).unwrap().to_vec();
+            assert!(access.len() < MAX_AU);
+            let mut decoder = openh264::decoder::Decoder::new().unwrap();
+            let decoded = decoder.decode(&access).unwrap().unwrap();
+            assert_eq!(decoded.dimensions(), (width, height));
+        }
     }
     #[test]
     fn preview_retains_only_the_latest_picture() {

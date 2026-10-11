@@ -138,6 +138,7 @@ fn header(app: &mut App, ui: &mut egui::Ui) {
                 vec2(ui.available_width(), super::conversation::HEADER_ROW),
                 Layout::left_to_right(Align::Center),
                 |ui| {
+                    super::accessibility::toolbar(ui, "Chat list controls");
                     if app.show_starred {
                         if theme::icon_button(
                             ui,
@@ -524,6 +525,7 @@ fn filter_chips(app: &mut App, ui: &mut egui::Ui) {
     ui.add_space(8.0);
     let output = widgets::chip_scroll_row(ui, "chat-filters", |ui| {
         ui.horizontal(|ui| {
+            super::accessibility::toolbar(ui, "Chat filters");
             ui.spacing_mut().item_spacing = vec2(4.0, 6.0);
             for filter in ChatFilter::EVERY {
                 let count = match filter {
@@ -579,6 +581,18 @@ fn filter_chips(app: &mut App, ui: &mut egui::Ui) {
                     let next = if selected { ChatFilter::All } else { filter };
                     app.actions.push(Action::SetChatFilter(next));
                 }
+            }
+            let statuses = widgets::filter_chip(
+                ui,
+                &palette,
+                &crate::i18n::gettext(app.locale, "Status"),
+                0,
+                false,
+            )
+            .tab_stop(Stop::Statuses);
+            if statuses.clicked() {
+                app.actions
+                    .push(Action::ShowDialog(crate::model::Dialog::Statuses));
             }
             if app.archived_count() > 0 || app.show_archived {
                 let selected = app.show_archived;
@@ -663,6 +677,15 @@ fn starred_list(app: &mut App, ui: &mut egui::Ui) {
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(ui, |ui| {
+            let visible_count = app
+                .starred
+                .iter()
+                .filter(|entry| {
+                    !app.chat(&entry.message.chat)
+                        .is_some_and(|chat| chat.locked)
+                })
+                .count();
+            super::accessibility::begin_results(ui, "Starred messages", visible_count);
             for entry in &app.starred {
                 if app
                     .chat(&entry.message.chat)
@@ -680,6 +703,7 @@ fn starred_list(app: &mut App, ui: &mut egui::Ui) {
                     &mut actions,
                 );
             }
+            super::accessibility::end_results(ui.ctx());
         });
     if app.starred_more
         && theme::pill_button(
@@ -753,6 +777,7 @@ fn starred_row(
     response.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), &label)
     });
+    super::accessibility::result_item(&response);
     if !ui.is_rect_visible(rect) {
         return;
     }
@@ -943,17 +968,40 @@ fn list(app: &mut App, ui: &mut egui::Ui) {
     // Rows touch: one clickable surface from top to bottom, no gaps or rules.
     ui.spacing_mut().item_spacing.y = 0.0;
     let row_height = theme::ROW_HEIGHT;
-    let total = chats.len();
+    let grouped = app.chat_filter != ChatFilter::Favorites && app.label_filter.is_none();
+    let rows = community_rows(&chats, &app.collapsed_communities, |chat| {
+        grouped && !chat.pinned && !app.has_draft(&chat.id)
+    });
+    let total = rows.len();
+    if ui.is_enabled() && !egui::Popup::is_any_open(ui.ctx()) {
+        let ids: Vec<_> = rows
+            .iter()
+            .map(|row| chat_row_id(&chats[row.chat].id).with("focus"))
+            .collect();
+        if let Some(index) = super::accessibility::navigate(ui.ctx(), &ids) {
+            app.scroll_chat_into_view = Some(chats[rows[index].chat].id.clone());
+        }
+    }
     let mut scroll_area = egui::ScrollArea::vertical()
         .id_salt("chat-list")
         .auto_shrink([false, false]);
     if to_top {
         scroll_area = scroll_area.vertical_scroll_offset(0.0);
     }
-    let target_row = app
-        .scroll_chat_into_view
-        .as_ref()
-        .and_then(|target| chats.iter().position(|chat| chat.id == *target));
+    let target_row = app.scroll_chat_into_view.as_ref().and_then(|target| {
+        rows.iter()
+            .position(|entry| chats[entry.chat].id == *target)
+            .or_else(|| {
+                let child = chats.iter().find(|chat| chat.id == *target)?;
+                let crate::model::CommunityRole::Member { parent, .. } =
+                    child.community.as_ref()?
+                else {
+                    return None;
+                };
+                rows.iter()
+                    .position(|entry| chats[entry.chat].id == *parent)
+            })
+    });
     // The copies a narrow window's slide draws have widget ids of their own:
     // they show the real list's offset instead of keeping one.
     let copy = ui
@@ -992,6 +1040,7 @@ fn list(app: &mut App, ui: &mut egui::Ui) {
         0.0
     };
     let output = scroll_area.show_rows(ui, row_height, total, |ui, range| {
+        super::accessibility::list(ui, "Chats", total);
         if carried != 0.0 {
             ui.scroll_with_delta_animation(
                 vec2(0.0, carried),
@@ -999,11 +1048,84 @@ fn list(app: &mut App, ui: &mut egui::Ui) {
             );
         }
         for index in range {
-            let chat = &chats[index];
+            let entry = &rows[index];
+            let chat = &chats[entry.chat];
             // Key by chat so an open menu survives list reordering.
             let response = ui
-                .push_id(("chat", &chat.id), |ui| row(app, ui, chat))
+                .push_id(("chat", &chat.id), |ui| {
+                    if entry.parent || entry.child {
+                        ui.horizontal(|ui| {
+                            if entry.parent {
+                                let collapsed = app.collapsed_communities.contains(&chat.id);
+                                let (rect, toggle) =
+                                    ui.allocate_exact_size(vec2(24.0, row_height), Sense::click());
+                                let label = crate::i18n::gettext(
+                                    app.locale,
+                                    if collapsed {
+                                        "Expand community"
+                                    } else {
+                                        "Collapse community"
+                                    },
+                                );
+                                toggle.widget_info(|| {
+                                    egui::WidgetInfo::labeled(
+                                        egui::WidgetType::Button,
+                                        ui.is_enabled(),
+                                        label.as_ref(),
+                                    )
+                                });
+                                if ui.is_rect_visible(rect) {
+                                    let icon = if collapsed {
+                                        Icon::ChevronRight
+                                    } else {
+                                        Icon::ChevronDown
+                                    };
+                                    icon.image(palette.dim, 16.0).paint_at(
+                                        ui,
+                                        Rect::from_center_size(rect.center(), Vec2::splat(16.0)),
+                                    );
+                                }
+                                if toggle.clicked() {
+                                    app.actions.push(Action::ToggleCommunity(chat.id.clone()));
+                                }
+                            } else {
+                                ui.add_space(24.0);
+                            }
+                            row(app, ui, chat)
+                        })
+                        .inner
+                    } else {
+                        row(app, ui, chat)
+                    }
+                })
                 .inner;
+            super::accessibility::item(&response, index, total);
+            if entry.parent && response.has_focus() && !egui::Popup::is_any_open(ui.ctx()) {
+                let expand = ui.input_mut(|input| {
+                    if super::keys::take_plain(input, egui::Key::ArrowRight) {
+                        Some(true)
+                    } else if super::keys::take_plain(input, egui::Key::ArrowLeft) {
+                        Some(false)
+                    } else {
+                        None
+                    }
+                });
+                if expand.is_some() {
+                    ui.ctx()
+                        .data_mut(|data| data.insert_temp(crate::theme::keyboard_focus_id(), true));
+                    ui.memory_mut(|memory| memory.move_focus(egui::FocusDirection::None));
+                }
+                if let Some(expand) = expand
+                    && expand == app.collapsed_communities.contains(&chat.id)
+                {
+                    let marker = response.id.with("community-keyboard-frame");
+                    let frame = ui.ctx().cumulative_frame_nr();
+                    if ui.ctx().data(|data| data.get_temp::<u64>(marker)) != Some(frame) {
+                        ui.ctx().data_mut(|data| data.insert_temp(marker, frame));
+                        app.actions.push(Action::ToggleCommunity(chat.id.clone()));
+                    }
+                }
+            }
             // Store the row rect for interaction tests.
             ui.ctx()
                 .data_mut(|data| data.insert_temp(chat_row_id(&chat.id), response.rect));
@@ -1025,6 +1147,68 @@ fn list(app: &mut App, ui: &mut egui::Ui) {
     #[cfg(test)]
     ui.ctx()
         .data_mut(|data| data.insert_temp(list_offset_id(), output.state.offset.y));
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct CommunityRow {
+    chat: usize,
+    parent: bool,
+    child: bool,
+}
+
+/// Group only known visible parents. Pins, drafts, Favorites, locks, filters and
+/// unknown membership retain the ordinary list, without exposing another chat.
+fn community_rows(
+    chats: &[Chat],
+    collapsed: &std::collections::HashSet<String>,
+    eligible: impl Fn(&Chat) -> bool,
+) -> Vec<CommunityRow> {
+    use crate::model::CommunityRole;
+    let parents: std::collections::HashMap<_, _> = chats
+        .iter()
+        .enumerate()
+        .filter(|(_, chat)| eligible(chat) && matches!(chat.community, Some(CommunityRole::Parent)))
+        .map(|(index, chat)| (chat.id.as_str(), index))
+        .collect();
+    let mut children: std::collections::HashMap<usize, Vec<usize>> =
+        std::collections::HashMap::new();
+    let mut membership = std::collections::HashMap::new();
+    for (index, chat) in chats.iter().enumerate().filter(|(_, chat)| eligible(chat)) {
+        if let Some(CommunityRole::Member { parent, .. }) = &chat.community
+            && let Some(&owner) = parents.get(parent.as_str())
+        {
+            children.entry(owner).or_default().push(index);
+            membership.insert(index, owner);
+        }
+    }
+    let mut emitted = std::collections::HashSet::new();
+    let mut rows = Vec::with_capacity(chats.len());
+    for index in 0..chats.len() {
+        let owner = membership.get(&index).copied().unwrap_or(index);
+        if let Some(members) = children.get(&owner) {
+            if emitted.insert(owner) {
+                rows.push(CommunityRow {
+                    chat: owner,
+                    parent: true,
+                    child: false,
+                });
+                if !collapsed.contains(&chats[owner].id) {
+                    rows.extend(members.iter().map(|&chat| CommunityRow {
+                        chat,
+                        parent: false,
+                        child: true,
+                    }));
+                }
+            }
+        } else {
+            rows.push(CommunityRow {
+                chat: index,
+                parent: false,
+                child: false,
+            });
+        }
+    }
+    rows
 }
 
 /// Set while a narrow window's slide draws copies of the list.
@@ -1175,6 +1359,11 @@ fn results(app: &mut App, ui: &mut egui::Ui) {
         .id_salt("search-results")
         .auto_shrink([false, false])
         .show(ui, |ui| {
+            super::accessibility::begin_results(
+                ui,
+                "Search results",
+                chats.len() + hits.len() + contacts.len() + usize::from(offer_self),
+            );
             if !chats.is_empty() {
                 section(ui, &palette, "Chats");
                 for chat in &chats {
@@ -1205,6 +1394,7 @@ fn results(app: &mut App, ui: &mut egui::Ui) {
                 }
             }
             ui.add_space(8.0);
+            super::accessibility::end_results(ui.ctx());
         });
 }
 
@@ -1246,6 +1436,18 @@ fn hit_row(app: &mut App, ui: &mut egui::Ui, hit: &Message) {
         crate::settings::ScreenPrivacyWhat::Preview,
         response.hovered(),
     );
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Button,
+            ui.is_enabled(),
+            if hidden_name || hidden_preview {
+                "Message search result".to_owned()
+            } else {
+                format!("{title}: {}", hit.summary())
+            },
+        )
+    });
+    super::accessibility::result_item(&response);
     if ui.is_rect_visible(rect) {
         if response.hovered() {
             widgets::row_highlight(ui, &palette, rect, palette.surface_hover);
@@ -1383,6 +1585,7 @@ fn person_row(
         Sense::click(),
     );
     theme::reveal_focus(&response);
+    super::accessibility::result_item(&response);
     let hidden_avatar = app.settings.screen_privacy.hides(
         crate::settings::ScreenPrivacyWhat::Avatar,
         response.hovered(),
@@ -1391,6 +1594,19 @@ fn person_row(
         .settings
         .screen_privacy
         .hides(crate::settings::ScreenPrivacyWhat::Name, response.hovered());
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Button,
+            ui.is_enabled(),
+            if hidden_name { "Contact" } else { name },
+        )
+    });
+    // The response was registered before its label, so restore its native item role.
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        if node.position_in_set().is_some() {
+            node.set_role(egui::accesskit::Role::ListItem);
+        }
+    });
     if ui.is_rect_visible(rect) {
         if response.hovered() {
             widgets::row_highlight(ui, &palette, rect, palette.surface_hover);
@@ -1457,10 +1673,11 @@ fn row(app: &mut App, ui: &mut egui::Ui, chat: &Chat) -> egui::Response {
         .is_some_and(|selected| *selected == chat.id);
     let now = crate::util::now();
     let muted = chat.muted(now);
-    let (rect, response) = ui.allocate_exact_size(
+    let (rect, _) = ui.allocate_exact_size(
         vec2(ui.available_width(), theme::ROW_HEIGHT),
-        Sense::click(),
+        Sense::hover(),
     );
+    let response = ui.interact(rect, chat_row_id(&chat.id).with("focus"), Sense::click());
     theme::reveal_focus(&response);
     // Screen privacy hides rows until hovered.
     let hidden_name = app
@@ -1485,6 +1702,7 @@ fn row(app: &mut App, ui: &mut egui::Ui, chat: &Chat) -> egui::Response {
             unread_announcement(if hidden_name { "Chat" } else { &title }, chat),
         )
     });
+    super::accessibility::result_item(&response);
     if ui.is_rect_visible(rect) {
         if selected {
             widgets::row_highlight(ui, &palette, rect, palette.surface_active);
@@ -2314,6 +2532,50 @@ fn sound_menu(app: &mut App, ui: &mut egui::Ui, palette: &Palette, chat: &Chat) 
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn communities_group_visible_members_without_reordering_pins_or_revealing_unknown_parents() {
+        use crate::model::CommunityRole;
+        use std::collections::HashSet;
+        let mut parent = Chat::new("community@g.us".into(), "Synthetic community".into());
+        parent.community = Some(crate::model::CommunityRole::Parent);
+        let member = |id: &str, parent: &str| {
+            let mut chat = Chat::new(id.into(), "Synthetic group".into());
+            chat.community = Some(CommunityRole::Member {
+                parent: parent.into(),
+                announcement: false,
+                general: false,
+            });
+            chat
+        };
+        let mut pinned = member("pinned@g.us", &parent.id);
+        pinned.pinned = true;
+        let chats = vec![
+            pinned,
+            member("new@g.us", &parent.id),
+            Chat::new("direct".into(), "Direct".into()),
+            parent,
+            member("older@g.us", "community@g.us"),
+            member("unknown@g.us", "hidden@g.us"),
+        ];
+        let rows = community_rows(&chats, &HashSet::new(), |chat| !chat.pinned);
+        assert_eq!(
+            rows.iter().map(|row| row.chat).collect::<Vec<_>>(),
+            vec![0, 3, 1, 4, 2, 5]
+        );
+        assert!(rows[1].parent && rows[2].child && rows[3].child);
+        let closed = community_rows(&chats, &HashSet::from(["community@g.us".into()]), |chat| {
+            !chat.pinned
+        });
+        assert_eq!(
+            closed.iter().map(|row| row.chat).collect::<Vec<_>>(),
+            vec![0, 3, 2, 5]
+        );
+        let flat = community_rows(&chats, &HashSet::new(), |_| false);
+        assert_eq!(
+            flat.iter().map(|row| row.chat).collect::<Vec<_>>(),
+            (0..chats.len()).collect::<Vec<_>>()
+        );
+    }
     use super::*;
 
     #[test]
@@ -2774,6 +3036,85 @@ mod tests {
             },
         );
         output.textures_delta.clear();
+    }
+
+    #[test]
+    fn focused_community_parent_expands_and_collapses_with_arrows() {
+        let (_directory, mut app, _ids, ctx) = rail_app(0);
+        let mut parent = Chat::new(
+            "fixture-community@g.us".into(),
+            "Synthetic community".into(),
+        );
+        parent.community = Some(crate::model::CommunityRole::Parent);
+        let parent_id = parent.id.clone();
+        app.chats.push(parent);
+        let mut child = Chat::new("fixture-child@g.us".into(), "Synthetic child".into());
+        child.community = Some(crate::model::CommunityRole::Member {
+            parent: parent_id.clone(),
+            announcement: false,
+            general: false,
+        });
+        app.chats.push(child);
+        let frame = |app: &mut App, events, relayout| {
+            let mut passes = 0;
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(900.0, 600.0))),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    show(app, ui);
+                    passes += 1;
+                    if relayout && passes == 1 {
+                        ui.ctx().request_discard("community arrow relayout");
+                    }
+                },
+            );
+            output.textures_delta.clear();
+        };
+        frame(&mut app, vec![], false);
+        let parent_focus = chat_row_id(&parent_id).with("focus");
+        assert!(ctx.read_response(parent_focus).is_some());
+        for (collapsed, key, expected) in [
+            (false, egui::Key::ArrowLeft, 1),
+            (true, egui::Key::ArrowRight, 1),
+            (false, egui::Key::ArrowRight, 0),
+            (true, egui::Key::ArrowLeft, 0),
+        ] {
+            app.actions.clear();
+            if collapsed {
+                app.collapsed_communities.insert(parent_id.clone());
+            } else {
+                app.collapsed_communities.remove(&parent_id);
+            }
+            ctx.memory_mut(|memory| memory.request_focus(parent_focus));
+            frame(
+                &mut app,
+                vec![egui::Event::Key {
+                    key,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                true,
+            );
+            assert_eq!(
+                app.actions
+                    .iter()
+                    .filter(
+                        |action| matches!(action, Action::ToggleCommunity(id) if id == &parent_id)
+                    )
+                    .count(),
+                expected
+            );
+            assert!(
+                !app.actions
+                    .iter()
+                    .any(|action| matches!(action, Action::OpenChat(_)))
+            );
+        }
     }
 
     #[test]

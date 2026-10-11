@@ -1,0 +1,76 @@
+{
+  "generated_at_utc": "2026-10-11T14:52:41.124259+00:00",
+  "local_head": "c9b5672e2b8f0fa205e84d9739e4a4fadef78cf0",
+  "state": "uncommitted source, no build or runtime acceptance",
+  "cache_policy": "preserve every archived attachment; clean unused files only; default off",
+  "inventory": {
+    "unique_items": 153,
+    "pull_requests": 66,
+    "issues": 87,
+    "covered": 75,
+    "unchecked": 78
+  },
+  "checks": [
+    {
+      "name": "rustfmt --check, edition 2024, skip_children=true, changed Rust and new cache module",
+      "exit_code": 0,
+      "scope": "formatting and syntax parsing only"
+    },
+    {
+      "name": "pinned fastframe-i18n update-translations.sh --check with translated:2",
+      "exit_code": 0,
+      "scope": "source extraction plus GNU catalog format checks"
+    },
+    {
+      "name": "git diff --check",
+      "exit_code": 0
+    },
+    {
+      "name": "inventory uniqueness, new setting defaults, camera call-site arity, checkpoint links",
+      "exit_code": 0,
+      "scope": "static assertions only"
+    }
+  ],
+  "deferred": [
+    "Cargo build/test/Clippy/rustdoc",
+    "platform compilation and native packaging",
+    "synthetic Rust regression execution",
+    "visual matrix",
+    "physical camera/phone and screen-reader acceptance"
+  ],
+  "sha256": {
+    "assets/i18n/de.po": "896982827e3bcfab4615932b1bc0a4e217761e3deb84c3d2d11b5aad364cafab",
+    "assets/i18n/es.po": "7337aac27a25488b4745a2d34cdb383a4ae6802cc85da084cc6d364c526c333b",
+    "assets/i18n/fr.po": "c166883cea83293cbc2c433bb6d8f6185fa8683b0d4990dae9759ed330e6ad7a",
+    "assets/i18n/id.po": "a8b65ad2c9ab469002d7ba1fa854d277a76c966a9f0afd4476129ad6bdc59671",
+    "assets/i18n/it.po": "4d5cc74ecee89834e6fe425f9392ef4c537ccb08e5527e533790bd27efde923e",
+    "assets/i18n/pt-BR.po": "2875eb8dfce1d6d823a48ee716c023d92f00ae69c7e4455d0aecf6386b35f6d9",
+    "assets/i18n/ru.po": "3e0e39123876b1e968991710881a10ba78239044a89545992ac5535ef5161db8",
+    "assets/i18n/tr.po": "9aea7830b943b4b5360d22b26ae66f6d26e3e1ece0ecec5ff548919737dc6a1d",
+    "assets/i18n/zapfast.pot": "17cef5a4a8a66d98a26f5d806855f4ea821a60bc847aacea4ef409a95b7f2afc",
+    "assets/i18n/zh-Hans.po": "c11c35bb37b477207e5added2cd59a6df25395ebdd54bed35fe5eef1aa76cebc",
+    "assets/i18n/zh-Hant.po": "87944fd349b488a2bc4d8afa236f6dfe5a0835edec782e2eca8be3772aedeaa2",
+    "docs/_guide/using-zapfast.md": "7ec5d462d799d5886c9555aac6516b5d0637d9441cce4f727882539777cc897a",
+    "docs/cache-retention.md": "40b7cea6b2445f2d3a0187f1a4634d489562f0de43831c56623321ba28162e9d",
+    "docs/development-backlog-20261010.md": "4923f9a28e5cf55191e30b3ee7113f3c0e62e0caf30eeca21a9aa12860158c5d",
+    "docs/development-batch-20261011.md": "d79413139fb49ce469506ca1b3a7b98c62202b12809394a8a820f06f3cac5b04",
+    "docs/development-resume-20261010.md": "5db830dadcfecd07e56bb1371a0f72ccff8c04faf0d4f59aed741c217472d8b8",
+    "docs/upstream-capabilities-20261011.md": "89ad6497e1f27ebc19a4cbb1e85ebf6a80e283bfac31cf925e688581642c785d",
+    "src/account.rs": "82cbbe0ea0aa5bc18a4b49f334db99f919a25fc519968e219f566ab4b845207f",
+    "src/app.rs": "8b767f4f06e4655294be363c385bad373639086b5827e025b2372e9334ac445e",
+    "src/archive/storage.rs": "d5c55bdad6db59d9e2a89e91c2e20a138aeabe94df3a520869ae4be65e597c82",
+    "src/backend.rs": "98926d0619c454c65297a769feea5204e12ff4a7274103dba39374b50959bca6",
+    "src/backend/worker.rs": "5c07194e5836bbc25bf36862b1d739e6378968babe59bac384fe14566da50273",
+    "src/backend/worker/cache_retention.rs": "af54775b87b985ef670db28149d8573855d14ba5283e6f5e273adef69573d91f",
+    "src/backend/worker/calls.rs": "12fb36156ab09ae6bbbc38dd9c4e2727b5100b1e6520f7e106edc0a0e1bd4882",
+    "src/bidi.rs": "e1faafebcc43a9ac90c2286a5496183c76637fd016edfa714f11820e7de854be",
+    "src/calls.rs": "bf233d09d7883e19a30feaf2d5f476067529f79503cc7cc602c899e05b0563dc",
+    "src/camera.rs": "3154590d705dafbdfef05fe549c8535706f8bc22399e14315f40f8f375f7fb0a",
+    "src/demo.rs": "5b819e9f9eb7cd9d000e40823fb6416ffb8badd47dca9a4e6b87ea5fc206f86e",
+    "src/main.rs": "c662b98d93fb02df1e6c8c87a8cf33d9bf26a41c12a17fae7c1710bdce10e6f0",
+    "src/model.rs": "db8ebcd96ec541a5a992e73d4703caa0baf263020b58e3072a6bb987a8dd3380",
+    "src/settings.rs": "61cff8c7dc616f93c62663195c74a3e64687e873ec61abd843e3629c1415956c",
+    "src/ui/call.rs": "d0d2365e4049223b34088303790e434fb4011d557173a8ef82916e0976db618a",
+    "src/ui/settings.rs": "4296c4c1f482b050087d4cca96085fa89b9896ac51184e58e03c857414f447da"
+  }
+}

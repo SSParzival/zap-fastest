@@ -303,6 +303,62 @@ fn devices(app: &mut App, ui: &mut egui::Ui) {
             });
         }
     }
+    ui.label(gettext(locale, "Camera"));
+    let mut camera = app.account().settings.call_camera.clone();
+    let before = camera.clone();
+    let label = app
+        .call_devices
+        .cameras
+        .iter()
+        .find(|entry| camera.as_deref() == Some(entry.id.as_str()))
+        .map(|entry| std::borrow::Cow::Borrowed(entry.label.as_str()))
+        .unwrap_or_else(|| {
+            if camera.is_some() {
+                if app.call_devices.cameras_discovered {
+                    gettext(locale, "Selected camera unavailable")
+                } else {
+                    gettext(locale, "Saved camera (refresh devices)")
+                }
+            } else {
+                gettext(locale, "System default")
+            }
+        });
+    let camera_selector =
+        egui::ComboBox::from_id_salt(("call-camera-device", app.account().id.as_str()))
+            .selected_text(label)
+            .truncate()
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut camera, None, gettext(locale, "System default"));
+                for entry in &app.call_devices.cameras {
+                    ui.selectable_value(&mut camera, Some(entry.id.clone()), &entry.label);
+                }
+            });
+    #[cfg(test)]
+    ui.ctx().data_mut(|data| {
+        data.insert_temp(
+            camera_bounds_id(app.account().id.as_str()),
+            (camera_selector.response.rect, ui.clip_rect()),
+        );
+    });
+    let _ = camera_selector;
+    ui.label(gettext(locale, "Used next time the camera is turned on."));
+    if app.call_devices.camera_error.is_some() {
+        ui.label(gettext(
+            locale,
+            "Camera discovery failed. Try refreshing devices.",
+        ));
+    }
+    if camera != before {
+        app.actions.push(Action::SetCallCamera(camera));
+    }
+    if ui.button(gettext(locale, "Refresh devices")).clicked() {
+        app.actions.push(Action::RefreshAudioDevices);
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn camera_bounds_id(account: &str) -> egui::Id {
+    egui::Id::new(("call-camera-bounds", account))
 }
 
 #[cfg(test)]

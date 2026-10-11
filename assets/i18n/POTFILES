@@ -25,3 +25,4 @@ src/ui/gallery.rs
 src/ui/login.rs
 src/ui/archive_backup.rs
 src/ui/call.rs
+src/ui/statuses.rs
