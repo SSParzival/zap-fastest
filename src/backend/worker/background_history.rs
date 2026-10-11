@@ -10,12 +10,25 @@ use std::{
 };
 
 const PACE: Duration = Duration::from_secs(20);
-const MAX_CHATS: usize = 10;
 const MAX_PAGES: u8 = 5;
 const MAX_REQUESTS: u8 = 50;
 
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+struct Checkpoint {
+    cursor: usize,
+    day: i64,
+    requests: u32,
+    next_request: i64,
+    retries: HashMap<ChatId, (u8, i64)>,
+}
+
 #[derive(Default)]
 pub(super) struct Recovery {
+    pub response: crate::model::HistoryResponseState,
+    pub full: bool,
+    pub daily_budget: u32,
+    checkpoint: Checkpoint,
     pub enabled: bool,
     pub paused: bool,
     pub focused: Option<ChatId>,
@@ -33,7 +46,20 @@ pub(super) struct Recovery {
 }
 
 impl Recovery {
+    pub fn restore(&mut self, value: &str) -> Result<(), serde_json::Error> {
+        self.checkpoint = serde_json::from_str(value)?;
+        self.cursor = self.checkpoint.cursor;
+        Ok(())
+    }
+    pub fn checkpoint(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string(&self.checkpoint)
+    }
     pub fn canonicalize(&mut self, old: &str, new: &str) {
+        if let Some(retry) = self.checkpoint.retries.remove(old) {
+            let target = self.checkpoint.retries.entry(new.to_owned()).or_default();
+            target.0 = target.0.max(retry.0);
+            target.1 = target.1.max(retry.1);
+        }
         if let Some(pages) = self.pages.remove(old) {
             let total = self.pages.entry(new.to_owned()).or_default();
             *total = total.saturating_add(pages);
@@ -68,6 +94,7 @@ impl Recovery {
         }
     }
     pub fn started(&mut self, chat: &str, requested: Instant) {
+        self.response = crate::model::HistoryResponseState::Waiting;
         self.started.insert(chat.to_owned(), requested);
     }
     pub fn session(&self, id: &str) -> Option<&(ChatId, Instant)> {
@@ -125,44 +152,81 @@ impl Recovery {
         self.polls.contains(chat)
     }
     pub fn answered(&mut self, chat: &str, progress: bool) -> bool {
+        self.response = crate::model::HistoryResponseState::Answered;
         self.polls.remove(chat);
         let owned = self.silent.remove(chat);
         if owned && !progress {
-            self.stopped.insert(chat.to_owned());
+            self.stop(chat);
+        } else if owned {
+            self.checkpoint.retries.remove(chat);
         }
         owned
     }
     pub fn stop(&mut self, chat: &str) {
-        self.stopped.insert(chat.to_owned());
+        if self.started.contains_key(chat) {
+            self.response = crate::model::HistoryResponseState::NoResponse;
+        }
+        if self.full {
+            let retry = self.checkpoint.retries.entry(chat.to_owned()).or_default();
+            retry.0 = retry.0.saturating_add(1).min(10);
+            retry.1 = crate::util::now() + (60_i64 * (1 << retry.0)).min(3600);
+            // An exact old session identity still protects late responses.
+            // Untagged sends retain their owner until reconnect.
+            if self.correlated(chat) {
+                self.silent.remove(chat);
+            }
+        } else {
+            self.stopped.insert(chat.to_owned());
+        }
     }
     /// Reconnect releases uncorrelated leases but never renews session budgets.
     pub fn reconnect(&mut self) {
+        self.response = crate::model::HistoryResponseState::Unknown;
         self.silent.clear();
         self.polls.clear();
         self.started.clear();
         self.early.clear();
     }
     pub fn next(&mut self, candidates: &[ChatId], now: Instant) -> Option<ChatId> {
+        let timestamp = crate::util::now();
+        let day = timestamp.div_euclid(86_400);
+        if day != self.checkpoint.day {
+            self.checkpoint.day = day;
+            self.checkpoint.requests = 0;
+        }
         if !self.enabled
             || self.paused
-            || self.requests >= MAX_REQUESTS
+            || (!self.full && self.requests >= MAX_REQUESTS)
+            || (self.full
+                && (self.checkpoint.requests >= self.daily_budget.max(1)
+                    || timestamp < self.checkpoint.next_request))
             || self.due.is_some_and(|due| now < due)
         {
             return None;
         }
-        let len = candidates.len().min(MAX_CHATS);
+        let len = candidates.len();
         for step in 0..len {
             let index = (self.cursor + step) % len;
             let chat = &candidates[index];
             if self.owns(chat)
                 || self.stopped.contains(chat)
-                || self.pages.get(chat).copied().unwrap_or_default() >= MAX_PAGES
+                || (self.full
+                    && self
+                        .checkpoint
+                        .retries
+                        .get(chat)
+                        .is_some_and(|(_, due)| timestamp < *due))
+                || (!self.full && self.pages.get(chat).copied().unwrap_or_default() >= MAX_PAGES)
             {
                 continue;
             }
             self.cursor = (index + 1) % len;
-            *self.pages.entry(chat.clone()).or_default() += 1;
-            self.requests += 1;
+            let pages = self.pages.entry(chat.clone()).or_default();
+            *pages = pages.saturating_add(1);
+            self.requests = self.requests.saturating_add(1);
+            self.checkpoint.cursor = self.cursor;
+            self.checkpoint.requests = self.checkpoint.requests.saturating_add(1);
+            self.checkpoint.next_request = timestamp + PACE.as_secs() as i64;
             self.due = Some(now + PACE);
             self.claim(chat.clone());
             return Some(chat.clone());
@@ -174,6 +238,105 @@ impl Recovery {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn history_response_reports_observations_without_inferring_phone_availability() {
+        use crate::model::HistoryResponseState as State;
+        let mut recovery = Recovery::default();
+        assert_eq!(recovery.response, State::Unknown);
+        recovery.stop("unsent");
+        assert_eq!(recovery.response, State::Unknown);
+        recovery.started("fixture", Instant::now());
+        assert_eq!(recovery.response, State::Waiting);
+        recovery.stop("fixture");
+        assert_eq!(recovery.response, State::NoResponse);
+        recovery.answered("fixture", false);
+        assert_eq!(recovery.response, State::Answered);
+        recovery.reconnect();
+        assert_eq!(recovery.response, State::Unknown);
+    }
+
+    #[test]
+    fn canonical_identity_merge_keeps_the_stronger_persisted_backoff() {
+        let mut recovery = Recovery::default();
+        recovery
+            .checkpoint
+            .retries
+            .insert("old@lid".into(), (4, 900));
+        recovery
+            .checkpoint
+            .retries
+            .insert("new@s.whatsapp.net".into(), (1, 100));
+        recovery.canonicalize("old@lid", "new@s.whatsapp.net");
+        assert_eq!(
+            recovery.checkpoint.retries.get("new@s.whatsapp.net"),
+            Some(&(4, 900))
+        );
+        assert!(!recovery.checkpoint.retries.contains_key("old@lid"));
+        let saved = recovery.checkpoint().unwrap();
+        let mut restarted = Recovery::default();
+        restarted.restore(&saved).unwrap();
+        assert_eq!(
+            restarted.checkpoint.retries.get("new@s.whatsapp.net"),
+            Some(&(4, 900))
+        );
+    }
+    #[test]
+    fn full_mode_rotates_beyond_ten_chats_and_preserves_daily_budget() {
+        let mut recovery = Recovery {
+            enabled: true,
+            full: true,
+            daily_budget: 60,
+            ..Default::default()
+        };
+        let candidates: Vec<_> = (0..12).map(|index| format!("fixture-{index}")).collect();
+        let now = Instant::now();
+        for attempt in 0..60 {
+            // Advance the synthetic wall-clock gate without a real sleep.
+            recovery.checkpoint.next_request = 0;
+            let chat = recovery.next(&candidates, now + PACE * attempt).unwrap();
+            assert_eq!(chat, candidates[attempt as usize % candidates.len()]);
+            recovery.answered(&chat, true);
+        }
+        let saved = recovery.checkpoint().unwrap();
+        let mut restarted = Recovery {
+            enabled: true,
+            full: true,
+            daily_budget: 60,
+            ..Default::default()
+        };
+        restarted.restore(&saved).unwrap();
+        assert!(restarted.next(&candidates, now + PACE * 61).is_none());
+    }
+
+    #[test]
+    fn full_mode_no_progress_backoff_and_pacing_survive_restart() {
+        let mut recovery = Recovery {
+            enabled: true,
+            full: true,
+            daily_budget: 100,
+            ..Default::default()
+        };
+        let candidates = vec!["fixture-chat".into()];
+        let now = Instant::now();
+        let chat = recovery.next(&candidates, now).unwrap();
+        recovery.answered(&chat, false);
+        let saved = recovery.checkpoint().unwrap();
+        let mut restarted = Recovery {
+            enabled: true,
+            full: true,
+            daily_budget: 100,
+            ..Default::default()
+        };
+        restarted.restore(&saved).unwrap();
+        restarted.checkpoint.next_request = 0;
+        assert!(restarted.next(&candidates, now + PACE * 10).is_none());
+        restarted.checkpoint.retries.get_mut(&chat).unwrap().1 = 0;
+        assert_eq!(
+            restarted.next(&candidates, now + PACE * 11).as_deref(),
+            Some(chat.as_str())
+        );
+    }
+
     #[test]
     fn late_privacy_mapping_preserves_budget_and_correlated_ownership() {
         let now = Instant::now();

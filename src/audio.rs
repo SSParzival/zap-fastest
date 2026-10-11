@@ -39,6 +39,9 @@ pub struct Output {
     device: Option<rodio::cpal::DeviceId>,
     failed: Arc<AtomicBool>,
     checked: Instant,
+    preferred: Option<String>,
+    notice: Option<String>,
+    fallback: bool,
 }
 
 impl Output {
@@ -49,7 +52,7 @@ impl Output {
     /// Active playback already has a clock. Check routing at most once per
     /// second on that clock, without adding an idle repaint timer.
     pub fn route_changed(&mut self) -> bool {
-        use rodio::cpal::traits::{DeviceTrait, HostTrait};
+        use rodio::cpal::traits::DeviceTrait;
         if self.failed.load(Ordering::Acquire) {
             return true;
         }
@@ -57,34 +60,94 @@ impl Output {
             return false;
         }
         self.checked = Instant::now();
-        let current = rodio::cpal::default_host()
-            .default_output_device()
-            .and_then(|device| device.id().ok());
+        let current = selected_output(if self.fallback {
+            None
+        } else {
+            self.preferred.as_deref()
+        })
+        .and_then(|device| device.id().ok());
         current != self.device
     }
 }
 
-pub fn open_output() -> Result<Output, rodio::DeviceSinkError> {
+fn selected_output(preferred: Option<&str>) -> Option<rodio::cpal::Device> {
     use rodio::cpal::traits::{DeviceTrait, HostTrait};
-    let device = rodio::cpal::default_host()
-        .default_output_device()
-        .ok_or(rodio::DeviceSinkError::NoDevice)?;
-    let id = device.id().ok();
-    let failed = Arc::new(AtomicBool::new(false));
-    let report = failed.clone();
-    // Do not silently enumerate other devices when the selected one fails.
-    let mut sink = rodio::DeviceSinkBuilder::from_device(device)?
-        .with_error_callback(move |_| {
-            report.store(true, Ordering::Release);
+    let host = rodio::cpal::default_host();
+    preferred
+        .and_then(|name| {
+            host.output_devices().ok()?.find(|device| {
+                device
+                    .description()
+                    .is_ok_and(|description| description.name() == name)
+            })
         })
-        .open_stream()?;
-    sink.log_on_drop(false);
-    Ok(Output {
-        sink,
-        device: id,
-        failed,
-        checked: Instant::now(),
-    })
+        .or_else(|| host.default_output_device())
+}
+
+pub fn open_output() -> Result<Output, rodio::DeviceSinkError> {
+    open_output_on(None)
+}
+
+pub fn open_output_on(preferred: Option<&str>) -> Result<Output, rodio::DeviceSinkError> {
+    use rodio::cpal::traits::{DeviceTrait, HostTrait};
+    let host = rodio::cpal::default_host();
+    let selected = preferred.and_then(|name| {
+        host.output_devices().ok()?.find(|device| {
+            device
+                .description()
+                .is_ok_and(|description| description.name() == name)
+        })
+    });
+    let missing = preferred.is_some() && selected.is_none();
+    let device = selected
+        .or_else(|| host.default_output_device())
+        .ok_or(rodio::DeviceSinkError::NoDevice)?;
+    let open = |device: rodio::cpal::Device| {
+        let id = device.id().ok();
+        let failed = Arc::new(AtomicBool::new(false));
+        let report = failed.clone();
+        let mut sink = rodio::DeviceSinkBuilder::from_device(device)?
+            .with_error_callback(move |_| {
+                report.store(true, Ordering::Release);
+            })
+            .open_stream()?;
+        sink.log_on_drop(false);
+        Ok::<_, rodio::DeviceSinkError>(Output {
+            sink,
+            device: id,
+            failed,
+            checked: Instant::now(),
+            preferred: preferred.map(str::to_owned),
+            notice: None,
+            fallback: false,
+        })
+    };
+    let mut output = match open(device) {
+        Ok(output) => output,
+        Err(error) if preferred.is_some() => {
+            let Some(device) = host.default_output_device() else {
+                return Err(error);
+            };
+            let mut output = open(device)?;
+            output.fallback = true;
+            output.notice=Some("The selected audio output could not open. Playback uses the system default; choose an output in Settings.".into());
+            output
+        }
+        Err(error) => return Err(error),
+    };
+    if missing {
+        output.notice=Some("The selected audio output is unavailable. Playback uses the system default; choose an output in Settings.".into());
+    }
+    Ok(output)
+}
+
+impl Output {
+    pub fn matches_preference(&self, preferred: Option<&str>) -> bool {
+        self.preferred.as_deref() == preferred
+    }
+    pub fn take_notice(&mut self) -> Option<String> {
+        self.notice.take()
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -169,6 +232,8 @@ pub struct Player {
     bars: HashMap<String, Vec<u8>>,
     /// Message whose clip just played to its end, waiting to be taken.
     finished: Option<String>,
+    output_device: Option<String>,
+    notice: Option<String>,
 }
 
 struct Loaded {
@@ -219,7 +284,16 @@ impl Player {
             stretching: None,
             bars: HashMap::new(),
             finished: None,
+            output_device: None,
+            notice: None,
         }
+    }
+
+    pub fn set_output_device(&mut self, device: Option<String>) {
+        self.output_device = device;
+    }
+    pub fn take_notice(&mut self) -> Option<String> {
+        self.notice.take()
     }
 
     /// Current playback speed multiplier.
@@ -481,11 +555,9 @@ impl Player {
             // The speed may have moved on while this compression built.
             self.ensure_stretch();
         }
-        if self
-            .output
-            .as_mut()
-            .is_some_and(|(output, _)| output.route_changed())
-        {
+        if self.output.as_mut().is_some_and(|(output, _)| {
+            !output.matches_preference(self.output_device.as_deref()) || output.route_changed()
+        }) {
             let status = self
                 .loaded
                 .as_ref()
@@ -503,6 +575,14 @@ impl Player {
                         loaded.base = status.position;
                     }
                     return Err(error);
+                }
+                if status.state == State::Paused {
+                    if let Some((_, sink)) = self.output.as_ref() {
+                        sink.pause();
+                    }
+                    if let Some(loaded) = self.loaded.as_mut() {
+                        loaded.paused = true;
+                    }
                 }
             }
         }
@@ -556,7 +636,11 @@ impl Player {
         let total = clip_length(loaded.samples.len());
         let offset = ((fraction.clamp(0.0, 1.0) * buffer.len() as f32) as usize).min(buffer.len());
         if self.output.is_none() {
-            let device = open_output().map_err(|error| format!("No sound output: {error}"))?;
+            let mut device = open_output_on(self.output_device.as_deref()).map_err(|_| {
+                "Could not open sound output. Choose an output in Settings and resume playback."
+                    .to_owned()
+            })?;
+            self.notice = device.take_notice();
             let sink = rodio::Player::connect_new(device.mixer());
             self.output = Some((device, sink));
         }
@@ -604,11 +688,7 @@ fn decode_file(path: &Path) -> Result<Vec<f32>, String> {
 
 type Outcome = Arc<Mutex<Option<Result<Vec<f32>, String>>>>;
 
-/// Records until told to stop, pushing a level per 50 ms and calling the
-/// wake function after each, and returns the mono 48 kHz samples.
-type Take = fn(&AtomicBool, &Mutex<Vec<f32>>, &dyn Fn()) -> Result<Vec<f32>, String>;
-
-/// Records from the default microphone until told to stop.
+/// Records from the chosen microphone until told to stop.
 pub struct Recorder {
     started: Instant,
     stop: Arc<AtomicBool>,
@@ -623,7 +703,13 @@ pub struct Recorder {
 
 impl Recorder {
     pub fn start(waker: Waker) -> Self {
-        Self::spawn(waker, record)
+        Self::start_on(waker, None)
+    }
+
+    pub fn start_on(waker: Waker, device: Option<String>) -> Self {
+        Self::spawn(waker, move |stop, levels, wake| {
+            record(stop, levels, wake, device.as_deref())
+        })
     }
 
     /// Records a synthetic voice instead of the microphone, at the pace a
@@ -634,7 +720,12 @@ impl Recorder {
         Self::spawn(waker, rehearse)
     }
 
-    fn spawn(waker: Waker, body: Take) -> Self {
+    fn spawn(
+        waker: Waker,
+        body: impl FnOnce(&AtomicBool, &Mutex<Vec<f32>>, &dyn Fn()) -> Result<Vec<f32>, String>
+        + Send
+        + 'static,
+    ) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let levels: Arc<Mutex<Vec<f32>>> = Default::default();
         let stepped = Arc::new(AtomicBool::new(false));
@@ -787,41 +878,193 @@ fn record(
     stop: &AtomicBool,
     levels: &Mutex<Vec<f32>>,
     wake: &dyn Fn(),
+    preferred: Option<&str>,
 ) -> Result<Vec<f32>, String> {
-    let mut microphone = rodio::microphone::MicrophoneBuilder::new()
-        .default_device()
-        .map_err(|error| format!("No microphone available: {error}"))?
-        .default_config()
-        .map_err(|error| format!("The microphone has no supported format: {error}"))?
-        .open_stream()
-        .map_err(|error| format!("Could not open the microphone: {error}"))?;
-    let channels = microphone.channels().get();
-    let rate = microphone.sample_rate().get();
-    let chunk = (rate as usize * usize::from(channels) / 20).max(1);
-    let started = Instant::now();
-    let mut heard = Vec::new();
-    while !stop.load(Ordering::Relaxed) && started.elapsed() < LONGEST_RECORDING {
-        let before = heard.len();
-        heard.extend(microphone.by_ref().take(chunk));
-        let taken = &heard[before..];
-        if taken.is_empty() {
-            log::warn!("microphone: input stream ended before the next sample batch");
-            break;
-        }
-        let loudness = (taken.iter().map(|s| s * s).sum::<f32>() / taken.len() as f32).sqrt();
-        levels
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .push(loudness);
-        wake();
-        if taken.len() < chunk {
-            // rodio waits for samples; a short batch means the stream ended.
-            log::warn!("microphone: input stream ended during a sample batch");
-            break;
+    use rodio::cpal::{
+        SampleFormat,
+        traits::{DeviceTrait, HostTrait, StreamTrait},
+    };
+    if stop.load(Ordering::Acquire) {
+        return Ok(Vec::new());
+    }
+    let host = rodio::cpal::default_host();
+    let device = match preferred {
+        Some(name) => rodio::microphone::available_inputs()
+            .map_err(|_| {
+                "The microphone devices could not be listed. Check audio permissions.".to_owned()
+            })?
+            .into_iter()
+            .find(|input| input.to_string() == name)
+            .map(|input| input.into_inner())
+            .ok_or_else(|| {
+                "The selected microphone is unavailable. Choose a microphone in Settings."
+                    .to_owned()
+            })?,
+        None => host.default_input_device().ok_or_else(|| {
+            "No microphone is available. Connect one and check microphone permissions.".to_owned()
+        })?,
+    };
+    let supported = match device.default_input_config() {
+        Ok(config) => config,
+        Err(_) => device
+            .supported_input_configs()
+            .map_err(|_| {
+                "The microphone formats could not be read. Check microphone permissions.".to_owned()
+            })?
+            .next()
+            .map(|config| {
+                let rate = voice::RATE.clamp(config.min_sample_rate(), config.max_sample_rate());
+                config.with_sample_rate(rate)
+            })
+            .ok_or_else(|| {
+                "The microphone has no supported format. Choose another microphone.".to_owned()
+            })?,
+    };
+    let config: rodio::cpal::StreamConfig = supported.clone().into();
+    let channels = config.channels;
+    let rate = config.sample_rate;
+    if channels == 0 || channels > 32 || rate == 0 || rate > 192_000 {
+        return Err(
+            "The microphone format exceeds the supported limits. Choose another microphone.".into(),
+        );
+    }
+    let (send, receive) = std::sync::mpsc::sync_channel(8);
+    let failed = Arc::new(AtomicBool::new(false));
+    if stop.load(Ordering::Acquire) {
+        return Ok(Vec::new());
+    }
+    let stream = match supported.sample_format() {
+        SampleFormat::F32 => record_stream::<f32>(&device, &config, send, failed.clone()),
+        SampleFormat::F64 => record_stream::<f64>(&device, &config, send, failed.clone()),
+        SampleFormat::I8 => record_stream::<i8>(&device, &config, send, failed.clone()),
+        SampleFormat::I16 => record_stream::<i16>(&device, &config, send, failed.clone()),
+        SampleFormat::I32 => record_stream::<i32>(&device, &config, send, failed.clone()),
+        SampleFormat::I64 => record_stream::<i64>(&device, &config, send, failed.clone()),
+        SampleFormat::U8 => record_stream::<u8>(&device, &config, send, failed.clone()),
+        SampleFormat::U16 => record_stream::<u16>(&device, &config, send, failed.clone()),
+        SampleFormat::U32 => record_stream::<u32>(&device, &config, send, failed.clone()),
+        SampleFormat::U64 => record_stream::<u64>(&device, &config, send, failed.clone()),
+        _ => {
+            return Err(
+                "The microphone sample format is unsupported. Choose another microphone.".into(),
+            );
         }
     }
+    .map_err(|_| {
+        "Could not open the microphone. Check microphone permissions and other apps using it."
+            .to_owned()
+    })?;
+    if stop.load(Ordering::Acquire) {
+        return Ok(Vec::new());
+    }
+    stream
+        .play()
+        .map_err(|_| "Could not start the microphone. Check audio permissions.".to_owned())?;
+    let result = collect_recording(stop, levels, wake, &receive, &failed, channels, rate);
+    drop(stream);
+    result
+}
+
+fn record_stream<T: rodio::cpal::SizedSample>(
+    device: &rodio::cpal::Device,
+    config: &rodio::cpal::StreamConfig,
+    send: std::sync::mpsc::SyncSender<Vec<f32>>,
+    failed: Arc<AtomicBool>,
+) -> Result<rodio::cpal::Stream, rodio::cpal::BuildStreamError>
+where
+    f32: rodio::cpal::FromSample<T>,
+{
+    use rodio::cpal::traits::DeviceTrait;
+    let overflow = failed.clone();
+    device.build_input_stream(
+        config,
+        move |samples: &[T], _| {
+            if samples.len() > 192000 {
+                overflow.store(true, Ordering::Release);
+                return;
+            }
+            let values = samples
+                .iter()
+                .copied()
+                .map(|sample| sample.to_sample::<f32>())
+                .collect();
+            if send.try_send(values).is_err() {
+                overflow.store(true, Ordering::Release);
+            }
+        },
+        move |_| {
+            failed.store(true, Ordering::Release);
+        },
+        None,
+    )
+}
+
+fn collect_recording(
+    stop: &AtomicBool,
+    levels: &Mutex<Vec<f32>>,
+    wake: &dyn Fn(),
+    receive: &std::sync::mpsc::Receiver<Vec<f32>>,
+    failed: &AtomicBool,
+    channels: u16,
+    rate: u32,
+) -> Result<Vec<f32>, String> {
+    let started = Instant::now();
+    let mut heard = Vec::new();
+    let mut last_audio = Instant::now();
+    let window = (rate as usize * channels as usize / 20).max(1);
+    let mut energy = 0.0;
+    let mut count = 0;
+    while !stop.load(Ordering::Acquire) && started.elapsed() < LONGEST_RECORDING {
+        if failed.load(Ordering::Acquire) {
+            return Err("The microphone stopped recording. Check its connection, permissions, and audio settings.".into());
+        }
+        match receive.recv_timeout(Duration::from_millis(10)) {
+            Ok(values) => {
+                if values.is_empty() {
+                    continue;
+                }
+                if heard.len().saturating_add(values.len())
+                    > 256 * 1024 * 1024 / std::mem::size_of::<f32>()
+                {
+                    return Err(
+                        "The recording reached its memory limit. Record a shorter voice message."
+                            .into(),
+                    );
+                }
+                last_audio = Instant::now();
+                for sample in &values {
+                    energy += sample * sample;
+                    count += 1;
+                    if count == window {
+                        levels
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner())
+                            .push((energy / count as f32).sqrt());
+                        energy = 0.0;
+                        count = 0;
+                        wake();
+                    }
+                }
+                heard.extend(values);
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                if last_audio.elapsed() >= Duration::from_secs(5) {
+                    return Err("The microphone stopped providing audio. Check its connection and permissions.".into());
+                }
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                return Err("The microphone disconnected before recording finished.".into());
+            }
+        }
+    }
+    if failed.load(Ordering::Acquire) {
+        return Err("The microphone stopped recording. Check its connection, permissions, and audio settings.".into());
+    }
     if heard.is_empty() {
-        return Err("The microphone did not record any audio".to_owned());
+        return Err(
+            "The microphone did not record any audio. Check its input level and permissions."
+                .into(),
+        );
     }
     Ok(voice::mono_at_rate(&heard, channels, rate))
 }
@@ -835,6 +1078,85 @@ pub fn recording_path(dir: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recording_stream_errors_never_return_a_partial_take() {
+        let (send, receive) = std::sync::mpsc::sync_channel(8);
+        send.send(vec![0.5; 2400]).unwrap();
+        let stop = AtomicBool::new(false);
+        let failed = AtomicBool::new(false);
+        let result = collect_recording(
+            &stop,
+            &Mutex::new(Vec::new()),
+            &|| {
+                failed.store(true, Ordering::Release);
+                stop.store(true, Ordering::Release);
+            },
+            &receive,
+            &failed,
+            1,
+            48_000,
+        );
+        assert!(result.unwrap_err().contains("stopped recording"));
+    }
+
+    #[test]
+    fn stopped_and_disconnected_recorders_finish_without_native_devices() {
+        let (send, receive) = std::sync::mpsc::sync_channel(8);
+        let stop = AtomicBool::new(true);
+        let failed = AtomicBool::new(false);
+        assert!(
+            collect_recording(
+                &stop,
+                &Mutex::new(Vec::new()),
+                &|| {},
+                &receive,
+                &failed,
+                1,
+                48_000
+            )
+            .unwrap_err()
+            .contains("did not record")
+        );
+        drop(send);
+        stop.store(false, Ordering::Release);
+        assert!(
+            collect_recording(
+                &stop,
+                &Mutex::new(Vec::new()),
+                &|| {},
+                &receive,
+                &failed,
+                1,
+                48_000
+            )
+            .unwrap_err()
+            .contains("disconnected")
+        );
+    }
+
+    #[test]
+    fn negotiated_stereo_recording_keeps_fifty_millisecond_levels_and_resamples() {
+        let (send, receive) = std::sync::mpsc::sync_channel(8);
+        send.send(vec![0.25; 1600]).unwrap();
+        let stop = AtomicBool::new(false);
+        let levels = Mutex::new(Vec::new());
+        let result = collect_recording(
+            &stop,
+            &levels,
+            &|| {
+                stop.store(true, Ordering::Release);
+            },
+            &receive,
+            &AtomicBool::new(false),
+            2,
+            16_000,
+        )
+        .unwrap();
+        assert_eq!(levels.lock().unwrap().len(), 1);
+        assert!((result.len() as isize - 2400).abs() <= 3);
+        assert!(result.iter().all(|sample| (*sample - 0.25).abs() < 0.001));
+    }
 
     #[test]
     #[ignore = "opens physical output with synthetic silence only"]

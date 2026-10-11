@@ -143,6 +143,12 @@ The sticker tab works like WhatsApp's: a row of tabs holds **Recent**
 adding more. Zap Faster adds **Received** (the speech bubble) after Favorites.
 Click a sticker to send it. Animated stickers play on hover.
 
+Click a downloaded sticker in a conversation to see it on its own. Animated
+stickers play in the viewer. **Add to favorites** or **Remove from favorites**
+uses the same favorites that sync with your phone. Click the sticker or the
+backdrop, or press Escape, to close the viewer.
+
+
 **Recent** holds the stickers you sent, not the ones you received.
 Right-click one to take it out of Recent here and on your phone. A sticker
 you sent long ago may be gone from WhatsApp's servers: it joins Recent once
@@ -471,6 +477,12 @@ without leaving the composer (Command instead of Ctrl on macOS), and
 chat, `PgUp`/`PgDn` scroll by about a page, and `Home`/`End` jump to the top or
 the newest message (when the input is empty).
 
+By default, `Ctrl+W` closes the window (`Command+W` on macOS). In Settings,
+System, turn on **Ctrl+W closes the chat** to close the open chat instead.
+Your draft stays with that chat. With this option on, the shortcut does nothing
+when there is no visible chat, an overlay is open, or the app is locked. Closing
+the window from its own close button keeps its existing behavior.
+
 With a mouse that has them, the **Back** and **Forward** side buttons step
 through the places you have visited, as in a browser: between chats, and
 between the chat list, Settings, and the wallpaper picker. Forward repeats a
@@ -674,3 +686,56 @@ Offline previews are available as `gallery`, `gallery-docs`, `gallery-links`,
 ### Original documents
 
 Choose **Document** on a staged attachment tile to send original image file bytes or lossless PNG clipboard pixels. Original file names and existing file metadata are preserved; clipboard pixels have neither an original filename nor EXIF. See [Original documents]({{ site.baseurl }}/original-documents/) for refusal recovery and acceptance checks.
+
+## Custom interface fonts
+
+Under **Settings > Appearance > Font**, choose System, Inter, or **Choose a font
+file**. Zap Faster accepts `.ttf`, `.otf`, `.ttc`, and `.otc` files and keeps a copy
+in the `font` folder of its application state directory. The original file may
+then move without affecting the app. A collection uses its first face.
+
+Your font leads the interface text. Characters it lacks fall back to the chosen
+System or Inter font and the existing installed-font fallbacks. Emoji, monospace
+text, and tabular playback timers keep their existing rendering. Variable fonts
+use their weight axis for regular, medium, semibold, and bold text. Static fonts
+use the chosen face for all weights.
+
+Choosing System or Inter removes the custom copy. An invalid or unavailable
+custom font reports an error and returns to the built-in choice. Font files are
+limited to 32 MiB. The font choice is shared by all accounts.
+
+### Messages appearance
+
+Settings > Appearance > Theme offers **Messages**, an optional appearance with
+round bubbles and a frosted conversation header. It follows your computer's
+light or dark appearance. The default theme is unchanged.
+
+macOS uses its native sidebar material, supported Windows 11 versions use Mica,
+and Hyprland can blur the desktop behind the window. Other systems retain an
+opaque background. Choosing this theme while a window is open may require
+closing and reopening the window before desktop translucency appears. The
+rounded bubbles and header are available immediately.
+
+### Portable preferences
+
+To keep process preferences beside the executable, create
+`zap-faster-portable-settings.txt` there containing exactly
+`zap-faster-portable-settings-v1`. Restart Zap Faster. It reads and saves the
+adjacent `settings.json`; you may copy your existing process preferences there
+before restarting. The executable folder must be writable. Removing this marker
+returns to standard process preferences without deleting either file.
+
+This opt-in does not move linked accounts, their archive keys, caches, account
+roster or custom themes. Moving an executable and its preferences to another
+computer does not transfer WhatsApp identity. Use an encrypted account backup
+for that. The updater's existing portable-installation marker alone does not
+enable portable preferences.
+
+### Local contact pictures
+
+Open a person's contact information and choose Set local picture. Zap Faster
+copies and scales the image into that account's own state folder; the source
+file may then be moved. Reset local picture returns to their WhatsApp picture.
+This changes display only on this computer, never uploads a picture, and never
+replaces the photo downloaded from WhatsApp. Separate accounts keep separate
+overrides. Encrypted full account backups include these local pictures.

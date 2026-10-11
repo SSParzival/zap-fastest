@@ -43,6 +43,49 @@ pub struct Text {
 }
 
 impl Text {
+    /// Search the displayed text, mapping expanded emoji and Unicode case
+    /// folds back to the galley's logical character positions.
+    pub fn search_ranges(&self, query: &str) -> Vec<Range<usize>> {
+        let query: Vec<char> = query.trim().chars().flat_map(char::to_lowercase).collect();
+        if query.is_empty() {
+            return Vec::new();
+        }
+        let mut characters = Vec::new();
+        let mut positions = Vec::new();
+        let mut emoji = self.placements.iter();
+        for (index, character) in self.galley.text().chars().enumerate() {
+            let replacement = (character == crate::emoji::PLACEHOLDER)
+                .then(|| emoji.next())
+                .flatten();
+            if let Some(replacement) = replacement {
+                for folded in replacement.chars().flat_map(char::to_lowercase) {
+                    characters.push(folded);
+                    positions.push(index);
+                }
+            } else {
+                for folded in character.to_lowercase() {
+                    characters.push(folded);
+                    positions.push(index);
+                }
+            }
+        }
+        characters
+            .windows(query.len())
+            .enumerate()
+            .filter(|(_, window)| *window == query.as_slice())
+            .map(|(index, _)| positions[index]..positions[index + query.len() - 1] + 1)
+            .collect()
+    }
+
+    pub fn paint_search_matches(&self, ui: &egui::Ui, pos: Pos2, query: &str, color: Color32) {
+        for range in self.search_ranges(query) {
+            for (_, bounds) in bidi::char_bounds_by_row(&self.galley, range.start, range.end) {
+                ui.painter()
+                    .rect_filled(bounds.translate(pos.to_vec2()).expand(1.0), 2.0, color);
+            }
+        }
+    }
+
     /// Emoji sequences represented by placeholder glyphs.
     pub fn placements(&self) -> &[String] {
         &self.placements
@@ -165,6 +208,21 @@ pub fn paint_selectable(
             &text.accessible_text,
         )
     });
+    // Touch pans the enclosing scroll area. egui's label-selection plugin
+    // starts selecting from a primary pointer press, even before a drag is
+    // decided, so click-only senses alone cannot keep touch scrolling clean.
+    if ui.input(|input| {
+        input.any_touches()
+            || input
+                .events
+                .iter()
+                .any(|event| matches!(event, egui::Event::Touch { .. }))
+    }) {
+        if visible {
+            paint(ui, text, pos, fallback);
+        }
+        return;
+    }
     // egui treats non-overlapping text bounds as separate columns. Incoming
     // and outgoing bubbles are one transcript even when both contain short
     // text. Give selection a shared column while keeping every glyph in its
@@ -773,6 +831,35 @@ const KNOWN_TLDS: &[&str] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn search_matches_displayed_markup_unicode_and_emoji_without_changing_text() {
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        theme::apply(&ctx, &crate::theme::Palette::dark());
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let style = Style {
+                size: 14.0,
+                color: Color32::WHITE,
+                secondary: Color32::GRAY,
+                link: Color32::BLUE,
+                mention: Color32::BLUE,
+            };
+            let text = layout(ui, "*Hello* İSTANBUL שלום 👩‍💻 hello", &[], &style, 100.0);
+            let original = text.galley.text().to_owned();
+            assert_eq!(text.search_ranges("HELLO"), vec![0..5, 22..27]);
+            assert_eq!(text.search_ranges("i\u{307}stanbul"), vec![6..14]);
+            assert_eq!(text.search_ranges("שלום"), vec![15..19]);
+            assert_eq!(text.search_ranges("👩‍💻"), vec![20..21]);
+            assert!(text.search_ranges("  ").is_empty());
+            for range in text.search_ranges("hello") {
+                assert!(!bidi::char_bounds_by_row(&text.galley, range.start, range.end).is_empty());
+            }
+            text.paint_search_matches(ui, Pos2::ZERO, "שלום", Color32::YELLOW);
+            assert_eq!(text.galley.text(), original);
+        });
+        output.textures_delta.clear();
+    }
 
     fn kinds(text: &str) -> Vec<(String, bool, bool, bool, bool)> {
         parse(text, &[])

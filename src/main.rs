@@ -106,10 +106,180 @@ struct Cli {
 
 #[derive(Debug, clap::Subcommand)]
 enum Control {
+    /// Private read/watch/send access to an explicitly opted-in running account.
+    Automation {
+        #[command(subcommand)]
+        operation: Automation,
+    },
     /// Reload palettes in an already-running Zap Faster without showing its window.
     ReloadThemes,
     /// Quit an already-running Zap Faster, which closing its window leaves in the tray.
     Quit,
+}
+
+#[derive(Debug, clap::Subcommand)]
+enum Automation {
+    /// Read a bounded archive page without sending read receipts.
+    Read {
+        #[arg(long)]
+        account: String,
+        #[arg(long)]
+        chat: String,
+        #[arg(long, default_value_t = 10)]
+        limit: usize,
+        #[arg(long, requires = "before_id")]
+        before_time: Option<i64>,
+        #[arg(long, requires = "before_time")]
+        before_id: Option<String>,
+    },
+    /// Poll archived arrivals as JSON lines; does not fetch phone history.
+    Watch {
+        #[arg(long)]
+        account: String,
+        #[arg(long)]
+        chat: String,
+        #[arg(long, default_value_t = 10)]
+        limit: usize,
+        #[arg(long, default_value_t = 60)]
+        seconds: u32,
+        #[arg(long, requires = "after_id")]
+        after_row: Option<i64>,
+        #[arg(long, requires = "after_row")]
+        after_id: Option<String>,
+    },
+    /// Send a UTF-8 text file once under a stable 32-hex-digit request id.
+    Send {
+        #[arg(long)]
+        account: String,
+        #[arg(long)]
+        chat: String,
+        #[arg(long)]
+        request_id: String,
+        #[arg(long)]
+        text_file: std::path::PathBuf,
+    },
+    /// Check a prior send's state, including Unconfirmed, without sending again.
+    Status {
+        #[arg(long)]
+        account: String,
+        #[arg(long)]
+        chat: String,
+        #[arg(long)]
+        request_id: String,
+    },
+}
+fn automation_command(operation: &Automation, runtime: &std::path::Path) -> Result<(), String> {
+    use zapfast::automation::Request;
+    let mut cursor = None;
+    let (request, duration) = match operation {
+        Automation::Read {
+            account,
+            chat,
+            limit,
+            before_time,
+            before_id,
+        } => (
+            Request::Read {
+                account: account.clone(),
+                chat: chat.clone(),
+                before: before_time.zip(before_id.clone()),
+                limit: *limit,
+            },
+            0,
+        ),
+        Automation::Watch {
+            account,
+            chat,
+            limit,
+            seconds,
+            after_row,
+            after_id,
+        } => {
+            if !(1..=3600).contains(seconds) {
+                return Err("Watch duration must be 1 through 3600 seconds".into());
+            }
+            cursor = after_row.zip(after_id.clone());
+            (
+                Request::Watch {
+                    account: account.clone(),
+                    chat: chat.clone(),
+                    after: cursor.clone(),
+                    limit: *limit,
+                },
+                *seconds,
+            )
+        }
+        Automation::Send {
+            account,
+            chat,
+            request_id,
+            text_file,
+        } => {
+            if std::fs::metadata(text_file)
+                .map_err(|_| "Could not open text file")?
+                .len()
+                > 4000
+            {
+                return Err("Text file must be at most 4000 UTF-8 bytes".into());
+            }
+            let text = std::fs::read_to_string(text_file)
+                .map_err(|_| "Text file must be readable UTF-8")?;
+            (
+                Request::Send {
+                    account: account.clone(),
+                    chat: chat.clone(),
+                    request_id: request_id.to_ascii_lowercase(),
+                    text,
+                },
+                0,
+            )
+        }
+        Automation::Status {
+            account,
+            chat,
+            request_id,
+        } => (
+            Request::Status {
+                account: account.clone(),
+                chat: chat.clone(),
+                request_id: request_id.to_ascii_lowercase(),
+            },
+            0,
+        ),
+    };
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(u64::from(duration));
+    loop {
+        let current = match &request {
+            Request::Watch {
+                account,
+                chat,
+                limit,
+                ..
+            } => Request::Watch {
+                account: account.clone(),
+                chat: chat.clone(),
+                limit: *limit,
+                after: cursor.clone(),
+            },
+            _ => request.clone(),
+        };
+        let reply=zapfast::automation::send(runtime,&current).map_err(|_|"Could not reach opted-in local automation. A send may be Unconfirmed; query the same request id".to_owned())?;
+        let value: serde_json::Value =
+            serde_json::from_str(&reply).map_err(|_| "Invalid automation reply")?;
+        println!("{reply}");
+        if value.get("error").is_some() {
+            return Err("Automation request was refused, see JSON response".into());
+        }
+        if duration == 0 || std::time::Instant::now() >= deadline {
+            break;
+        }
+        if let Some(next) = value.get("cursor").filter(|next| !next.is_null()) {
+            cursor =
+                Some(serde_json::from_value(next.clone()).map_err(|_| "Invalid watch cursor")?);
+        }
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    }
+    Ok(())
 }
 
 /// Default log filter, used when `RUST_LOG` is unset.
@@ -150,6 +320,14 @@ fn run() -> eframe::Result<()> {
     // update helper when asked (`--apply-update <job>`, then exit), and take
     // `--update-receipt` and `--update-error` off the command line.
     let launch = fastframe_update::intercept(&zapfast::updates::CONFIG);
+    if launch
+        .arguments
+        .iter()
+        .any(|argument| argument == "--camera-helper")
+    {
+        zapfast::camera::run_helper();
+        return Ok(());
+    }
     let cli = Cli::parse_from(&launch.arguments);
     let chat_link = cli
         .whatsapp_url
@@ -162,6 +340,13 @@ fn run() -> eframe::Result<()> {
             )
         })?;
     let discovered = paths::AppDirs::discover();
+    if let Some(Control::Automation { operation }) = &cli.command {
+        if let Err(error) = automation_command(operation, &discovered.runtime) {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+        return Ok(());
+    }
     if let Some(command) = &cli.command {
         let (verb, not_running) = match command {
             Control::ReloadThemes => (
@@ -169,6 +354,7 @@ fn run() -> eframe::Result<()> {
                 "Zap Faster is not running, so there are no themes to reload.",
             ),
             Control::Quit => ("quit", "Zap Faster is not running."),
+            Control::Automation { .. } => unreachable!("handled above"),
         };
         if let Err(error) = single_instance::send(&discovered.runtime, verb) {
             use std::io::ErrorKind;
@@ -328,6 +514,12 @@ fn run() -> eframe::Result<()> {
             // a reopened window (tray, notification, Wayland reopen) uses
             // what the last one remembered, not what the process started
             // with. Demo runs keep their fixed screenshot size.
+            // Decided as each window is made: it cannot become transparent
+            // later.
+            let transparent =
+                zapfast::backdrop::transparent_window(lease.peek(|app: &app::App| {
+                    app.settings.theme == zapfast::settings::ThemeChoice::Messages
+                }));
             let geometry = if demo_persistence.is_some() {
                 zapfast::window::Geometry::default()
             } else {
@@ -351,7 +543,7 @@ fn run() -> eframe::Result<()> {
             });
             eframe::run_native(
                 "Zap Faster",
-                native_options(demo_persistence.clone(), geometry),
+                native_options(demo_persistence.clone(), geometry, transparent),
                 Box::new(move |cc| {
                     let mut app = lease.take(&cc.egui_ctx);
                     app.attach(&cc.egui_ctx);
@@ -362,6 +554,7 @@ fn run() -> eframe::Result<()> {
                     Ok(Box::new(Shell {
                         app,
                         window_recovery_checked: false,
+                        transparent,
                         update_receipt: receipt,
                         #[cfg(target_os = "windows")]
                         taskbar: Default::default(),
@@ -469,6 +662,7 @@ fn tour_script(name: &str) -> zapfast::demo::tour::Script {
 fn native_options(
     demo_persistence: Option<std::path::PathBuf>,
     geometry: zapfast::window::Geometry,
+    transparent: bool,
 ) -> eframe::NativeOptions {
     let default_size = demo_size_arg().unwrap_or([1180.0, 780.0]);
     let demo = demo_persistence.is_some();
@@ -499,6 +693,9 @@ fn native_options(
         .with_icon(app_icon())
         // macOS uses a full-size content view under the traffic lights.
         .with_fullsize_content_view(true)
+        // Transparent where the Messages theme can show the desktop through
+        // its sidebar; every other theme paints the window opaque.
+        .with_transparent(transparent)
         .with_titlebar_shown(false)
         .with_title_shown(false);
     eframe::NativeOptions {
@@ -515,6 +712,8 @@ fn native_options(
 struct Shell {
     /// Whether this window's first frame checked that a monitor shows it.
     window_recovery_checked: bool,
+    /// Whether this window was made transparent, for the Messages theme.
+    transparent: bool,
     update_receipt: Option<fastframe_update::Receipt>,
     app: fastframe_shell::Held<app::App>,
     /// This window's unread overlay on its taskbar button.
@@ -578,6 +777,16 @@ impl Shell {
 }
 
 impl eframe::App for Shell {
+    /// What shows where the interface paints nothing: the window colour, or
+    /// nothing while the window has a material, so it shows.
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        if zapfast::backdrop::active() {
+            [0.0; 4]
+        } else {
+            self.app.palette.window.to_normalized_gamma_f32()
+        }
+    }
+
     #[cfg(feature = "demo")]
     fn raw_input_hook(&mut self, ctx: &egui::Context, input: &mut egui::RawInput) {
         if let Some(tour) = &mut self.tour {
@@ -623,6 +832,7 @@ impl eframe::App for Shell {
             28.0 / ctx.zoom_factor()
         };
         fastframe_macos::align_traffic_lights(frame, ctx, title_bar);
+        zapfast::backdrop::apply(frame, &app.palette, self.transparent);
         #[cfg(feature = "demo")]
         {
             // Keep requesting the configured screenshot size until it is applied.
@@ -707,6 +917,52 @@ fn app_icon() -> egui::IconData {
 #[cfg(test)]
 mod chat_link_cli_tests {
     use super::*;
+
+    #[test]
+    fn automation_cli_is_explicit_and_send_requires_a_file_and_request_id() {
+        let cli = Cli::try_parse_from([
+            "zap-faster",
+            "automation",
+            "read",
+            "--account",
+            "2",
+            "--chat",
+            "fixture",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Control::Automation {
+                operation: Automation::Read { .. }
+            })
+        ));
+        assert!(
+            Cli::try_parse_from([
+                "zap-faster",
+                "automation",
+                "send",
+                "--account",
+                "2",
+                "--chat",
+                "fixture"
+            ])
+            .is_err()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "zap-faster",
+                "automation",
+                "read",
+                "--account",
+                "2",
+                "--chat",
+                "fixture",
+                "--before-time",
+                "100"
+            ])
+            .is_err()
+        );
+    }
 
     #[test]
     fn browser_urls_are_positional_and_control_commands_still_work() {

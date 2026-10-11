@@ -387,15 +387,21 @@ pub fn ureq_proxy() -> Option<ureq::Proxy> {
     }
 }
 
+fn http_config(proxy: Option<ureq::Proxy>) -> ureq::config::Config {
+    ureq::Agent::config_builder()
+        .proxy(proxy)
+        // ureq divides this budget between resolved addresses. Without one,
+        // a blackholed first address can block version fetching before IPv4.
+        .timeout_connect(Some(Duration::from_secs(15)))
+        .build()
+}
+
 /// A shared HTTP agent that uses [`ureq_proxy`].
 pub fn agent() -> ureq::Agent {
     if let Some(agent) = &configured().read().unwrap_or_else(|e| e.into_inner()).agent {
         return agent.clone();
     }
-    let agent: ureq::Agent = ureq::Agent::config_builder()
-        .proxy(ureq_proxy())
-        .build()
-        .into();
+    let agent: ureq::Agent = http_config(ureq_proxy()).into();
     configured()
         .write()
         .unwrap_or_else(|e| e.into_inner())
@@ -442,6 +448,18 @@ impl TransportFactory for ProxyTransportFactory {
 mod tests {
     use super::*;
     use tokio::net::TcpListener;
+
+    #[test]
+    fn http_connect_budget_preserves_both_ip_families_and_certificate_validation() {
+        let config = http_config(None);
+        assert_eq!(config.timeouts().connect, Some(Duration::from_secs(15)));
+        assert_eq!(config.ip_family(), ureq::config::IpFamily::Any);
+        assert!(!config.tls_config().disable_verification());
+        assert!(matches!(
+            config.tls_config().root_certs(),
+            ureq::tls::RootCerts::WebPki
+        ));
+    }
 
     #[test]
     fn parses_supported_schemes() {

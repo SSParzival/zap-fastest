@@ -20,6 +20,9 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1"
+# Native call audio queues, already used by the official protocol library.
+async-channel = "2.5"
+tempfile = "3"
 # Hashes saved stickers by content. Already included through wacore.
 sha2 = "0.11"
 # Already in the tree through rustls; verifies lock codes.
@@ -56,7 +59,7 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png",
 # sync events (#1538), boolean AB props (#1539), and favorite chats sync
 # (#1544). Device-store
 # compatibility retains the legacy created_at column.
-whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "ee89f5ad9cf0553825f201f0e264ad32c4b73966", default-features = false, features = ["sqlite-storage", "tokio-transport", "tokio-runtime", "ureq-client", "tokio-native"] }
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "94c53e833805c58c9f5966b08d08c990650a651e", default-features = false, features = ["sqlite-storage", "tokio-transport", "tokio-runtime", "ureq-client", "tokio-native", "voip"] }
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros", "fs", "net", "io-util"] }
 # Opens the WhatsApp WebSocket through a proxy. Both crates are already
 # included through the Tokio transport at these versions.
@@ -108,6 +111,8 @@ resvg = { version = "0.45", default-features = false }
 # Desktop notifications through D-Bus on Linux and system frameworks elsewhere.
 notify-rust = { version = "4", default-features = false, features = ["z"] }
 openh264 = "0.9"
+# Native camera capture only, encoded locally by the existing OpenH264 codec.
+nokhwa = { version = "0.10.11", default-features = false, features = ["input-native"] }
 mp4 = "0.14"
 # The 0.22 release ends the sound of an interleaved MP4 at the first packet of
 # another track, so a video that has a picture and a sound track plays a tenth
@@ -205,16 +210,20 @@ zbus-secret-service-keyring-store = { version = "1.0.1", features = ["rt-tokio-c
 zbus = { version = "5.19", default-features = false, features = ["blocking-api", "tokio"] }
 # Reads the time locale's clock format.
 libc = "0.2"
+raw-window-handle = "0.6"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 apple-native-keyring-store = { version = "1.0.2", features = ["keychain"] }
+# Cancellable Notification Center click handling with native Focus-aware sounds.
+mac-usernotifications = "0.3.1"
 # The application menu bar, built with tray-icon's muda at the version
 # fastframe-tray uses.
 tray-icon = { version = "0.25", default-features = false }
 # AppKit calls for the application menus and editing commands, on the main
 # thread.
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSDockTile", "NSResponder", "NSText", "NSView", "NSWindow"] }
+raw-window-handle = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSDockTile", "NSAppearance", "NSGraphics", "NSVisualEffectView", "NSResponder", "NSText", "NSView", "NSWindow"] }
 # Reads the locale's clock format.
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSDateFormatter", "NSFormatter", "NSLocale", "NSString"] }
 
@@ -222,12 +231,12 @@ objc2-foundation = { version = "0.3", default-features = false, features = ["std
 windows-native-keyring-store = { version = "1.1", default-features = false }
 winrt-notification = { package = "tauri-winrt-notification", version = "0.7.3" }
 # Registry and locale calls.
-windows-sys = { version = "0.60", features = ["Win32_Foundation", "Win32_Globalization", "Win32_System_Registry"] }
+windows-sys = { version = "0.60", features = ["Win32_Foundation", "Win32_Globalization", "Win32_System_Registry", "Win32_Storage_FileSystem"] }
 # Accesses the native window handle for the taskbar overlay.
 raw-window-handle = "0.6"
 # Pauses other apps' media through the system media transport controls while
 # recording or playing voice messages. The same version cpal already uses.
-windows = { version = "0.62", features = ["Media_Control", "Foundation_Collections", "Win32_Foundation", "Win32_Graphics_Gdi", "Win32_System_Com", "Win32_System_Ole", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+windows = { version = "0.62", features = ["Media_Control", "Foundation_Collections", "Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_UI_Controls", "Win32_System_Com", "Win32_System_Ole", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
 # clang-cl is required by whisper.cpp on Windows ARM64. Opus's runtime SIMD
 # probe uses MSVC-only __emit intrinsics, so keep its portable scalar path on
@@ -242,7 +251,6 @@ winresource = "0.1"
 [dev-dependencies]
 # Reproduce native accessibility consumer failures with synthetic UI frames.
 accesskit_consumer = "=0.35.0"
-tempfile = "3"
 # Checks the default log filter the way fastframe-log's logger reads it.
 # Already in the tree through fastframe-log, at this version.
 env_logger = { version = "0.11", default-features = false }

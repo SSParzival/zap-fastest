@@ -528,6 +528,7 @@ pub fn populate(app: &mut App) {
                 sender_name: last.sender_name.clone(),
                 summary: last.summary(),
                 full: last.content.full_summary(),
+                media: last.content.preview_media(),
                 status: last.status,
             });
         app.conversations.insert(sample.id.to_owned(), conversation);
@@ -891,6 +892,7 @@ pub fn populate(app: &mut App) {
                             sender_name: last.sender_name.clone(),
                             summary: last.summary(),
                             full: last.content.full_summary(),
+                            media: last.content.preview_media(),
                             status: last.status,
                         },
                     )
@@ -1119,6 +1121,7 @@ fn meta_ai_sample(app: &mut App) {
         sender_name: None,
         summary: reply.summary(),
         full: reply.content.full_summary(),
+        media: reply.content.preview_media(),
         status: reply.status,
     });
     app.chats.insert(0, chat);
@@ -1249,6 +1252,7 @@ fn interactive_sample(app: &mut App, with_image: bool) {
             sender_name: None,
             summary: last.summary(),
             full: last.content.full_summary(),
+            media: last.content.preview_media(),
             status: last.status,
         });
     }
@@ -1933,6 +1937,85 @@ fn starred_sample(app: &mut App, menu: Option<&str>) {
     app.open_list_menu = menu.map(|id| (chat, id.to_owned()));
 }
 
+/// Calling screenshots and layout tests use snapshots only, with no device enumeration,
+/// camera handle, protocol call or media stream behind them.
+fn call_sample(app: &mut App, scenario: &str) {
+    use crate::calls::{AudioDevice, CallOutcome, CallPhase, CallUpdate, DeviceList, PeerAudio};
+    use crate::model::CallDirection;
+    app.call_devices = DeviceList {
+        microphones: vec![AudioDevice {
+            id: "fixture-microphone".into(),
+            label: "Synthetic microphone".into(),
+        }],
+        speakers: vec![AudioDevice {
+            id: "fixture-speaker".into(),
+            label: "Synthetic speaker".into(),
+        }],
+    };
+    app.call_preparing = scenario == "call-preparing";
+    if app.call_preparing {
+        return;
+    }
+    if scenario == "call-history" {
+        app.call_log_open = true;
+        app.call_records = vec![
+            crate::archive::CallRecord {
+                id: "synthetic-answer".into(),
+                chat: SAMPLES[0].id.into(),
+                direction: CallDirection::Outgoing,
+                outcome: CallOutcome::Answered,
+                at: crate::util::now(),
+                duration: Some(83),
+            },
+            crate::archive::CallRecord {
+                id: "synthetic-missed".into(),
+                chat: SAMPLES[0].id.into(),
+                direction: CallDirection::Incoming,
+                outcome: CallOutcome::Missed,
+                at: crate::util::now() - 3600,
+                duration: None,
+            },
+        ];
+        return;
+    }
+    let incoming = matches!(scenario, "call-incoming" | "call-incoming-video");
+    let phase = if incoming {
+        CallPhase::Incoming
+    } else if scenario == "call-connecting" {
+        CallPhase::Connecting
+    } else {
+        CallPhase::Active
+    };
+    app.call = Some(CallUpdate {
+        generation: 1,
+        chat: SAMPLES[0].id.into(),
+        direction: if incoming {
+            CallDirection::Incoming
+        } else {
+            CallDirection::Outgoing
+        },
+        phase,
+        started: (phase == CallPhase::Active).then(std::time::Instant::now),
+        muted: scenario == "call-muted",
+        outcome: None,
+        peer_audio: (scenario == "call-stalled").then_some(PeerAudio::Stalled),
+        lost_devices: Vec::new(),
+        microphone: None,
+        speaker: None,
+        video_requested: matches!(scenario, "call-incoming-video" | "call-video-requested"),
+        video_starting: scenario == "call-camera-opening",
+        video_active: matches!(scenario, "call-video-waiting" | "call-video"),
+        video_view: if scenario == "call-video" {
+            Some(crate::camera::VideoView::synthetic(
+                egui::ColorImage::filled([160, 120], egui::Color32::from_rgb(60, 140, 100)),
+                egui::ColorImage::filled([320, 240], egui::Color32::from_rgb(70, 100, 160)),
+            ))
+        } else {
+            (scenario == "call-video-waiting").then(crate::camera::VideoView::default)
+        },
+    });
+}
+
 pub fn apply_flags(app: &mut App, page: Option<&str>) {
     let Some(page) = page else {
         return;
@@ -1940,6 +2023,24 @@ pub fn apply_flags(app: &mut App, page: Option<&str>) {
     for part in page.split(',').map(str::trim) {
         match part {
             "history-date" => history_date_sample(app),
+            "call-preparing"
+            | "call-incoming"
+            | "call-incoming-video"
+            | "call-connecting"
+            | "call-active"
+            | "call-muted"
+            | "call-stalled"
+            | "call-video-requested"
+            | "call-camera-opening"
+            | "call-video-waiting"
+            | "call-video"
+            | "call-history" => call_sample(app, part),
+            "archive-backup" => app.dialog = Some(Dialog::ArchiveBackup { restore: false }),
+            "archive-restore" => app.dialog = Some(Dialog::ArchiveBackup { restore: true }),
+            "archive-resume" => {
+                app.account_mut().settings.archive_only = true;
+                app.dialog = Some(Dialog::ResumeRestoredAccount(app.account().id.clone()));
+            }
             "chat" | "" => {}
             "phone-menu" => phone_menu_sample(app),
             "queued-messages" => queued::setup(app, false),
@@ -2383,6 +2484,7 @@ pub fn apply_flags(app: &mut App, page: Option<&str>) {
                     sender_name: None,
                     summary: last.summary(),
                     full: last.content.full_summary(),
+                    media: last.content.preview_media(),
                     status: last.status,
                 });
                 app.chats.insert(0, chat);
@@ -2736,6 +2838,25 @@ pub fn apply_flags(app: &mut App, page: Option<&str>) {
             "light" => {
                 app.settings.theme = ThemeChoice::Light;
             }
+            "messages" => {
+                app.settings.theme = ThemeChoice::Messages;
+            }
+            "messages-light" => {
+                app.settings.custom_theme = Some("Messages light.json".into());
+                app.settings.custom_theme_cache = Some(crate::theme::CustomTheme {
+                    filename: "Messages light.json".into(),
+                    palette: crate::theme::Palette::messages_light(),
+                });
+            }
+            "sync-choice" => {
+                unlink(app);
+                app.account_mut().settings.sync_mode = None;
+                app.link = LinkStatus::Unlinked {
+                    qr: None,
+                    pair_code: None,
+                    pairing_phone: None,
+                };
+            }
             "login" => {
                 unlink(app);
                 app.link = LinkStatus::Unlinked {
@@ -2843,6 +2964,7 @@ pub fn apply_flags(app: &mut App, page: Option<&str>) {
                     sender_name: None,
                     summary: last.summary(),
                     full: last.content.full_summary(),
+                    media: last.content.preview_media(),
                     status: last.status,
                 });
                 app.chats.insert(0, chat);
@@ -3280,6 +3402,14 @@ pub fn apply_flags(app: &mut App, page: Option<&str>) {
             "sticker-search" => sticker_sample(app, crate::model::StickerShelf::Recent, "laugh"),
             "sticker-animated" => animated_sticker_sample(app),
             "sticker-add" => sticker_sample(app, crate::model::StickerShelf::Add, ""),
+            "sticker-view" => {
+                sticker_sample(app, crate::model::StickerShelf::Recent, "");
+                app.picker = None;
+                app.sticker_view = app
+                    .stickers_received
+                    .first()
+                    .map(|path| crate::image_preview::StickerPreview::new(path.clone()));
+            }
             "sticker-maker" => {
                 let (photo, _) = sample_files(app);
                 let crop = crate::model::StickerCrop::centered(900, 1200).resized(620, 900, 1200);
@@ -5341,6 +5471,333 @@ mod tests {
         );
     }
 
+    fn new_surface_text(shape: &egui::Shape, text: &mut String) {
+        match shape {
+            egui::Shape::Text(shape) => {
+                text.push_str(shape.galley.text());
+                text.push('\n');
+            }
+            egui::Shape::Vec(shapes) => {
+                for shape in shapes {
+                    new_surface_text(shape, text);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    #[test]
+    fn call_windows_keep_controls_inside_short_viewports_and_scroll_large_text() {
+        fn inspect(
+            shape: &egui::Shape,
+            clip: egui::Rect,
+            labels: &mut std::collections::BTreeMap<String, usize>,
+            frames: &mut Vec<egui::Rect>,
+            title: &mut Option<egui::Pos2>,
+        ) {
+            match shape {
+                egui::Shape::Text(text) => {
+                    if text.galley.text() == "Video call" {
+                        *title = Some(text.pos);
+                    }
+                    if clip.contains_rect(text.galley.rect.translate(text.pos.to_vec2())) {
+                        *labels.entry(text.galley.text().to_owned()).or_default() += 1;
+                    }
+                }
+                egui::Shape::Rect(rect)
+                    if rect.stroke.width == 1.0
+                        && rect.rect.width() > 200.0
+                        && rect.rect.height() > 120.0 =>
+                {
+                    frames.push(rect.rect);
+                }
+                egui::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        inspect(shape, clip, labels, frames, title);
+                    }
+                }
+                _ => {}
+            }
+        }
+        for size in [
+            egui::vec2(640.0, 620.0),
+            egui::vec2(400.0, 600.0),
+            egui::vec2(1180.0, 780.0),
+            egui::vec2(400.0, 300.0),
+        ] {
+            for scenario in ["call-video", "call-incoming-video"] {
+                for light in [false, true] {
+                    for scale in [1.0, 1.5] {
+                        let mut app = app();
+                        apply_flags(&mut app, Some(scenario));
+                        let expected = if scenario == "call-video" {
+                            vec![
+                                "Mute",
+                                "End call",
+                                "Turn camera off",
+                                "Microphone",
+                                "Speaker",
+                            ]
+                        } else {
+                            vec![
+                                "Answer with video",
+                                "Answer without camera",
+                                "Decline",
+                                "Microphone",
+                                "Speaker",
+                            ]
+                        };
+                        if light {
+                            apply_flags(&mut app, Some("light"));
+                        }
+                        let (backend, mut commands) = crate::backend::Backend::recording();
+                        app.backend = backend;
+                        app.settings.text_scale = scale;
+                        let ctx = egui::Context::default();
+                        app.attach(&ctx);
+                        let call_account = app.account().id.as_str().to_owned();
+                        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
+                        let mut draw = |events| {
+                            let mut output = ctx.run_ui(
+                                egui::RawInput {
+                                    screen_rect: Some(screen),
+                                    events,
+                                    ..Default::default()
+                                },
+                                |ui| {
+                                    app.background_frame(&ctx);
+                                    app.frame_ui(ui);
+                                },
+                            );
+                            output.textures_delta.clear();
+                            output.shapes
+                        };
+                        for _ in 0..3 {
+                            draw(Vec::new());
+                        }
+                        let mut labels = std::collections::BTreeMap::new();
+                        let mut frames = Vec::new();
+                        let mut title = None;
+                        for clipped in draw(Vec::new()) {
+                            inspect(
+                                &clipped.shape,
+                                clipped.clip_rect,
+                                &mut labels,
+                                &mut frames,
+                                &mut title,
+                            );
+                        }
+                        let panel = *frames
+                            .iter()
+                            .find(|rect| rect.contains(title.expect("the call title is painted")))
+                            .expect("the call window has a painted border");
+                        assert!(
+                            screen.shrink(15.0).contains_rect(panel),
+                            "{scenario}, {size:?}, light={light}, scale={scale}: call panel {panel:?} exceeds the viewport"
+                        );
+                        if scale == 1.0 && size.y >= 600.0 {
+                            for label in &expected {
+                                assert!(
+                                    labels.contains_key(*label),
+                                    "{size:?}, light={light}: {label} must be visible without scrolling"
+                                );
+                            }
+                            assert_eq!(
+                                labels.get("System default"),
+                                Some(&2),
+                                "{scenario}, {size:?}, light={light}: both audio selectors must be visible without scrolling"
+                            );
+                            for kind in [
+                                crate::calls::DeviceKind::Microphone,
+                                crate::calls::DeviceKind::Speaker,
+                            ] {
+                                let (selector, clip) = ctx
+                                    .data(|data| {
+                                        data.get_temp::<(egui::Rect, egui::Rect)>(
+                                            crate::ui::call::device_bounds_id(&call_account, kind),
+                                        )
+                                    })
+                                    .expect("the actual selector response is registered");
+                                assert!(
+                                    clip.contains_rect(selector) && screen.contains_rect(selector),
+                                    "{scenario}, {size:?}, light={light}: {kind:?} selector {selector:?} is clipped by {clip:?}"
+                                );
+                            }
+                        }
+                        for _ in 0..20 {
+                            for clipped in draw(vec![
+                                egui::Event::PointerMoved(panel.center()),
+                                egui::Event::MouseWheel {
+                                    unit: egui::MouseWheelUnit::Point,
+                                    delta: egui::vec2(0.0, -40.0),
+                                    modifiers: egui::Modifiers::NONE,
+                                    phase: egui::TouchPhase::Move,
+                                },
+                            ]) {
+                                inspect(
+                                    &clipped.shape,
+                                    clipped.clip_rect,
+                                    &mut labels,
+                                    &mut Vec::new(),
+                                    &mut title,
+                                );
+                            }
+                        }
+                        for label in &expected {
+                            assert!(
+                                labels.contains_key(*label),
+                                "{size:?}, light={light}, scale={scale}: {label} must remain reachable"
+                            );
+                        }
+                        assert!(
+                            app.actions.is_empty(),
+                            "drawing and scrolling queue no call actions"
+                        );
+                        assert!(
+                            !std::iter::from_fn(|| commands.try_recv().ok()).any(
+                                |command| matches!(
+                                    command,
+                                    crate::backend::Command::StartCall { .. }
+                                        | crate::backend::Command::StartVideoCall { .. }
+                                        | crate::backend::Command::AnswerCall
+                                        | crate::backend::Command::AnswerVideoCall
+                                        | crate::backend::Command::SetCallVideo(true)
+                                )
+                            ),
+                            "synthetic layout never opens call devices"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn synthetic_call_and_backup_surfaces_show_their_actions_without_opening_devices() {
+        for (page, expected) in [
+            ("call-preparing", vec!["Starting call", "Cancel call"]),
+            (
+                "call-incoming",
+                vec!["Incoming voice call", "Answer", "Decline"],
+            ),
+            (
+                "call-incoming-video",
+                vec![
+                    "Incoming video call",
+                    "Answer with video",
+                    "Answer without camera",
+                ],
+            ),
+            (
+                "call-active",
+                vec!["Connected", "Mute", "End call", "Turn camera on"],
+            ),
+            ("call-muted", vec!["Unmute"]),
+            (
+                "call-video-requested",
+                vec!["Accept video and turn camera on", "Keep voice only"],
+            ),
+            (
+                "call-camera-opening",
+                vec!["Opening the camera", "Cancel video"],
+            ),
+            (
+                "call-video-waiting",
+                vec!["Waiting for the other person's video", "Turn camera off"],
+            ),
+            ("call-video", vec!["Your camera", "Turn camera off"]),
+            (
+                "call-history",
+                vec!["Calls and audio devices", "Answered", "Missed"],
+            ),
+            (
+                "archive-backup",
+                vec!["Back up this account", "passphrase", "Save backup"],
+            ),
+            (
+                "archive-restore",
+                vec!["Restore an account backup", "Choose backup"],
+            ),
+            (
+                "archive-resume",
+                vec![
+                    "Resume this restored account?",
+                    "original installation",
+                    "Resume connection",
+                    "Keep offline",
+                ],
+            ),
+        ] {
+            for light in [false, true] {
+                let mut app = app();
+                apply_flags(&mut app, Some(page));
+                let (backend, mut commands) = crate::backend::Backend::recording();
+                app.backend = backend;
+                if light {
+                    apply_flags(&mut app, Some("light"));
+                }
+                let ctx = egui::Context::default();
+                app.attach(&ctx);
+                render(&mut app, &ctx);
+                let shapes = frame_sized(&mut app, &ctx, 780.0, Vec::new());
+                let mut text = String::new();
+                for shape in &shapes {
+                    new_surface_text(&shape.shape, &mut text);
+                }
+                for label in &expected {
+                    assert!(
+                        text.contains(label),
+                        "{page} (light={light}) is missing {label:?}"
+                    );
+                }
+                assert!(
+                    !std::iter::from_fn(|| commands.try_recv().ok()).any(|command| matches!(
+                        command,
+                        crate::backend::Command::StartCall { .. }
+                            | crate::backend::Command::StartVideoCall { .. }
+                            | crate::backend::Command::AnswerCall
+                            | crate::backend::Command::AnswerVideoCall
+                            | crate::backend::Command::SetCallVideo(true)
+                            | crate::backend::Command::ResumeRestoredAccount
+                    )),
+                    "rendering must not initiate a connection or device action"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn app_lock_hides_synthetic_call_and_restore_confirmation_surfaces() {
+        for page in ["call-incoming-video", "call-video", "archive-resume"] {
+            let mut app = app();
+            apply_flags(&mut app, Some(page));
+            app_lock_sample(&mut app);
+            let ctx = egui::Context::default();
+            app.attach(&ctx);
+            render(&mut app, &ctx);
+            let shapes = frame_sized(&mut app, &ctx, 780.0, Vec::new());
+            assert!(
+                app.app_lock.is_locked(),
+                "the configured synthetic password keeps the app locked"
+            );
+            let mut text = String::new();
+            for shape in &shapes {
+                new_surface_text(&shape.shape, &mut text);
+            }
+            for private_control in [
+                "Answer with video",
+                "Your camera",
+                "Resume this restored account?",
+                "Resume connection",
+            ] {
+                assert!(
+                    !text.contains(private_control),
+                    "{page}: lock must hide {private_control}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn every_surface_lays_out() {
         let mut app = app();
@@ -5352,6 +5809,26 @@ mod tests {
             render(&mut app, &ctx);
         }
         for page in [
+            "call-preparing",
+            "call-incoming",
+            "call-incoming-video",
+            "call-connecting",
+            "call-active",
+            "call-muted",
+            "call-stalled",
+            "call-video-requested",
+            "call-camera-opening",
+            "call-video-waiting",
+            "call-video",
+            "call-history",
+            "call-active,light",
+            "call-incoming-video,light",
+            "call-video-waiting,light",
+            "archive-backup",
+            "archive-restore",
+            "archive-resume",
+            "archive-backup,light",
+            "archive-resume,light",
             "draft-priority",
             "draft-priority,light",
             "document-draft-priority",
@@ -5497,6 +5974,7 @@ mod tests {
             "sticker-search",
             "sticker-animated",
             "sticker-add",
+            "sticker-view",
             "sticker-pack-message",
             "sticker-maker",
             "sticker-pack-view",
@@ -5553,7 +6031,7 @@ mod tests {
             apply_flags(&mut app, Some(page));
             render(&mut app, &ctx);
         }
-        for page in ["login", "pair", "phone"] {
+        for page in ["sync-choice", "login", "pair", "phone"] {
             let mut app = self::app();
             apply_flags(&mut app, Some(page));
             render(&mut app, &ctx);
@@ -5603,6 +6081,137 @@ mod tests {
                 output.textures_delta.clear();
             }
         }
+    }
+
+    /// A sticker shown large offers the favorite toggle that matches its
+    /// state, and a click on the sticker itself closes it.
+    #[test]
+    fn a_large_sticker_toggles_its_favorite_and_closes_on_click() {
+        let mut app = app();
+        let ctx = egui::Context::default();
+        app.attach(&ctx);
+        apply_flags(&mut app, Some("sticker-view"));
+        app.backend.record_demo_commands();
+        render(&mut app, &ctx);
+        let received = app.sticker_view.as_ref().expect("open").path().to_owned();
+        let click = |app: &mut App, pos: egui::Pos2| {
+            let press = |pressed| egui::Event::PointerButton {
+                pos,
+                pressed,
+                button: egui::PointerButton::Primary,
+                modifiers: egui::Modifiers::NONE,
+            };
+            frame_with(app, &ctx, vec![egui::Event::PointerMoved(pos), press(true)]);
+            frame_with(app, &ctx, vec![press(false)]);
+            render(app, &ctx);
+        };
+        let button = || {
+            ctx.data(|data| {
+                data.get_temp::<egui::Rect>(crate::ui::image_preview::sticker_favorite_id())
+            })
+            .expect("the favorite button is drawn")
+        };
+
+        click(&mut app, button().center());
+        let commands = app.backend.take_demo_commands();
+        assert!(
+            commands.iter().any(
+                |command| matches!(command, crate::backend::Command::SaveSticker { path } if *path == received)
+            ),
+            "{commands:?}"
+        );
+
+        // Once the favorite copy arrives, the same button removes it.
+        let copy = app.dirs.media_cache_dir().join(format!(
+            "{}.webp",
+            crate::backend::sticker_store::content_hash(&std::fs::read(&received).unwrap())
+        ));
+        app.stickers_saved.push(copy.clone());
+        render(&mut app, &ctx);
+        click(&mut app, button().center());
+        let commands = app.backend.take_demo_commands();
+        assert!(
+            commands.iter().any(
+                |command| matches!(command, crate::backend::Command::ForgetSticker { path } if *path == copy)
+            ),
+            "{commands:?}"
+        );
+        assert!(app.sticker_view.is_some(), "the buttons leave it open");
+
+        let above = button().center_top() - egui::vec2(0.0, 120.0);
+        click(&mut app, above);
+        assert!(
+            app.sticker_view.is_none(),
+            "a click on the sticker closes it"
+        );
+    }
+
+    /// The viewer steps through an animated sticker's frames on its own.
+    #[test]
+    fn an_animated_sticker_plays_in_the_viewer() {
+        let mut app = app();
+        let ctx = egui::Context::default();
+        app.attach(&ctx);
+        animated_sticker_sample(&mut app);
+        app.picker = None;
+        let path = app.stickers[0].clone();
+        render(&mut app, &ctx);
+        app.actions
+            .push(crate::model::Action::PreviewSticker(path.clone()));
+        let drawn = |app: &mut App| {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1180.0, 780.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| {
+                    let ctx = ui.ctx().clone();
+                    app.background_frame(&ctx);
+                    app.frame_ui(ui);
+                },
+            );
+            output.textures_delta.clear();
+            output
+                .shapes
+                .iter()
+                .map(|clipped| clipped.shape.texture_id())
+                .collect::<std::collections::HashSet<_>>()
+        };
+        let first = drawn(&mut app);
+        assert!(app.sticker_view.as_ref().expect("open").animated());
+        let mut seen = std::collections::HashSet::new();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while seen.len() < 3 && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(30));
+            seen.extend(drawn(&mut app).difference(&first).copied());
+        }
+        assert!(
+            seen.len() >= 3,
+            "the viewer showed {} new frames",
+            seen.len()
+        );
+    }
+
+    /// Escape closes a large sticker without reaching the chat behind it.
+    #[test]
+    fn escape_closes_a_large_sticker() {
+        let mut app = app();
+        let ctx = egui::Context::default();
+        app.attach(&ctx);
+        apply_flags(&mut app, Some("sticker-view"));
+        render(&mut app, &ctx);
+        assert!(app.sticker_view.is_some());
+        frame_with(
+            &mut app,
+            &ctx,
+            vec![key(egui::Key::Escape, egui::Modifiers::NONE)],
+        );
+        render(&mut app, &ctx);
+        assert!(app.sticker_view.is_none());
+        assert!(app.open_chat.is_some(), "the chat stays open");
     }
 
     /// Runs one frame with input events.
@@ -6000,6 +6609,7 @@ mod tests {
                     sender_name: Some("Linus Example".into()),
                     summary: long.into(),
                     full: long.into(),
+                    media: None,
                     status: Delivery::Read,
                 });
             } else if chat.id == direct {
@@ -6009,6 +6619,7 @@ mod tests {
                     sender_name: None,
                     summary: "Short one".into(),
                     full: "Short one".into(),
+                    media: None,
                     status: Delivery::Read,
                 });
             }
@@ -6307,7 +6918,8 @@ mod tests {
                                 egui::Shape::Rect(rect)
                                     if rect.rect.width() > 360.0
                                         && rect.rect.width() < 430.0
-                                        && rect.rect.height() > 300.0 =>
+                                        && rect.rect.height() > 300.0
+                                        && rect.stroke.width == 1.0 =>
                                 {
                                     Some(rect.rect)
                                 }
@@ -10034,6 +10646,10 @@ mod tests {
         assert!(app.reaction_target.is_none(), "a double-click never reacts");
 
         // A right-click on the bubble still opens the context menu, not the picker.
+        // Opening the reply strip resizes a bottom-aligned short transcript.
+        let bubble = ctx
+            .data(|data| data.get_temp::<egui::Rect>(id.with("rect")))
+            .expect("the current bubble rect");
         let press = |pressed| egui::Event::PointerButton {
             pos: bubble.center(),
             button: egui::PointerButton::Secondary,
@@ -16008,6 +16624,34 @@ mod bubble_detail_tests {
         );
     }
 
+    #[test]
+    fn voice_time_shares_the_duration_line() {
+        let mut app = app();
+        let ctx = egui::Context::default();
+        app.attach(&ctx);
+        apply_flags(&mut app, Some("voice"));
+        frames(&mut app, &ctx, egui::vec2(1180.0, 1400.0));
+        let chat = SAMPLES[0].id;
+        for id in ["ada-voice", "you-voice"] {
+            let bubble = crate::ui::conversation::bubble_id(chat, id);
+            let frame = rect(&ctx, bubble.with("rect")).expect("the bubble was drawn");
+            let footer = rect(&ctx, crate::ui::conversation::footer_id(chat, id))
+                .expect("the time was drawn");
+            assert!(
+                frame.contains_rect(footer),
+                "{id}: time stays inside the bubble"
+            );
+            assert!(
+                frame.bottom() - footer.bottom() <= 8.0,
+                "{id}: no empty strip under the time"
+            );
+            assert!(
+                frame.height() <= 60.0,
+                "{id}: time does not add another line"
+            );
+        }
+    }
+
     /// A picture without a caption carries its time and ticks over its
     /// bottom corner, and its bubble closes just under it; with a caption
     /// they stay on the caption's line below the picture (#251).
@@ -16179,5 +16823,230 @@ mod bubble_detail_tests {
         // A narrow page keeps the usual margins instead.
         frames(&mut app, &ctx, egui::vec2(900.0, 900.0));
         assert!(column(&ctx).span() < 640.0, "{:?}", column(&ctx));
+    }
+}
+
+#[cfg(test)]
+mod independent_text_scale_tests {
+    use super::tests::app;
+    use super::*;
+    use crate::model::Action;
+
+    fn frame(
+        app: &mut App,
+        ctx: &egui::Context,
+        size: egui::Vec2,
+    ) -> Vec<egui::epaint::ClippedShape> {
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                ..Default::default()
+            },
+            |ui| {
+                app.background_frame(ui.ctx());
+                app.frame_ui(ui);
+            },
+        );
+        output.textures_delta.clear();
+        output.shapes
+    }
+
+    fn texts<'a>(shape: &'a egui::Shape, result: &mut Vec<&'a egui::epaint::TextShape>) {
+        match shape {
+            egui::Shape::Text(text) => result.push(text),
+            egui::Shape::Vec(shapes) => {
+                for shape in shapes {
+                    texts(shape, result);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    #[test]
+    fn messages_emoji_selection_and_composer_scale_without_window_zoom() {
+        for light in [false, true] {
+            for size in [egui::vec2(400.0, 600.0), egui::vec2(1180.0, 780.0)] {
+                let mut app = app();
+                if light {
+                    apply_flags(&mut app, Some("light"));
+                }
+                let chat = app.open_chat.clone().unwrap();
+                app.conversations.get_mut(&chat).unwrap().messages = vec![
+                    message(
+                        &chat,
+                        "scale-text",
+                        false,
+                        1_700_000_000,
+                        Content::text("Scale fixture 🦀 readable"),
+                    ),
+                    message(
+                        &chat,
+                        "scale-emoji",
+                        false,
+                        1_700_000_001,
+                        Content::text("🦀"),
+                    ),
+                ];
+                app.composer = "Composer scale fixture".into();
+                let ctx = egui::Context::default();
+                app.attach(&ctx);
+                let mut emoji_widths = Vec::new();
+                // Returning to 100% also exercises invalidation of rows laid out at 150%.
+                for scale in [0.85, 1.0, 1.5, 1.0] {
+                    app.actions.push(Action::SetTextScale(scale));
+                    let mut shapes = Vec::new();
+                    for _ in 0..4 {
+                        shapes = frame(&mut app, &ctx, size);
+                    }
+                    assert!((ctx.zoom_factor() - 1.0).abs() < 0.001);
+                    assert!((ctx.pixels_per_point() - 1.0).abs() < 0.001);
+                    let mut drawn = Vec::new();
+                    for shape in &shapes {
+                        texts(&shape.shape, &mut drawn);
+                    }
+                    let body = drawn
+                        .iter()
+                        .find(|text| text.galley.text().starts_with("Scale fixture"))
+                        .expect("the message text is drawn at every scale");
+                    let composer = drawn
+                        .iter()
+                        .find(|text| text.galley.text() == "Composer scale fixture")
+                        .expect("the composer text is drawn at every scale");
+                    for text in [body, composer] {
+                        let font = text
+                            .galley
+                            .job
+                            .sections
+                            .first()
+                            .unwrap()
+                            .format
+                            .font_id
+                            .size;
+                        assert!(
+                            (font - 14.5 * scale).abs() < 0.05,
+                            "actual text font {font}, scale {scale}, {size:?}, light {light}"
+                        );
+                    }
+                    assert!(
+                        (ctx.global_style().text_styles[&egui::TextStyle::Body].size
+                            - 14.0 * scale)
+                            .abs()
+                            < 0.05
+                    );
+                    let emoji_id = crate::ui::conversation::bubble_id(&chat, "scale-emoji");
+                    let emoji_body = ctx
+                        .data(|data| data.get_temp::<egui::Rect>(emoji_id.with("body")))
+                        .expect("the emoji message body is registered");
+                    let emoji = drawn
+                        .iter()
+                        .find(|text| {
+                            text.galley.text() == crate::emoji::PLACEHOLDER.to_string()
+                                && crate::bidi::char_bounds(&text.galley, 0, 1).is_some_and(
+                                    |bounds| {
+                                        emoji_body
+                                            .contains(bounds.translate(text.pos.to_vec2()).center())
+                                    },
+                                )
+                        })
+                        .expect("the emoji-only message has a selectable placeholder");
+                    // The placeholder font is adjusted to the native glyph's
+                    // aspect ratio; its pinned line height measures the text scale.
+                    let expected = ctx.fonts_mut(|fonts| {
+                        fonts.row_height(&crate::theme::regular(14.5 * 2.4 * scale))
+                    });
+                    let format = &emoji.galley.job.sections.first().unwrap().format;
+                    assert!((format.line_height.unwrap() - expected).abs() < 0.1);
+                    emoji_widths.push(
+                        crate::bidi::char_bounds(&emoji.galley, 0, 1)
+                            .unwrap()
+                            .width(),
+                    );
+                    let id = crate::ui::conversation::bubble_id(&chat, "scale-text");
+                    let body_rect = ctx
+                        .data(|data| data.get_temp::<egui::Rect>(id.with("body")))
+                        .expect("scaled body geometry is registered");
+                    let response = ctx
+                        .read_response(id.with("body-text"))
+                        .expect("scaled body remains selectable");
+                    assert!(response.rect.contains(body_rect.center()));
+                    let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
+                    assert!(screen.contains(body_rect.min) && screen.contains(body_rect.max));
+                    let composer_rect = ctx
+                        .data(|data| {
+                            data.get_temp::<egui::Rect>(crate::ui::conversation::composer_text_id())
+                        })
+                        .expect("composer geometry is registered");
+                    assert!(
+                        screen.contains(composer_rect.min) && screen.contains(composer_rect.max)
+                    );
+                    let rows = app.copy_rows.lock().unwrap();
+                    let row = rows
+                        .iter()
+                        .find(|row| row.body.starts_with("Scale fixture"))
+                        .unwrap();
+                    let copied = crate::transcript::refine(&row.body, &rows).unwrap();
+                    assert!(copied.contains("Scale fixture 🦀 readable"));
+                    assert!(!copied.contains(crate::emoji::PLACEHOLDER));
+                }
+                assert!(
+                    emoji_widths[0] < emoji_widths[1] && emoji_widths[1] < emoji_widths[2],
+                    "actual emoji message widths: {emoji_widths:?}, {size:?}, light {light}"
+                );
+                assert!((emoji_widths[1] - emoji_widths[3]).abs() < 0.1);
+            }
+        }
+    }
+
+    #[test]
+    fn group_info_dialog_remains_inside_the_window_at_each_text_scale() {
+        fn modal(shape: &egui::Shape) -> Option<egui::Rect> {
+            match shape {
+                egui::Shape::Rect(rect)
+                    if rect.stroke.width == 1.0
+                        && rect.rect.width() > 300.0
+                        && rect.rect.width() < 430.0
+                        && rect.rect.height() > 200.0 =>
+                {
+                    Some(rect.rect)
+                }
+                egui::Shape::Vec(shapes) => shapes.iter().find_map(modal),
+                _ => None,
+            }
+        }
+        for light in [false, true] {
+            for size in [egui::vec2(400.0, 600.0), egui::vec2(1180.0, 780.0)] {
+                for scale in [0.85, 1.0, 1.5] {
+                    let mut app = app();
+                    apply_flags(
+                        &mut app,
+                        Some(if light {
+                            "group-info,light"
+                        } else {
+                            "group-info"
+                        }),
+                    );
+                    app.settings.text_scale = scale;
+                    let ctx = egui::Context::default();
+                    app.attach(&ctx);
+                    let mut shapes = Vec::new();
+                    for _ in 0..4 {
+                        shapes = frame(&mut app, &ctx, size);
+                    }
+                    let rect = shapes
+                        .iter()
+                        .find_map(|shape| modal(&shape.shape))
+                        .expect("the synthetic group info modal is drawn");
+                    assert!(
+                        rect.left() >= 16.0
+                            && rect.right() <= size.x - 16.0
+                            && rect.top() >= 16.0
+                            && rect.bottom() <= size.y - 16.0,
+                        "modal {rect:?}, scale {scale}, {size:?}, light {light}"
+                    );
+                    assert!((ctx.zoom_factor() - 1.0).abs() < 0.001);
+                }
+            }
+        }
     }
 }

@@ -22,3 +22,6 @@ src/settings.rs
 src/account.rs
 src/ui/accounts.rs
 src/ui/gallery.rs
+src/ui/login.rs
+src/ui/archive_backup.rs
+src/ui/call.rs

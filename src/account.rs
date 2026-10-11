@@ -27,6 +27,11 @@ pub struct Account {
     pub link: LinkStatus,
     pub syncing: bool,
     pub sync_percent: Option<u32>,
+    pub call: Option<crate::calls::CallUpdate>,
+    pub call_preparing: bool,
+    pub call_devices: crate::calls::DeviceList,
+    pub call_records: Vec<crate::archive::CallRecord>,
+    pub call_log_open: bool,
     pub me: Option<String>,
     pub me_lid: Option<String>,
     pub me_name: Option<String>,
@@ -65,6 +70,7 @@ pub struct Account {
     pub typing: HashMap<ChatId, Vec<(String, Instant)>>,
     pub presence: HashMap<String, crate::app::Presence>,
     pub account_receipts_off: bool,
+    pub(crate) local_avatars: HashMap<String, PathBuf>,
     pub(crate) avatars: HashMap<String, Option<PathBuf>>,
     pub(crate) avatar_requests: HashSet<String>,
     pub(crate) avatars_full: HashMap<String, Option<PathBuf>>,
@@ -89,6 +95,9 @@ pub struct Account {
     pub(crate) new_contact_request: Option<u64>,
     pub(crate) new_contact_dialog_request: Option<u64>,
     pub pair_phone: String,
+    pub archive_progress: Option<crate::model::ArchiveRecoveryProgress>,
+    pub backup_busy: bool,
+    pub backup_status: Option<String>,
     pub show_archived: bool,
     /// Starred messages, newest star first, and whether the left panel lists
     /// them instead of the chats.
@@ -111,6 +120,7 @@ pub struct Account {
     /// has not arrived yet.
     pub reply_when_loaded: Option<(ChatId, String)>,
     pub chat_filter: ChatFilter,
+    pub label_filter: Option<String>,
     pub labels: Vec<Label>,
     pub account_privacy: crate::privacy::Snapshot,
     pub gallery: crate::model::GalleryState,
@@ -118,7 +128,7 @@ pub struct Account {
     pub interactive_sending: HashSet<(ChatId, String)>,
     pub group_saving: HashSet<ChatId>,
     pub(crate) reported_online: Option<bool>,
-    pub(crate) reported_history: Option<(bool, bool, Option<crate::model::ChatId>)>,
+    pub(crate) reported_history: Option<(bool, bool, bool, u32, u32, Option<crate::model::ChatId>)>,
     /// Chats this account may pin; WhatsApp Plus raises it once known.
     pub pin_limit: usize,
 }
@@ -131,7 +141,19 @@ impl Account {
         settings: AccountSettings,
         backend: Backend,
     ) -> Self {
+        let local_avatars = crate::local_avatars::load(&dirs.state).unwrap_or_else(|error| {
+            log::warn!("could not load local picture preferences: {error}");
+            HashMap::new()
+        });
         let open_chat = settings.last_chat.clone();
+        let chat_filter = settings.last_filter;
+        let label_filter = settings.last_label.clone();
+        backend.send(crate::backend::Command::SetCallMicrophone(
+            settings.call_microphone.clone(),
+        ));
+        backend.send(crate::backend::Command::SetCallSpeaker(
+            settings.call_speaker.clone(),
+        ));
         Self {
             id,
             dirs,
@@ -141,6 +163,11 @@ impl Account {
             link: LinkStatus::Starting,
             syncing: false,
             sync_percent: None,
+            call: None,
+            call_preparing: false,
+            call_devices: Default::default(),
+            call_records: Vec::new(),
+            call_log_open: false,
             me: None,
             me_lid: None,
             me_name: None,
@@ -170,6 +197,7 @@ impl Account {
             typing: HashMap::new(),
             presence: HashMap::new(),
             account_receipts_off: false,
+            local_avatars,
             avatars: HashMap::new(),
             avatar_requests: HashSet::new(),
             avatars_full: HashMap::new(),
@@ -194,6 +222,9 @@ impl Account {
             new_contact_request: None,
             new_contact_dialog_request: None,
             pair_phone: String::new(),
+            archive_progress: None,
+            backup_busy: false,
+            backup_status: None,
             show_archived: false,
             starred: Vec::new(),
             show_starred: false,
@@ -205,7 +236,8 @@ impl Account {
             #[cfg(any(test, feature = "demo"))]
             open_list_menu: None,
             reply_when_loaded: None,
-            chat_filter: ChatFilter::All,
+            chat_filter,
+            label_filter,
             labels: Vec::new(),
             account_privacy: crate::privacy::Snapshot::default(),
             gallery: Default::default(),
@@ -255,10 +287,12 @@ impl Account {
 
     /// Whether the device has linked data, including while offline.
     pub fn is_linked(&self) -> bool {
-        matches!(
-            self.link,
-            LinkStatus::Connected | LinkStatus::Connecting | LinkStatus::Disconnected { .. }
-        ) || (!self.chats.is_empty() && !matches!(self.link, LinkStatus::LoggedOut))
+        self.settings.archive_only
+            || matches!(
+                self.link,
+                LinkStatus::Connected | LinkStatus::Connecting | LinkStatus::Disconnected { .. }
+            )
+            || (!self.chats.is_empty() && !matches!(self.link, LinkStatus::LoggedOut))
     }
 
     /// The taskbar count: unarchived, unmuted, unlocked chats that look
@@ -278,6 +312,10 @@ impl Account {
     /// The name the switcher shows: the profile name, else the number,
     /// else "Account" and its number here.
     pub fn display_label(&self, locale: crate::i18n::Locale) -> String {
+        if self.settings.archive_only {
+            return crate::i18n::gettext(locale, "Offline archive {id}")
+                .replace("{id}", self.id.as_str());
+        }
         if let Some(name) = self
             .me_name
             .as_deref()
@@ -293,6 +331,9 @@ impl Account {
 
     /// Returns or requests a cached profile picture from this account.
     pub fn avatar(&mut self, id: &str) -> Option<PathBuf> {
+        if let Some(path) = self.local_avatars.get(&crate::local_avatars::key(id)) {
+            return Some(path.clone());
+        }
         if let Some(known) = self.avatars.get(id) {
             return known.clone();
         }

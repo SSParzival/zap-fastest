@@ -392,6 +392,13 @@ pub struct UnreadDivider {
     pub placed: bool,
 }
 
+struct ArchiveRestoreTask {
+    origin: AccountId,
+    destination: AccountId,
+    receiver:
+        std::sync::mpsc::Receiver<Result<Option<crate::archive::backup::BackupSummary>, String>>,
+}
+
 pub struct App {
     pub dirs: AppDirs,
     pub settings: Settings,
@@ -418,6 +425,8 @@ pub struct App {
     zoom_applied: bool,
     /// The wallpaper image named in the settings, decoded off this thread.
     pub wallpaper_image: crate::wallpaper::CustomImage,
+    custom_font_request: u64,
+    custom_font_pending: Option<crate::custom_font::PendingPick>,
 
     /// A sent message moves its chat up, so the chat list goes to the top.
     pub scroll_chats_to_top: bool,
@@ -554,6 +563,7 @@ pub struct App {
     pauses_media: bool,
     /// Image currently shown in the native preview.
     pub image_preview: Option<PreviewState>,
+    pub sticker_view: Option<crate::image_preview::StickerPreview>,
     /// Whether the loaded video covers the window instead of its bubble.
     pub video_expanded: bool,
     /// The motion photo whose clip plays over it: its chat and message.
@@ -601,6 +611,8 @@ pub struct App {
 
     pub page: Page,
     pub dialog: Option<Dialog>,
+    pub backup_draft: crate::ui::archive_backup::BackupDraft,
+    archive_restore: Option<ArchiveRestoreTask>,
     /// Places visited in this window, for the mouse's back and forward
     /// buttons. Cleared when the account on screen changes.
     nav_history: History,
@@ -624,7 +636,6 @@ pub struct App {
     /// Label being renamed, with the name being typed.
     pub label_editing: Option<(String, String)>,
     /// Label the chat list shows; `None` shows every chat.
-    pub label_filter: Option<String>,
     /// Chats opened from the Unread list, kept there until the filter changes.
     unread_kept: HashSet<ChatId>,
     pub toasts: Vec<Toast>,
@@ -694,16 +705,20 @@ pub struct App {
     /// a programmatic focus or unminimize request and the window is closed and
     /// reopened instead.
     wayland: bool,
+    niri_focus_pending: Option<std::sync::mpsc::Receiver<bool>>,
     /// Whether the current window close should reopen a fresh one at once
     /// (`Closed::Reopen`) rather than stop drawing.
     reopen: bool,
     /// Requests received from later launches.
+    automation: Option<crate::automation::Server>,
     control_commands: Option<std::sync::Arc<std::sync::Mutex<Vec<ControlCommand>>>>,
     /// Browser links wait for this account's archive and the app's unlock.
     pending_chat_links: Vec<(AccountId, crate::chat_link::ChatLink)>,
     /// Chats and messages from clicked notifications.
     notification_opens: std::sync::Arc<std::sync::Mutex<Vec<crate::notify::NotificationTarget>>>,
     notifications: crate::notify::Notifications,
+    pub(crate) in_app_notifications: Vec<crate::ui::notification_overlay::Notification>,
+    next_in_app_notification: u64,
     /// Unread count on the taskbar icon, where the desktop reads it. `None`
     /// for demo and test runs, which must not touch the real taskbar.
     badge: Option<crate::notify::Badge>,
@@ -929,9 +944,10 @@ fn tray_config(lockable: bool) -> fastframe_tray::Config {
         title: "Zap Faster".into(),
         icon: crate::util::app_icon_rgba,
         template_icon: Some(crate::util::tray_template_rgba),
-        // The tray icon is the app icon, so hosts that draw only named icons
-        // may use the installed one.
-        themed_icon: true,
+        // Use the app's pixel icon consistently so optional unread indicators can
+        // change at runtime without recreating the tray.
+        // Hosts prefer a named theme icon over pixels, which would hide unread badges.
+        themed_icon: false,
         // A left click on macOS toggles the window, as on Linux.
         menu_on_click: false,
         menu: vec![
@@ -979,6 +995,8 @@ impl App {
     ) -> std::io::Result<Self> {
         crate::proxy::configure(&settings.proxy);
         let mut roster = AccountRoster::load(&dirs.accounts_file())?;
+        crate::archive::backup::reconcile_restores(&dirs, &roster.order)
+            .map_err(std::io::Error::other)?;
         if roster.order.is_empty() {
             roster = AccountRoster::default();
         }
@@ -1027,6 +1045,10 @@ impl App {
             .ok();
         let folder = app.settings.download_folder.clone();
         for account in &app.accounts {
+            account.backend.send(Command::SetDownloadOrganization {
+                organization: app.settings.download_organization,
+                descriptive_names: app.settings.descriptive_download_names,
+            });
             account
                 .backend
                 .send(Command::SetDownloadFolder(folder.clone()));
@@ -1120,6 +1142,7 @@ impl App {
             .cached_palette()
             .unwrap_or_else(|| match settings.theme {
                 ThemeChoice::Light => Palette::light(),
+                ThemeChoice::Messages => Palette::messages(),
                 _ => Palette::dark(),
             });
         let locale = crate::i18n::resolve(settings.interface_language);
@@ -1145,6 +1168,8 @@ impl App {
             reveal_theme_changes: !cfg!(test),
             zoom_applied: false,
             wallpaper_image: crate::wallpaper::CustomImage::default(),
+            custom_font_request: 0,
+            custom_font_pending: None,
             scroll_chats_to_top: false,
             composer: String::new(),
             emoticon_undo: None,
@@ -1215,6 +1240,7 @@ impl App {
             media_hold: None,
             pauses_media: false,
             image_preview: None,
+            sticker_view: None,
             video_expanded: false,
             motion_playing: None,
             copy_rows: Default::default(),
@@ -1239,6 +1265,8 @@ impl App {
             scroll_route: ScrollRoute::default(),
             page: Page::Chats,
             dialog: None,
+            backup_draft: crate::ui::archive_backup::BackupDraft::default(),
+            archive_restore: None,
             nav_history: History::default(),
             forward_search: String::new(),
             forward_recipients: Vec::new(),
@@ -1252,7 +1280,6 @@ impl App {
             label_name: String::new(),
             label_color: crate::archive::DEFAULT_COLOR.to_owned(),
             label_editing: None,
-            label_filter: None,
             unread_kept: HashSet::new(),
             toasts: Vec::new(),
             actions: Vec::new(),
@@ -1289,11 +1316,15 @@ impl App {
             hide_intent: false,
             wants_show: false,
             wayland: wayland_session(),
+            niri_focus_pending: None,
             reopen: false,
+            automation: None,
             control_commands: None,
             pending_chat_links: Vec::new(),
             notification_opens: Default::default(),
             notifications: Default::default(),
+            in_app_notifications: Vec::new(),
+            next_in_app_notification: 0,
             badge: None,
             app_lock,
         };
@@ -1485,7 +1516,189 @@ impl App {
         self.voice_wanted = None;
         self.recording = None;
         self.image_preview = None;
+        self.sticker_view = None;
         self.video_expanded = false;
+    }
+
+    fn begin_archive_restore(&mut self, passphrase: crate::archive::backup::BackupPassphrase) {
+        if self.archive_restore.is_some() || self.backup_busy {
+            return;
+        }
+        let origin = self.account().id.clone();
+        let destination = loop {
+            let mut reserved = self.roster.clone();
+            let id = reserved.allocate();
+            self.roster.next_id = reserved.next_id;
+            let dirs = self.dirs.account(&id);
+            if !dirs.state.exists() && !dirs.cache.exists() {
+                break id;
+            }
+        };
+        let dirs = self.dirs.account(&destination);
+        let staging = self.dirs.state.join("backup-staging");
+        let waker = self.waker.clone();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        self.backup_busy = true;
+        self.backup_status =
+            Some(crate::i18n::gettext(self.locale, "Restoring encrypted archive…").into_owned());
+        let spawned = std::thread::Builder::new().name("archive-restore".into()).spawn(move || {
+            let result = (|| -> anyhow::Result<Option<crate::archive::backup::BackupSummary>> {
+                let Some(source) = rfd::FileDialog::new()
+                    .add_filter("Encrypted Zap Faster archive", &["zfbackup"])
+                    .pick_file() else { return Ok(None); };
+                let prepared = crate::archive::backup::prepare_restore(&source, passphrase.expose(), &staging)?;
+                let has_session = prepared.has_session();
+                let summary = prepared.install_into_empty(&dirs)?;
+                let mut settings = if has_session {
+                    crate::settings::AccountSettings::load(&dirs.settings_file())
+                } else { Default::default() };
+                // Retain the recovered identity and preferences without opening
+                // a second connection to the same linked device automatically.
+                settings.archive_only = true;
+                settings.cli_access = false;
+                if !has_session {
+                    settings.background_history = false;
+                    settings.archive_media = false;
+                    settings.notifications = false;
+                    settings.send_read_receipts = false;
+                    settings.send_typing = false;
+                    settings.auto_download = false;
+                }
+                if let Err(error) = settings.save(&dirs.settings_file()) {
+                    if let Err(cleanup) = discard_unregistered_archive_restore(&dirs) {
+                        anyhow::bail!("Could not save restored settings: {error}; cleanup failed: {cleanup}");
+                    }
+                    return Err(error.into());
+                }
+                Ok(Some(summary))
+            })().map_err(|error| error.to_string());
+            let _ = sender.send(result);
+            waker.wake();
+        });
+        match spawned {
+            Ok(_) => {
+                self.archive_restore = Some(ArchiveRestoreTask {
+                    origin,
+                    destination,
+                    receiver,
+                })
+            }
+            Err(_) => {
+                self.backup_busy = false;
+                self.backup_status = Some(
+                    crate::i18n::gettext(self.locale, "Could not start archive restore")
+                        .into_owned(),
+                );
+                self.toast_error("Could not start archive restore");
+            }
+        }
+    }
+
+    fn poll_archive_restore(&mut self) {
+        let Some(task) = &self.archive_restore else {
+            return;
+        };
+        let result = match task.receiver.try_recv() {
+            Ok(result) => result,
+            Err(std::sync::mpsc::TryRecvError::Empty) => return,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                Err("Archive restore worker stopped unexpectedly".into())
+            }
+        };
+        let task = self
+            .archive_restore
+            .take()
+            .expect("restore task was present");
+        let status = match result {
+            Ok(Some(_summary)) => {
+                let mut account = match Account::spawn(
+                    &self.dirs,
+                    task.destination.clone(),
+                    &self.settings,
+                    &self.waker,
+                ) {
+                    Ok(account) => account,
+                    Err(error) => {
+                        let cleanup = discard_unregistered_archive_restore(
+                            &self.dirs.account(&task.destination),
+                        )
+                        .err();
+                        let detail = cleanup
+                            .map(|error| format!("; cleanup failed: {error}"))
+                            .unwrap_or_default();
+                        self.finish_archive_restore(
+                            &task.origin,
+                            format!("Could not open restored archive: {error}{detail}"),
+                            true,
+                        );
+                        return;
+                    }
+                };
+                let mut roster = self.roster.clone();
+                roster.order = self
+                    .accounts
+                    .iter()
+                    .map(|account| account.id.as_str().to_owned())
+                    .collect();
+                roster.order.push(task.destination.as_str().to_owned());
+                roster.active = self.account().id.as_str().to_owned();
+                if let Err(error) = roster.save(&self.dirs.accounts_file()) {
+                    account.backend.shutdown();
+                    let cleanup = discard_unregistered_archive_restore(&account.dirs).err();
+                    let detail = cleanup
+                        .map(|error| format!("; cleanup failed: {error}"))
+                        .unwrap_or_default();
+                    self.finish_archive_restore(
+                        &task.origin,
+                        format!("Could not register restored archive: {error}{detail}"),
+                        true,
+                    );
+                    return;
+                }
+                if let Err(error) = crate::archive::backup::finish_restore(&account.dirs) {
+                    log::warn!(
+                        "restored account is registered; ownership-marker cleanup will retry: {error}"
+                    );
+                }
+                self.roster = roster;
+                self.accounts.push(account);
+                self.report_background_history();
+                (
+                    crate::i18n::gettext(
+                        self.locale,
+                        "Archive restored. Open the account switcher to view the offline archive.",
+                    )
+                    .into_owned(),
+                    false,
+                )
+            }
+            Ok(None) => (
+                crate::i18n::gettext(self.locale, "Archive restore cancelled").into_owned(),
+                false,
+            ),
+            Err(error) => (
+                crate::i18n::gettext(self.locale, "Archive restore failed: {error}")
+                    .replace("{error}", &error),
+                true,
+            ),
+        };
+        self.finish_archive_restore(&task.origin, status.0, status.1);
+    }
+
+    fn finish_archive_restore(&mut self, origin: &AccountId, message: String, failed: bool) {
+        if let Some(account) = self
+            .accounts
+            .iter_mut()
+            .find(|account| &account.id == origin)
+        {
+            account.backup_busy = false;
+            account.backup_status = Some(message.clone());
+        }
+        if failed {
+            self.toast_error(message);
+        } else {
+            self.toast(message);
+        }
     }
 
     fn add_account(&mut self) {
@@ -1511,6 +1724,10 @@ impl App {
                 }
             }
         };
+        account.backend.send(Command::SetDownloadOrganization {
+            organization: self.settings.download_organization,
+            descriptive_names: self.settings.descriptive_download_names,
+        });
         account.backend.send(Command::SetDownloadFolder(
             self.settings.download_folder.clone(),
         ));
@@ -1617,9 +1834,15 @@ impl App {
     /// What the conversation shows behind its bubbles, for the chat and the
     /// wallpaper preview alike.
     pub fn wallpaper(&self) -> crate::wallpaper::Look {
+        let mut color = self.settings.wallpaper_background(&self.palette);
+        if self.palette.vibrant() {
+            color = self.palette.vibrant_chat(color);
+        }
         crate::wallpaper::Look {
-            color: self.settings.wallpaper_background(&self.palette),
-            doodles: self.settings.show_wallpaper,
+            color,
+            // Messages draws its conversations on a plain background.
+            doodles: self.settings.show_wallpaper
+                && self.palette.bubbles != crate::theme::BubbleStyle::Messages,
             image: self
                 .account()
                 .settings
@@ -1675,7 +1898,96 @@ impl App {
         }
     }
 
+    pub(crate) fn sync_automation_authority(&self) {
+        let Some(server) = &self.automation else {
+            return;
+        };
+        let locked = self.app_lock.is_locked();
+        server
+            .locked
+            .store(locked, std::sync::atomic::Ordering::SeqCst);
+        server.permits.sync(|account, chat| {
+            !locked
+                && self.accounts.iter().any(|known| {
+                    known.id.as_str() == account
+                        && known.settings.cli_access
+                        && known.chats.iter().any(|known| {
+                            known.id == chat
+                                && !known.locked
+                                && known.disappearing_timer().is_none()
+                        })
+                })
+        });
+    }
+
+    fn handle_automation(&mut self) {
+        if self.automation.is_none()
+            && self
+                .accounts
+                .iter()
+                .any(|account| account.settings.cli_access)
+        {
+            match crate::automation::Server::start(&self.dirs.runtime, self.waker.clone()) {
+                Ok(server) => self.automation = Some(server),
+                Err(error) => {
+                    log::warn!("could not start local automation: {error}");
+                    return;
+                }
+            }
+        }
+        self.sync_automation_authority();
+        let Some(server) = &self.automation else {
+            return;
+        };
+        server.locked.store(
+            self.app_lock.is_locked(),
+            std::sync::atomic::Ordering::SeqCst,
+        );
+        let requests = std::mem::take(&mut *server.queue.lock().unwrap_or_else(|p| p.into_inner()));
+        for request in requests {
+            if request.expired() {
+                request.answer(crate::automation::error(
+                    "Application locked or request expired",
+                ));
+                continue;
+            }
+            let Some(account) = self
+                .accounts
+                .iter()
+                .find(|account| account.id.as_str() == request.request.account())
+            else {
+                request.answer(crate::automation::error("Unknown account"));
+                continue;
+            };
+            if !account.settings.cli_access
+                || account
+                    .chats
+                    .iter()
+                    .any(|chat| chat.id == request.request.chat() && chat.locked)
+            {
+                request.answer(crate::automation::error(
+                    "Access disabled or conversation locked",
+                ));
+                continue;
+            }
+            if matches!(request.request, crate::automation::Request::Send { .. })
+                && (account.settings.archive_only || !matches!(account.link, LinkStatus::Connected))
+            {
+                request.answer(crate::automation::error("Account is offline"));
+                continue;
+            }
+            if !server.permits.authorize(&request) {
+                request.answer(crate::automation::error(
+                    "Request expired or authorization revoked",
+                ));
+                continue;
+            }
+            account.backend.send(Command::Automation(request));
+        }
+    }
+
     fn handle_control_commands(&mut self) {
+        self.handle_automation();
         let Some(queue) = &self.control_commands else {
             return;
         };
@@ -1781,6 +2093,9 @@ impl App {
     fn clear_chat_notifications(&mut self, chat: &str) {
         let account = self.account().id.clone();
         self.notifications.clear(&account, chat);
+        self.in_app_notifications.retain(|notification| {
+            notification.target.account != account || notification.target.chat != chat
+        });
     }
 
     /// The chat was looked at, so its next message may notify at once.
@@ -1812,6 +2127,9 @@ impl App {
         // A limited chat notifies once, then waits; opening it ends the wait.
         // A mention of us or a reply to us always notifies and leaves the wait alone.
         let for_us = chat.is_group() && self.addresses_us(message);
+        if !self.focus_allows_chat(chat) && !(for_us && self.account().settings.focus_mentions) {
+            return;
+        }
         let limited = !for_us
             && self
                 .account()
@@ -1834,6 +2152,7 @@ impl App {
         }
         let (name, is_group) = (self.chat_title(chat), chat.is_group());
         let chat_sound = chat.notification_sound.clone();
+        let label_sound = self.chat_label_sound(chat);
         let sender = self.display_name_or(&message.sender, message.sender_name.as_deref());
         let (title, body) = crate::notify::preview_lines(
             self.locale,
@@ -1857,10 +2176,33 @@ impl App {
         let identity_visible = self.account().settings.notification_sender;
         let sound = notification_sound(
             &self.settings,
-            chat_sound.filter(|_| identity_visible),
+            chat_sound
+                .or_else(|| (!for_us).then_some(label_sound).flatten())
+                .filter(|_| identity_visible),
             is_group,
             for_us && identity_visible,
         );
+        if self.account().settings.in_app_notifications && !self.window_hidden {
+            let now = std::time::Instant::now();
+            self.in_app_notifications
+                .retain(|notification| notification.expires > now);
+            self.next_in_app_notification = self.next_in_app_notification.wrapping_add(1);
+            self.in_app_notifications
+                .push(crate::ui::notification_overlay::Notification {
+                    id: self.next_in_app_notification,
+                    target: crate::notify::NotificationTarget {
+                        account: self.account().id.clone(),
+                        chat: chat_id.to_owned(),
+                        message: message.id.clone(),
+                    },
+                    title: title.chars().take(96).collect(),
+                    body: body.chars().take(160).collect(),
+                    expires: now + crate::ui::notification_overlay::LIFETIME,
+                });
+            if self.in_app_notifications.len() > crate::ui::notification_overlay::LIMIT {
+                self.in_app_notifications.remove(0);
+            }
+        }
         self.notifications.show(
             title,
             body,
@@ -1959,7 +2301,7 @@ impl App {
         // Colour emoji in labels, menus, tooltips and text fields; message
         // bodies paint their own over placeholders, which it leaves alone.
         ctx.add_plugin(crate::emoji::plugin());
-        crate::theme::set_font(ctx, self.settings.font);
+        self.apply_font(ctx);
         crate::theme::install(ctx);
         // Zoom stays in the settings, so egui must not change it behind the
         // app's back: the shortcuts below go through `Action::ZoomBy`.
@@ -2012,10 +2354,12 @@ impl App {
 
     /// Whether the device has linked data, including while offline.
     pub fn is_linked(&self) -> bool {
-        matches!(
-            self.link,
-            LinkStatus::Connected | LinkStatus::Connecting | LinkStatus::Disconnected { .. }
-        ) || (!self.chats.is_empty() && !matches!(self.link, LinkStatus::LoggedOut))
+        self.account().settings.archive_only
+            || matches!(
+                self.link,
+                LinkStatus::Connected | LinkStatus::Connecting | LinkStatus::Disconnected { .. }
+            )
+            || (!self.chats.is_empty() && !matches!(self.link, LinkStatus::LoggedOut))
     }
 
     pub fn chat(&self, id: &str) -> Option<&Chat> {
@@ -2090,6 +2434,14 @@ impl App {
                 self.open_chat = None;
             }
             return;
+        }
+        if self
+            .sticker_view
+            .as_ref()
+            .and_then(crate::image_preview::StickerPreview::chat)
+            == Some(id)
+        {
+            self.sticker_view = None;
         }
         if self.image_preview.as_ref().and_then(PreviewState::chat) == Some(id) {
             self.image_preview = None;
@@ -2166,6 +2518,13 @@ impl App {
     /// gone, so a deleted label leaves the list before the chats reload.
     fn prune_labels(&mut self) {
         let known: Vec<String> = self.labels.iter().map(|label| label.id.clone()).collect();
+        let settings = &mut self.account_mut().settings;
+        settings.focus_labels.retain(|id| known.contains(id));
+        settings.label_sounds.retain(|id, _| known.contains(id));
+        if settings.focus_labels.is_empty() {
+            settings.focus_enabled = false;
+        }
+        self.account_mut().mark_settings_dirty();
         for chat in &mut self.chats {
             chat.labels.retain(|id| known.contains(id));
         }
@@ -2175,6 +2534,8 @@ impl App {
             .is_some_and(|id| !known.contains(id))
         {
             self.label_filter = None;
+            self.account_mut().settings.last_label = None;
+            self.account_mut().mark_settings_dirty();
         }
         if self
             .label_editing
@@ -2189,11 +2550,15 @@ impl App {
     /// filter row, so it replaces the chip filter, and leaves the archive and
     /// the locked folder the way the other chips do.
     fn select_label(&mut self, label: Option<String>) {
+        let label = label.filter(|id| self.labels.iter().any(|known| &known.id == id));
         if self.locked_folder {
             self.close_locked_folder();
             self.search.clear();
             self.search_hits.clear();
         }
+        self.account_mut().settings.last_label = label.clone();
+        self.account_mut().settings.last_filter = ChatFilter::All;
+        self.account_mut().mark_settings_dirty();
         self.label_filter = label;
         self.chat_filter = ChatFilter::All;
         self.show_archived = false;
@@ -2547,6 +2912,26 @@ impl App {
     /// Visible chats filtered by search, archive state, and the chat filter,
     /// with drafts first, then pinned chats.
     /// Locked chats only appear inside the locked folder.
+    pub fn focus_allows_chat(&self, chat: &Chat) -> bool {
+        !self.account().settings.focus_enabled
+            || self
+                .account()
+                .settings
+                .focus_labels
+                .iter()
+                .any(|id| self.chat_wears(chat, id))
+    }
+
+    fn chat_label_sound(&self, chat: &Chat) -> Option<NotificationSound> {
+        // Label manager order gives overlapping labels a stable precedence.
+        self.labels.iter().find_map(|label| {
+            self.chat_wears(chat, &label.id)
+                .then(|| self.account().settings.label_sounds.get(&label.id))
+                .flatten()
+                .cloned()
+        })
+    }
+
     pub fn visible_chats(&self) -> Vec<&Chat> {
         let needle = crate::util::search_key(self.search.trim());
         let locked = self.locked_folder_open();
@@ -2555,6 +2940,7 @@ impl App {
             .chats
             .iter()
             .filter(|chat| chat.locked == locked)
+            .filter(|chat| self.focus_allows_chat(chat))
             .filter(|chat| locked || chat.archived == self.show_archived || !needle.is_empty())
             .filter(|chat| match &self.label_filter {
                 // A label lists every chat wearing it, channels included,
@@ -2672,6 +3058,13 @@ impl App {
 
     /// Returns or requests a cached profile picture.
     fn cached_avatar(&self, id: &str) -> Option<PathBuf> {
+        if let Some(path) = self
+            .account()
+            .local_avatars
+            .get(&crate::local_avatars::key(id))
+        {
+            return Some(path.clone());
+        }
         let path = self.account().dirs.avatar_file(id, false);
         path.metadata()
             .ok()
@@ -2690,6 +3083,13 @@ impl App {
 
     /// Returns or requests a full-size profile picture.
     pub fn avatar_full(&mut self, id: &str) -> Option<PathBuf> {
+        if let Some(path) = self
+            .account()
+            .local_avatars
+            .get(&crate::local_avatars::key(id))
+        {
+            return Some(path.clone());
+        }
         if let Some(known) = self.avatars_full.get(id) {
             return known.clone();
         }
@@ -2907,6 +3307,7 @@ impl App {
 
     /// Drains backend events into interface state and queues follow-up actions.
     fn handle_events(&mut self) {
+        self.poll_archive_restore();
         let mut removed = Vec::new();
         let mut deferred = Vec::new();
         let real_active = self.active;
@@ -2939,7 +3340,61 @@ impl App {
     }
     /// Applies an event to its owning account while protecting other accounts' visible state.
     fn apply_backend_event(&mut self, event: Event, live: bool) {
+        self.apply_backend_event_inner(event, live);
+        self.sync_automation_authority();
+    }
+
+    fn apply_backend_event_inner(&mut self, event: Event, live: bool) {
         match event {
+            Event::Call(update) => {
+                let fresh_incoming = update.phase == crate::calls::CallPhase::Incoming
+                    && self
+                        .call
+                        .as_ref()
+                        .is_none_or(|old| old.generation != update.generation);
+                let chat = update.chat.clone();
+                let finished = !update.phase.is_live();
+                self.call = Some(*update);
+                if finished {
+                    self.backend.send(Command::LoadCallLog);
+                }
+                if fresh_incoming
+                    && self.account().settings.notifications
+                    && self
+                        .chat(&chat)
+                        .is_some_and(|known| self.focus_allows_chat(known))
+                    && !self.app_lock.is_locked()
+                {
+                    let title = if self.account().settings.notification_sender {
+                        self.chat(&chat)
+                            .map(|chat| self.chat_title(chat))
+                            .unwrap_or_else(|| "Zap Faster".into())
+                    } else {
+                        "Zap Faster".into()
+                    };
+                    let account = self.account().id.clone();
+                    let waker = self.waker.clone();
+                    self.notifications.show(
+                        title,
+                        "Incoming voice call".into(),
+                        None,
+                        crate::settings::NotificationSound::System,
+                        crate::notify::NotificationTarget {
+                            account,
+                            chat,
+                            message: String::new(),
+                        },
+                        self.notification_opens.clone(),
+                        move || waker.wake(),
+                        false,
+                    );
+                }
+            }
+            Event::CallDismissed => self.call = None,
+            Event::CallPreparing(preparing) => self.call_preparing = preparing,
+            Event::CallDevices(devices) => self.call_devices = *devices,
+            Event::CallLog(records) => self.call_records = records,
+
             Event::Link(status) => self.handle_link(status, live),
             Event::Me {
                 id,
@@ -3351,6 +3806,14 @@ impl App {
                     self.image_preview = None;
                     self.video.stop();
                 }
+                if live
+                    && self.sticker_view.as_ref().is_some_and(|preview| {
+                        preview.chat() == Some(chat.as_str())
+                            && preview.message() == Some(id.as_str())
+                    })
+                {
+                    self.sticker_view = None;
+                }
                 if let Some(conversation) = self.conversations.get_mut(&chat) {
                     conversation.messages.retain(|message| message.id != id);
                     conversation.transcripts.remove(&id);
@@ -3473,6 +3936,16 @@ impl App {
                 let conversation = self.conversations.entry(chat).or_default();
                 conversation.transcripts.extend(transcripts);
             }
+            Event::MotionTransferProgress {
+                chat,
+                message,
+                bytes,
+                total,
+            } => {
+                if let Some(motion) = self.motion_mut(&chat, &message) {
+                    motion.state = MediaState::Transferring { bytes, total };
+                }
+            }
             Event::Motion {
                 chat,
                 message,
@@ -3583,6 +4056,20 @@ impl App {
                     self.actions.push(Action::SetDownloadFolder(Some(path)));
                 }
             }
+            Event::LocalAvatarChanged { id, result } => match result {
+                Ok(Some(path)) => {
+                    self.account_mut()
+                        .local_avatars
+                        .insert(crate::local_avatars::key(&id), path);
+                }
+                Ok(None) => {
+                    self.account_mut()
+                        .local_avatars
+                        .remove(&crate::local_avatars::key(&id));
+                }
+                Err(error) if live => self.toast_error(error),
+                Err(_) => log::warn!("could not change a hidden account's local contact picture"),
+            },
             Event::WallpaperImagePicked(Ok(path)) => {
                 // The copy may keep the earlier one's name: decode it anew.
                 self.account_mut().settings.wallpaper_image = Some(path);
@@ -3677,6 +4164,42 @@ impl App {
                         name,
                         dismiss_dialog: false,
                     });
+                }
+            }
+            Event::ArchiveProgress(progress) => {
+                self.archive_progress = Some(progress);
+            }
+            Event::ArchiveBackupFinished(result) => {
+                self.backup_busy = false;
+                let (status, failed) = match result {
+                    Ok(Some(summary)) => (
+                        crate::i18n::ngettext(
+                            self.locale,
+                            "Archive backup saved ({count} file, {size})",
+                            "Archive backup saved ({count} files, {size})",
+                            u32::try_from(summary.files).unwrap_or(u32::MAX),
+                        )
+                        .replace("{count}", &summary.files.to_string())
+                        .replace("{size}", &crate::util::bytes(summary.bytes)),
+                        false,
+                    ),
+                    Ok(None) => (
+                        crate::i18n::gettext(self.locale, "Archive backup cancelled").into_owned(),
+                        false,
+                    ),
+                    Err(error) => (
+                        crate::i18n::gettext(self.locale, "Archive backup failed: {error}")
+                            .replace("{error}", &error),
+                        true,
+                    ),
+                };
+                self.backup_status = Some(status.clone());
+                if !self.events_hidden {
+                    if failed {
+                        self.toast_error(status);
+                    } else {
+                        self.toast(status);
+                    }
                 }
             }
             Event::Info(message) => self.toast(message),
@@ -3999,6 +4522,8 @@ impl App {
                 self.poll_creating = false;
                 self.poll_draft = Default::default();
                 self.notifications.clear_account(&account);
+                self.in_app_notifications
+                    .retain(|notification| notification.target.account != account);
                 self.chats.clear();
                 self.chats_loaded = false;
                 self.conversations.clear();
@@ -5679,12 +6204,42 @@ impl App {
         }
     }
 
+    fn apply_font(&mut self, ctx: &egui::Context) {
+        if crate::theme::set_font(
+            ctx,
+            self.settings.font,
+            self.settings.custom_font.as_deref(),
+        )
+        .is_err()
+        {
+            self.remove_custom_font();
+            self.mark_settings_dirty();
+            self.toast_error(
+                crate::i18n::gettext(self.locale, "Could not use this font").into_owned(),
+            );
+        }
+        ctx.request_repaint();
+    }
+
+    fn remove_custom_font(&mut self) {
+        self.settings.custom_font = None;
+        let request = self.claim_custom_font_request();
+        let _ = crate::custom_font::cleanup(self.dirs.clone(), None, request);
+    }
+
+    fn claim_custom_font_request(&mut self) -> u64 {
+        self.custom_font_request = self.custom_font_request.wrapping_add(1);
+        crate::custom_font::claim(self.custom_font_request);
+        self.custom_font_request
+    }
+
     fn apply_theme(&mut self, ctx: &egui::Context) {
         let preference = self.settings.cached_palette().map_or_else(
             || match self.settings.theme {
                 ThemeChoice::Dark => egui::ThemePreference::Dark,
                 ThemeChoice::Light => egui::ThemePreference::Light,
-                ThemeChoice::System => egui::ThemePreference::System,
+                // Messages follows the system's appearance, as Messages does.
+                ThemeChoice::System | ThemeChoice::Messages => egui::ThemePreference::System,
             },
             |palette| {
                 if palette.dark {
@@ -5710,7 +6265,13 @@ impl App {
             }
         };
         let palette = self.settings.cached_palette().unwrap_or_else(|| {
-            if dark {
+            if self.settings.theme == ThemeChoice::Messages {
+                if dark {
+                    Palette::messages()
+                } else {
+                    Palette::messages_light()
+                }
+            } else if dark {
                 Palette::dark()
             } else {
                 Palette::light()
@@ -5722,7 +6283,14 @@ impl App {
         // A change of colours after the window's first is revealed from the
         // middle outwards, as Omarchy does; the old palette stays until the
         // window's picture of it arrives.
-        if self.applied_dark.is_some() && self.palette != palette && self.reveal_theme_changes {
+        // A vibrant window's picture misses the desktop behind it, so changes
+        // to or from one switch at once.
+        if self.applied_dark.is_some()
+            && self.palette != palette
+            && self.reveal_theme_changes
+            && !self.palette.vibrant()
+            && !palette.vibrant()
+        {
             self.theme_transition.begin(ctx);
             if self.theme_transition.holding(ctx) {
                 return;
@@ -5782,6 +6350,11 @@ impl App {
 
     /// Applies queued view actions after drawing, routing state changes and backend commands.
     fn apply(&mut self, action: Action, ctx: &egui::Context) {
+        self.apply_inner(action, ctx);
+        self.sync_automation_authority();
+    }
+
+    fn apply_inner(&mut self, action: Action, ctx: &egui::Context) {
         if self.app_lock.is_locked() && !allowed_while_locked(&action) {
             // A clicked notification opens its message once unlocked; the
             // rest would show or change what the lock hides.
@@ -5847,6 +6420,84 @@ impl App {
         }
         let automatic_download = matches!(action, Action::DownloadAutomatic { .. });
         match action {
+            Action::ToggleCallLog => {
+                self.call_log_open = !self.call_log_open;
+                if self.call_log_open {
+                    self.backend.send(Command::LoadCallLog);
+                }
+            }
+            Action::StartCall(chat) => {
+                if self.accounts.iter().any(|account| {
+                    account.call_preparing
+                        || account
+                            .call
+                            .as_ref()
+                            .is_some_and(|call| call.phase.is_live())
+                }) {
+                    self.toast_error("Finish the current call first");
+                } else {
+                    self.backend.send(Command::StartCall { chat });
+                }
+            }
+            Action::StartVideoCall(chat) => {
+                if self.accounts.iter().any(|account| {
+                    account.call_preparing
+                        || account
+                            .call
+                            .as_ref()
+                            .is_some_and(|call| call.phase.is_live())
+                }) {
+                    self.toast_error("Finish the current call first");
+                } else {
+                    self.backend.send(Command::StartVideoCall { chat });
+                }
+            }
+            Action::AnswerCall => {
+                let active = self.account().id.clone();
+                if self.accounts.iter().any(|account| {
+                    account.id != active
+                        && (account.call_preparing
+                            || account
+                                .call
+                                .as_ref()
+                                .is_some_and(|call| call.phase.is_answered()))
+                }) {
+                    self.toast_error("Finish the current call first");
+                } else {
+                    self.backend.send(Command::AnswerCall);
+                }
+            }
+            Action::AnswerVideoCall => {
+                let active = self.account().id.clone();
+                if self.accounts.iter().any(|account| {
+                    account.id != active
+                        && (account.call_preparing
+                            || account
+                                .call
+                                .as_ref()
+                                .is_some_and(|call| call.phase.is_answered()))
+                }) {
+                    self.toast_error("Finish the current call first");
+                } else {
+                    self.backend.send(Command::AnswerVideoCall);
+                }
+            }
+            Action::DeclineCall => self.backend.send(Command::DeclineCall),
+            Action::HangupCall => self.backend.send(Command::HangupCall),
+            Action::SetCallMuted(muted) => self.backend.send(Command::SetCallMuted(muted)),
+            Action::SetCallVideo(enabled) => self.backend.send(Command::SetCallVideo(enabled)),
+            Action::RefreshAudioDevices => self.backend.send(Command::RefreshAudioDevices),
+            Action::SetCallMicrophone(device) => {
+                self.account_mut().settings.call_microphone = device.clone();
+                self.account_mut().mark_settings_dirty();
+                self.backend.send(Command::SetCallMicrophone(device));
+            }
+            Action::SetCallSpeaker(device) => {
+                self.account_mut().settings.call_speaker = device.clone();
+                self.account_mut().mark_settings_dirty();
+                self.backend.send(Command::SetCallSpeaker(device));
+            }
+
             Action::Open(page) => {
                 let opens_chats = page == Page::Chats;
                 // Privacy can change on the phone at any time, and nothing
@@ -6322,6 +6973,42 @@ impl App {
                 self.image_preview = None;
                 self.refocus_composer(ctx);
             }
+            Action::PreviewSticker(path) => {
+                if crate::safety::can_preview_image(&path)
+                    && crate::safety::image_preview_size_allowed(&path)
+                    && path.is_file()
+                {
+                    let chat = self.open_chat.clone();
+                    let message = chat
+                        .as_ref()
+                        .and_then(|chat| self.conversations.get(chat))
+                        .and_then(|conversation| {
+                            conversation.messages.iter().find(|message| {
+                                message
+                                    .content
+                                    .media()
+                                    .and_then(|media| media.path.as_deref())
+                                    == Some(path.as_path())
+                            })
+                        })
+                        .map(|message| message.id.clone());
+                    self.sticker_view = Some(
+                        crate::image_preview::StickerPreview::in_conversation(path, chat, message),
+                    );
+                    self.image_preview = None;
+                    self.dialog = None;
+                    self.picker = None;
+                    ctx.memory_mut(|memory| {
+                        if let Some(focused) = memory.focused() {
+                            memory.surrender_focus(focused);
+                        }
+                    });
+                }
+            }
+            Action::CloseStickerPreview => {
+                self.sticker_view = None;
+                self.refocus_composer(ctx);
+            }
             Action::OpenFile(path) => {
                 if crate::safety::can_open_attachment(&path) && path.is_file() {
                     if let Err(error) = open::that_detached(&path) {
@@ -6679,6 +7366,36 @@ impl App {
                 }
                 self.selection = next;
             }
+            Action::StarSelection(starred) => {
+                let Some((chat, ids)) = self.selection.clone() else {
+                    return;
+                };
+                if self.open_chat.as_deref() != Some(chat.as_str())
+                    || self
+                        .chat(&chat)
+                        .is_none_or(|known| known.locked && !self.locked_folder_open())
+                {
+                    return;
+                }
+                let Some(conversation) = self.conversations.get(&chat) else {
+                    return;
+                };
+                let mut seen = HashSet::new();
+                for id in ids {
+                    if seen.insert(id.clone())
+                        && conversation.message(&id).is_some_and(|message| {
+                            !message.status.is_local()
+                                && !matches!(message.content, Content::Revoked)
+                        })
+                    {
+                        self.backend.send(Command::SetStar {
+                            chat: chat.clone(),
+                            message: id,
+                            starred,
+                        });
+                    }
+                }
+            }
             Action::CancelSelection => {
                 self.selection = None;
                 self.sweep = None;
@@ -6886,6 +7603,8 @@ impl App {
                 self.video.stop();
                 self.voice_wanted = None;
                 self.voice_chat = self.open_chat.clone();
+                self.player
+                    .set_output_device(self.account().settings.call_speaker.clone());
                 if let Err(error) = self.player.seek(&message, &path, fraction) {
                     self.toast_error(error);
                 }
@@ -6903,10 +7622,16 @@ impl App {
                     let recorder = if self.backend.is_offline() {
                         Recorder::simulated(self.waker.clone())
                     } else {
-                        Recorder::start(self.waker.clone())
+                        Recorder::start_on(
+                            self.waker.clone(),
+                            self.account().settings.call_microphone.clone(),
+                        )
                     };
                     #[cfg(not(any(test, feature = "demo")))]
-                    let recorder = Recorder::start(self.waker.clone());
+                    let recorder = Recorder::start_on(
+                        self.waker.clone(),
+                        self.account().settings.call_microphone.clone(),
+                    );
                     self.recording = Some(recorder);
                 }
             }
@@ -6919,6 +7644,10 @@ impl App {
                 self.refocus_composer(ctx);
             }
             Action::DiscardUnsentVoice => self.unsent_voice = None,
+            Action::SetDisappearingTimer(chat, seconds) => {
+                self.backend
+                    .send(Command::SetDisappearingTimer { chat, seconds });
+            }
             Action::SetMuted(chat, until) => {
                 if let Some(known) = self.chat_mut(&chat) {
                     known.muted_until = until;
@@ -7417,6 +8146,7 @@ impl App {
                 self.dialog = Some(dialog);
             }
             Action::CloseDialog => {
+                self.backup_draft = crate::ui::archive_backup::BackupDraft::default();
                 self.cancel_contact_dialog_request();
                 self.clear_chat_lock_entry();
                 self.dialog = None;
@@ -7492,6 +8222,56 @@ impl App {
                 self.settings.screen_privacy.enabled = !self.settings.screen_privacy.enabled;
                 self.mark_settings_dirty();
             }
+            Action::SetVipChat { chat, enabled } => {
+                if self.chat(&chat).is_none() {
+                    return;
+                }
+                let chats = &mut self.account_mut().settings.vip_chats;
+                chats.retain(|id| id != &chat);
+                if enabled {
+                    chats.push(chat);
+                }
+                self.account_mut().mark_settings_dirty();
+            }
+            Action::SetFocusMode(enabled) => {
+                self.account_mut().settings.focus_enabled =
+                    enabled && !self.account().settings.focus_labels.is_empty();
+                self.account_mut().mark_settings_dirty();
+            }
+            Action::SetFocusLabels(labels) => {
+                let mut seen = HashSet::new();
+                let valid = labels
+                    .into_iter()
+                    .filter(|id| {
+                        self.labels.iter().any(|known| &known.id == id) && seen.insert(id.clone())
+                    })
+                    .collect();
+                self.account_mut().settings.focus_labels = valid;
+                if self.account().settings.focus_labels.is_empty() {
+                    self.account_mut().settings.focus_enabled = false;
+                }
+                self.account_mut().mark_settings_dirty();
+            }
+            Action::SetFocusMentions(enabled) => {
+                self.account_mut().settings.focus_mentions = enabled;
+                self.account_mut().mark_settings_dirty();
+            }
+            Action::SetLabelSound { label, sound } => {
+                if self.labels.iter().any(|known| known.id == label) {
+                    match sound {
+                        Some(sound) => {
+                            self.account_mut()
+                                .settings
+                                .label_sounds
+                                .insert(label, sound);
+                        }
+                        None => {
+                            self.account_mut().settings.label_sounds.remove(&label);
+                        }
+                    }
+                    self.account_mut().mark_settings_dirty();
+                }
+            }
             Action::SetChatFilter(filter) => {
                 if self.locked_folder {
                     self.close_locked_folder();
@@ -7500,6 +8280,9 @@ impl App {
                 }
                 self.chat_filter = filter;
                 self.label_filter = None;
+                self.account_mut().settings.last_filter = filter;
+                self.account_mut().settings.last_label = None;
+                self.account_mut().mark_settings_dirty();
                 self.show_archived = false;
                 self.unread_kept.clear();
             }
@@ -7750,8 +8533,35 @@ impl App {
             Action::SetFont(choice) => {
                 self.settings.font = choice;
                 self.mark_settings_dirty();
-                crate::theme::set_font(ctx, choice);
-                ctx.request_repaint();
+                self.remove_custom_font();
+                self.apply_font(ctx);
+            }
+            Action::PickCustomFont => {
+                let request = self.claim_custom_font_request();
+                match crate::custom_font::pick(
+                    self.dirs.clone(),
+                    request,
+                    crate::i18n::gettext(self.locale, "Choose a font file").into_owned(),
+                    crate::i18n::gettext(self.locale, "Font files").into_owned(),
+                    ctx.clone(),
+                ) {
+                    Ok(pending) => self.custom_font_pending = Some(pending),
+                    Err(error) => {
+                        self.toast_error(format!("Could not open the font picker: {error}"))
+                    }
+                }
+            }
+            Action::SetCustomFont(path) => {
+                self.settings.custom_font = Some(path.clone());
+                self.mark_settings_dirty();
+                self.apply_font(ctx);
+                if self.settings.custom_font.is_some() {
+                    let _ = crate::custom_font::cleanup(
+                        self.dirs.clone(),
+                        Some(path),
+                        self.custom_font_request,
+                    );
+                }
             }
             Action::SetEmojiRenderer(choice) => {
                 self.settings.emoji_renderer = choice;
@@ -7871,6 +8681,26 @@ impl App {
             Action::SetProfile { name, about } => {
                 self.backend.send(Command::SetProfile { name, about });
             }
+            Action::PickLocalAvatar(id) => {
+                if self
+                    .chats
+                    .iter()
+                    .any(|chat| chat.id == id && chat.phone().is_some())
+                    && self.me.as_deref() != Some(&id)
+                {
+                    self.backend.send(Command::PickLocalAvatar(id));
+                }
+            }
+            Action::ResetLocalAvatar(id) => {
+                if self
+                    .chats
+                    .iter()
+                    .any(|chat| chat.id == id && chat.phone().is_some())
+                    && self.me.as_deref() != Some(&id)
+                {
+                    self.backend.send(Command::ResetLocalAvatar(id));
+                }
+            }
             Action::PickProfilePicture => self.backend.send(Command::PickProfilePicture),
             Action::EditGroupName(name) => self.group_name_edit = Some(name),
             Action::CloseGroupName => self.group_name_edit = None,
@@ -7890,6 +8720,82 @@ impl App {
                 self.backend.send(Command::SetChatSound { chat, sound });
             }
             Action::PickChatSound(chat) => self.backend.send(Command::PickChatSound(chat)),
+            Action::SetSyncMode(mode) => {
+                self.account_mut().settings.sync_mode = Some(mode);
+                self.account_mut().settings.background_history =
+                    mode == crate::settings::SyncMode::Full;
+                self.account_mut().settings.archive_media = mode == crate::settings::SyncMode::Full;
+                self.account_mut().mark_settings_dirty();
+                self.backend.send(Command::ConfigureSync(mode));
+                self.report_background_history();
+            }
+            Action::ChooseSync(mode) => {
+                if !matches!(
+                    self.link,
+                    LinkStatus::Unlinked {
+                        qr: None,
+                        pair_code: None,
+                        pairing_phone: None
+                    }
+                ) {
+                    return;
+                }
+                let account = self.account_mut();
+                let mut settings = account.settings.clone();
+                settings.sync_mode = Some(mode);
+                settings.background_history = mode == crate::settings::SyncMode::Full;
+                settings.archive_media = mode == crate::settings::SyncMode::Full;
+                // Save before connecting: a restart must keep the exact pairing choice.
+                if let Err(error) = settings.save(&account.dirs.settings_file()) {
+                    self.toast_error(format!("Could not save your sync choice: {error}"));
+                    return;
+                }
+                account.settings = settings;
+                account.backend.send(Command::ConfigureSync(mode));
+                self.report_background_history();
+            }
+            Action::SetDownloadOrganization {
+                organization,
+                descriptive_names,
+            } => {
+                self.settings.download_organization = organization;
+                self.settings.descriptive_download_names = descriptive_names;
+                self.mark_settings_dirty();
+                for account in &self.accounts {
+                    account.backend.send(Command::SetDownloadOrganization {
+                        organization,
+                        descriptive_names,
+                    });
+                }
+            }
+            Action::ExportArchiveBackup(passphrase) => {
+                if !self.backup_busy {
+                    self.backup_busy = true;
+                    self.backup_status = Some(
+                        crate::i18n::gettext(self.locale, "Saving encrypted archive backup…")
+                            .into_owned(),
+                    );
+                    self.backend.send(Command::ExportArchiveBackup(passphrase));
+                }
+            }
+            Action::RestoreArchiveBackup(passphrase) => self.begin_archive_restore(passphrase),
+            Action::ResumeRestoredAccount(id) => {
+                if let Some(index) = self.accounts.iter().position(|account| account.id == id) {
+                    let account = &mut self.accounts[index];
+                    if account.settings.archive_only && account.dirs.session_db().is_file() {
+                        let mut settings = account.settings.clone();
+                        settings.archive_only = false;
+                        match settings.save(&account.dirs.settings_file()) {
+                            Ok(()) => {
+                                account.settings = settings;
+                                account.backend.send(Command::ResumeRestoredAccount);
+                            }
+                            Err(error) => self
+                                .toast_error(format!("Could not resume restored account: {error}")),
+                        }
+                    }
+                }
+            }
             Action::SetDownloadFolder(folder) => {
                 self.settings.download_folder = folder.clone();
                 self.mark_settings_dirty();
@@ -7932,6 +8838,17 @@ impl App {
                 self.settings.zoom = (self.settings.zoom + delta).clamp(0.6, 2.0);
                 self.zoom_applied = false;
                 self.mark_settings_dirty();
+            }
+            Action::SetTextScale(value) => {
+                if value.is_finite() {
+                    self.settings.text_scale = value.clamp(0.85, 1.5);
+                    for account in &mut self.accounts {
+                        for conversation in account.conversations.values_mut() {
+                            conversation.rows.clear();
+                        }
+                    }
+                    self.mark_settings_dirty();
+                }
             }
             Action::ResetZoom => {
                 self.settings.zoom = 1.0;
@@ -8021,12 +8938,51 @@ impl App {
                 self.quit_requested = true;
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
+            Action::DismissInAppNotification(id) => {
+                self.in_app_notifications
+                    .retain(|notification| notification.id != id);
+            }
+            Action::OpenInAppNotification(id) => {
+                let now = std::time::Instant::now();
+                let target = self
+                    .in_app_notifications
+                    .iter()
+                    .find(|notification| notification.id == id && notification.expires > now)
+                    .map(|notification| notification.target.clone());
+                self.in_app_notifications
+                    .retain(|notification| notification.id != id);
+                if let Some(target) = target
+                    && self.accounts.iter().any(|account| {
+                        account.id == target.account
+                            && account.settings.notifications
+                            && account.settings.in_app_notifications
+                            && account
+                                .chats
+                                .iter()
+                                .any(|chat| chat.id == target.chat && !chat.locked)
+                    })
+                {
+                    self.notification_opens
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner())
+                        .push(target);
+                    self.handle_notification_opens();
+                }
+            }
             Action::ShowWindow => {
                 let closing_to_hide = self.hide_intent;
                 self.hide_intent = false;
                 if self.window_hidden {
                     // The headless loop in `main` will create the window.
                     self.wants_show = true;
+                } else if self.wayland
+                    && !closing_to_hide
+                    && (self.niri_focus_pending.is_some() || {
+                        self.niri_focus_pending = crate::window::start_niri_focus(ctx.clone());
+                        self.niri_focus_pending.is_some()
+                    })
+                {
+                    // The compositor request completes off the interface thread.
                 } else if self.wayland || closing_to_hide {
                     // A previous hide already queued Close, so every platform
                     // must recreate the window when Show supersedes that hide.
@@ -8189,15 +9145,22 @@ impl App {
         for account in &mut self.accounts {
             let policy = (
                 account.settings.background_history,
+                account.settings.archive_media,
                 paused,
+                account.settings.history_requests_per_day,
+                account.settings.background_media_budget_mib,
                 account.open_chat.clone(),
             );
             if account.reported_history.as_ref() != Some(&policy) {
                 account.reported_history = Some(policy.clone());
+                account.backend.send(Command::CallPrivacyPaused(paused));
                 account.backend.send(Command::BackgroundHistory {
                     enabled: policy.0,
-                    paused: policy.1,
-                    focused: policy.2,
+                    media: policy.1,
+                    paused: policy.2,
+                    daily_budget: policy.3,
+                    media_budget_mib: policy.4,
+                    focused: policy.5,
                 });
             }
         }
@@ -8205,6 +9168,52 @@ impl App {
 
     /// Processes app state shared by windowed and headless modes.
     pub fn background_frame(&mut self, ctx: &egui::Context) {
+        if let Some(pending) = &self.custom_font_pending {
+            let request = pending.request;
+            match pending.receiver.try_recv() {
+                Ok(result) => {
+                    self.custom_font_pending = None;
+                    if request == self.custom_font_request {
+                        match result {
+                            Some(Ok(path)) => self.actions.push(Action::SetCustomFont(path)),
+                            Some(Err(error)) => {
+                                self.toast_error(format!("Could not use this font: {error}"))
+                            }
+                            None => {}
+                        }
+                    }
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.custom_font_pending = None;
+                    if request == self.custom_font_request {
+                        self.toast_error("The font picker closed unexpectedly");
+                    }
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            }
+        }
+
+        if let Some(pending) = &self.niri_focus_pending {
+            match pending.try_recv() {
+                Ok(focused) => {
+                    self.niri_focus_pending = None;
+                    if !focused && !self.window_hidden && !self.hide_intent && !self.quit_requested
+                    {
+                        self.reopen = true;
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.niri_focus_pending = None;
+                    if !self.window_hidden && !self.hide_intent && !self.quit_requested {
+                        self.reopen = true;
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            }
+        }
+
         if let Some(deadline) = self.tray_start_deadline {
             if self.tray_shown() {
                 self.tray_start_deadline = None;
@@ -8232,7 +9241,11 @@ impl App {
         self.report_background_history();
         self.handle_tray();
         #[cfg(target_os = "macos")]
-        self.actions.extend(crate::macos::drain(self.window_hidden));
+        {
+            let close = crate::ui::keys::close_shortcut_action(self, ctx);
+            self.actions
+                .extend(crate::macos::drain(self.window_hidden, close));
+        }
         self.handle_control_commands();
         self.poll_custom_themes();
         let wallpaper = self.account().settings.wallpaper_image.clone();
@@ -8306,10 +9319,20 @@ impl App {
     /// window: media stops, a recording is discarded, the locked-chats folder
     /// closes, and notifications already on the desktop are withdrawn.
     pub fn lock_app(&mut self) {
+        for account in &self.accounts {
+            account.backend.send(Command::CallPrivacyPaused(true));
+        }
         if self.settings.app_lock_hash.is_none() || self.app_lock.is_locked() {
             return;
         }
+        if let Some(server) = &self.automation {
+            server.permits.revoke_all();
+            server
+                .locked
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+        }
         self.app_lock.lock();
+        self.in_app_notifications.clear();
         self.window_focused = false;
         self.flush_open_draft();
         self.recording = None;
@@ -8400,6 +9423,31 @@ impl App {
         if let Some(badge) = &mut self.badge {
             badge.set(count);
         }
+        let private = self.app_lock.is_locked() || self.settings.screen_privacy.enabled;
+        let vip = !private
+            && self.settings.tray_vip
+            && self.accounts.iter().any(|account| {
+                account.chats.iter().any(|chat| {
+                    account.settings.vip_chats.contains(&chat.id)
+                        && !chat.locked
+                        && !chat.archived
+                        && !chat.muted(crate::util::now())
+                        && chat.looks_unread()
+                })
+            });
+        let count = if private { 0 } else { count };
+        if crate::tray_indicator::publish(count, vip, self.settings.tray_unread_numbers)
+            && let Some(tray) = &mut self.tray
+        {
+            if vip || (self.settings.tray_unread_numbers && count > 0) {
+                tray.set_icon(crate::tray_indicator::draw, None);
+            } else {
+                tray.set_icon(
+                    crate::util::app_icon_rgba,
+                    Some(crate::util::tray_template_rgba),
+                );
+            }
+        }
     }
 
     /// The unread chat count for the Windows taskbar overlay, which the window
@@ -8455,6 +9503,11 @@ impl App {
 
     /// Polls audio state and schedules repaints while it changes.
     fn tick_audio(&mut self, ctx: &egui::Context) {
+        self.player
+            .set_output_device(self.account().settings.call_speaker.clone());
+        if let Some(notice) = self.player.take_notice() {
+            self.toast_error(notice);
+        }
         if let Err(error) = self.player.poll() {
             self.toast_error(error);
         }
@@ -8490,6 +9543,8 @@ impl App {
     /// Shows the playing video's frames, stops it once its chat is left, and
     /// hands a video it cannot decode to the system player.
     fn tick_video(&mut self, ctx: &egui::Context) {
+        self.video
+            .set_output_device(self.account().settings.call_speaker.clone());
         if self.video.message().is_some() && self.video_chat != self.open_chat {
             self.video.stop();
         }
@@ -8502,6 +9557,7 @@ impl App {
                 self.toast_error(crate::i18n::gettext(self.locale, "Cannot play this video here; opening it in your system player"));
                 self.actions.push(Action::OpenFile(path));
             }
+            Some(crate::video::Notice::OutputFallback(notice)) => self.toast_error(notice),
             Some(crate::video::Notice::OutputUnavailable) => self.toast_error(crate::i18n::gettext(self.locale, "The selected audio output is unavailable. Choose an output and resume playback.")),
             None => {}
         }
@@ -8510,6 +9566,8 @@ impl App {
     /// Plays or pauses a video in its message. A video message, the round
     /// kind, sends its played receipt like a voice message.
     fn play_video(&mut self, message: String, path: PathBuf) {
+        self.video
+            .set_output_device(self.account().settings.call_speaker.clone());
         let Some(chat) = self.open_chat.clone() else {
             return;
         };
@@ -8532,6 +9590,8 @@ impl App {
 
     /// Plays or pauses audio and sends the first played receipt when needed.
     fn play_voice(&mut self, message: String, path: PathBuf) {
+        self.player
+            .set_output_device(self.account().settings.call_speaker.clone());
         self.video.stop();
         self.voice_wanted = None;
         self.voice_chat = self.open_chat.clone();
@@ -9046,6 +10106,7 @@ impl App {
             && self.page == Page::Chats
             && self.dialog.is_none()
             && self.image_preview.is_none()
+            && self.sticker_view.is_none()
             && !self.video_expanded
             && self.picker.is_none()
             && self.reaction_target.is_none()
@@ -9346,6 +10407,11 @@ fn notification_sound(
 /// What may still happen while the app lock is on: the lock screen's own
 /// actions, the window and the tray, and settings results that show
 /// nothing. Everything else would show or change what the lock hides.
+/// Only for the newly allocated restore destination, before roster registration.
+fn discard_unregistered_archive_restore(dirs: &crate::paths::AccountDirs) -> anyhow::Result<()> {
+    crate::archive::backup::rollback_restore(dirs)
+}
+
 fn allowed_while_locked(action: &Action) -> bool {
     matches!(
         action,
@@ -9363,6 +10429,7 @@ fn allowed_while_locked(action: &Action) -> bool {
             | Action::SettingsChanged
             | Action::SetChatSound { .. }
             | Action::SetNotificationSound { .. }
+            | Action::SetCustomFont(_)
             | Action::SetDownloadFolder(_)
     )
 }
@@ -11378,6 +12445,144 @@ mod tests {
         app.accounts.push(second);
         app.active = 0;
         (app, commands)
+    }
+
+    #[test]
+    fn local_avatar_override_wins_without_replacing_fetched_photo_and_hidden_events_stay_account_owned()
+     {
+        let directory = tempfile::tempdir().unwrap();
+        let (mut app, _) = two_accounts(directory.path());
+        let id = "1@s.whatsapp.net";
+        let fetched = directory.path().join("fetched-fixture.png");
+        let local = directory.path().join("local-fixture.png");
+        let hidden = directory.path().join("hidden-fixture.png");
+        app.avatars.insert(id.into(), Some(fetched.clone()));
+        app.avatars_full.insert(id.into(), Some(fetched.clone()));
+        app.apply_backend_event(
+            Event::LocalAvatarChanged {
+                id: id.into(),
+                result: Ok(Some(local.clone())),
+            },
+            true,
+        );
+        assert_eq!(app.avatar(id), Some(local.clone()));
+        assert_eq!(app.avatar_full(id), Some(local.clone()));
+        assert_eq!(app.cached_avatar(id), Some(local));
+        assert_eq!(app.avatars.get(id), Some(&Some(fetched.clone())));
+        app.active = 1;
+        app.apply_backend_event(
+            Event::LocalAvatarChanged {
+                id: id.into(),
+                result: Ok(Some(hidden.clone())),
+            },
+            false,
+        );
+        app.active = 0;
+        assert_ne!(app.avatar(id), Some(hidden.clone()));
+        app.apply_backend_event(
+            Event::LocalAvatarChanged {
+                id: id.into(),
+                result: Ok(None),
+            },
+            true,
+        );
+        assert_eq!(app.avatar(id), Some(fetched));
+        assert_eq!(
+            app.accounts[1]
+                .local_avatars
+                .get(&crate::local_avatars::key(id)),
+            Some(&hidden)
+        );
+    }
+
+    #[test]
+    fn locked_local_picture_actions_never_open_picker_or_change_disk() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = App::headless(AppDirs::under(directory.path()), Settings::default()).0;
+        let (backend, mut commands) = Backend::recording();
+        app.backend = backend;
+        let id = "1@s.whatsapp.net";
+        app.chats
+            .push(Chat::new(id.into(), "Synthetic contact".into()));
+        app.app_lock.lock();
+        let ctx = egui::Context::default();
+        app.apply(Action::PickLocalAvatar(id.into()), &ctx);
+        app.apply(Action::ResetLocalAvatar(id.into()), &ctx);
+        assert!(commands.try_recv().is_err());
+        assert!(!app.dirs.state.join("avatar-overrides").exists());
+    }
+
+    #[test]
+    fn dispatched_automation_is_revoked_by_account_opt_out_local_and_remote_chat_locks() {
+        use crate::automation::{Permit, Request};
+        use std::sync::{Arc, atomic::AtomicBool};
+        for cause in ["opt-out", "local-lock", "remote-lock"] {
+            let directory = tempfile::tempdir().unwrap();
+            let mut app = App::headless(AppDirs::under(directory.path()), Settings::default()).0;
+            let id = "1@s.whatsapp.net";
+            app.chats
+                .push(Chat::new(id.into(), "Synthetic contact".into()));
+            app.account_mut().settings.cli_access = true;
+            let (backend, mut commands) = Backend::recording();
+            app.backend = backend;
+            app.automation = Some(
+                crate::automation::Server::start(&app.dirs.runtime, Waker::default()).unwrap(),
+            );
+            app.sync_automation_authority();
+            let (reply, received) = std::sync::mpsc::channel();
+            let pending = crate::automation::Pending {
+                request: Request::Read {
+                    account: "1".into(),
+                    chat: id.into(),
+                    before: None,
+                    limit: 1,
+                },
+                permit: Arc::new(Permit::default()),
+                reply,
+                cancelled: Arc::new(AtomicBool::new(false)),
+                locked: app.automation.as_ref().unwrap().locked.clone(),
+            };
+            app.automation
+                .as_ref()
+                .unwrap()
+                .queue
+                .lock()
+                .unwrap()
+                .push(pending);
+            app.handle_automation();
+            let Command::Automation(dispatched) = commands.try_recv().unwrap() else {
+                panic!("authorization must dispatch to the owning account");
+            };
+            assert!(!dispatched.blocked());
+            match cause {
+                "opt-out" => {
+                    app.account_mut().settings.cli_access = false;
+                    app.sync_automation_authority();
+                }
+                "local-lock" => app.apply(
+                    Action::SetLocked(id.into(), true),
+                    &egui::Context::default(),
+                ),
+                _ => {
+                    let mut chat = app.chats[0].clone();
+                    chat.locked = true;
+                    app.apply_backend_event(Event::ChatUpdated(Box::new(chat)), true);
+                }
+            }
+            assert!(dispatched.blocked(), "{cause}");
+            // Re-enable/unlock does not release an old queued result.
+            app.account_mut().settings.cli_access = true;
+            app.chats[0].locked = false;
+            app.sync_automation_authority();
+            dispatched.answer("synthetic private result".into());
+            assert!(
+                !received
+                    .recv()
+                    .unwrap()
+                    .contains("synthetic private result"),
+                "{cause}"
+            );
+        }
     }
 
     #[test]
@@ -13746,6 +14951,170 @@ mod tests {
 
     #[test]
     /// Checks a selected message batch is forwarded in its original conversation order.
+    fn bulk_starring_skips_local_revoked_missing_and_stale_account_selection() {
+        let mut app = app();
+        let (backend, mut commands) = Backend::recording();
+        app.backend = backend;
+        let ctx = egui::Context::default();
+        let chat = "1@s.whatsapp.net";
+        app.chats = vec![Chat::new(chat.into(), "Synthetic".into())];
+        app.open_chat = Some(chat.into());
+        let mut queued = message(chat, "queued", 1);
+        queued.status = Delivery::Queued;
+        let mut revoked = message(chat, "revoked", 2);
+        revoked.content = Content::Revoked;
+        app.conversations
+            .entry(chat.into())
+            .or_default()
+            .merge(vec![message(chat, "confirmed", 0), queued, revoked], false);
+        app.selection = Some((
+            chat.into(),
+            vec![
+                "confirmed".into(),
+                "confirmed".into(),
+                "queued".into(),
+                "revoked".into(),
+                "missing".into(),
+            ],
+        ));
+        app.apply(Action::StarSelection(true), &ctx);
+        let starred: Vec<String> = std::iter::from_fn(|| commands.try_recv().ok())
+            .filter_map(|command| match command {
+                Command::SetStar { message, .. } => Some(message),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(starred, ["confirmed"]);
+        app.open_chat = Some("2@s.whatsapp.net".into());
+        app.apply(Action::StarSelection(false), &ctx);
+        assert!(commands.try_recv().is_err());
+    }
+
+    #[test]
+    fn list_choice_persists_and_deleted_labels_are_forgotten() {
+        let mut app = app();
+        let ctx = egui::Context::default();
+        app.apply(Action::SetChatFilter(ChatFilter::Groups), &ctx);
+        assert_eq!(app.account().settings.last_filter, ChatFilter::Groups);
+        app.labels = vec![crate::model::Label {
+            id: "synthetic".into(),
+            name: "Work".into(),
+            color_hex: "#008800".into(),
+            created_at: 0,
+        }];
+        app.apply(Action::SelectLabel(Some("synthetic".into())), &ctx);
+        assert_eq!(
+            app.account().settings.last_label.as_deref(),
+            Some("synthetic")
+        );
+        app.labels.clear();
+        app.prune_labels();
+        assert!(app.account().settings.last_label.is_none());
+        app.apply(Action::SelectLabel(Some("missing".into())), &ctx);
+        assert!(app.label_filter.is_none());
+    }
+
+    #[test]
+    fn focus_labels_remain_account_owned_and_leave_locked_chats_hidden() {
+        let directory = tempfile::tempdir().unwrap();
+        let (mut app, _) = two_accounts(directory.path());
+        let ctx = egui::Context::default();
+        app.labels = vec![crate::model::Label {
+            id: "work".into(),
+            name: "Work".into(),
+            ..Default::default()
+        }];
+        let mut work = Chat::new("work@s.whatsapp.net".into(), "Fixture".into());
+        work.labels.push("work".into());
+        let mut locked = work.clone();
+        locked.id = "locked@s.whatsapp.net".into();
+        locked.locked = true;
+        app.chats = vec![
+            work,
+            locked,
+            Chat::new("other@s.whatsapp.net".into(), "Other".into()),
+        ];
+        app.apply(
+            Action::SetFocusLabels(vec!["work".into(), "missing".into()]),
+            &ctx,
+        );
+        app.apply(Action::SetFocusMode(true), &ctx);
+        assert_eq!(app.account().settings.focus_labels, ["work"]);
+        assert_eq!(
+            app.visible_chats()
+                .iter()
+                .map(|chat| chat.id.as_str())
+                .collect::<Vec<_>>(),
+            ["work@s.whatsapp.net"]
+        );
+        app.active = 1;
+        assert!(!app.account().settings.focus_enabled);
+        app.active = 0;
+        assert!(app.account().settings.focus_enabled);
+        app.labels.clear();
+        app.prune_labels();
+        assert!(!app.account().settings.focus_enabled);
+        assert!(app.account().settings.focus_labels.is_empty());
+    }
+
+    #[test]
+    fn changing_text_size_preserves_window_zoom_and_rejects_nan() {
+        let directory = tempfile::tempdir().unwrap();
+        let (mut app, _) = two_accounts(directory.path());
+        let ctx = egui::Context::default();
+        app.apply(Action::SetTextScale(1.3), &ctx);
+        assert_eq!(app.settings.text_scale, 1.3);
+        assert_eq!(app.settings.zoom, 1.0);
+        app.apply(Action::SetTextScale(f32::NAN), &ctx);
+        assert_eq!(app.settings.text_scale, 1.3);
+        app.apply(Action::SetTextScale(99.0), &ctx);
+        assert_eq!(app.settings.text_scale, 1.5);
+    }
+
+    #[test]
+    fn label_sound_overlap_is_stable_account_owned_and_mentions_keep_their_override() {
+        let directory = tempfile::tempdir().unwrap();
+        let (mut app, _) = two_accounts(directory.path());
+        app.labels = ["first", "second"]
+            .into_iter()
+            .map(|id| crate::model::Label {
+                id: id.into(),
+                ..Default::default()
+            })
+            .collect();
+        let mut chat = Chat::new("synthetic@s.whatsapp.net".into(), "Fixture".into());
+        chat.labels = vec!["second".into(), "first".into()];
+        app.account_mut()
+            .settings
+            .label_sounds
+            .insert("first".into(), NotificationSound::None);
+        app.account_mut()
+            .settings
+            .label_sounds
+            .insert("second".into(), NotificationSound::Receive);
+        assert_eq!(app.chat_label_sound(&chat), Some(NotificationSound::None));
+        app.labels.reverse();
+        assert_eq!(
+            app.chat_label_sound(&chat),
+            Some(NotificationSound::Receive)
+        );
+        assert_eq!(
+            notification_sound(&app.settings, None, true, true),
+            app.settings.mention_sound
+        );
+        assert_eq!(
+            notification_sound(&app.settings, Some(NotificationSound::None), true, true),
+            NotificationSound::None
+        );
+        app.active = 1;
+        assert!(app.chat_label_sound(&chat).is_none());
+        app.active = 0;
+        app.labels.clear();
+        app.prune_labels();
+        assert!(app.account().settings.label_sounds.is_empty());
+    }
+
+    #[test]
     fn selected_messages_forward_together_in_chat_order() {
         let mut app = app();
         let (backend, mut commands) = Backend::recording();
@@ -18569,6 +19938,67 @@ mod app_lock_tests {
     }
 
     #[test]
+    fn in_app_notifications_share_suppression_privacy_expiry_and_account_routing() {
+        let ctx = egui::Context::default();
+        let mut app = unlocked_app();
+        let mut message = incoming(&mut app);
+        app.window_hidden = false;
+        app.window_focused = true;
+        app.open_chat = None;
+        app.maybe_notify(CHAT, &message);
+        assert!(app.in_app_notifications.is_empty(), "default off");
+        app.account_mut().settings.in_app_notifications = true;
+        app.chats[0].muted_until = Some(crate::util::now() + 3600);
+        app.maybe_notify(CHAT, &message);
+        assert!(app.in_app_notifications.is_empty());
+        app.chats[0].muted_until = None;
+        app.chats[0].locked = true;
+        app.maybe_notify(CHAT, &message);
+        assert!(app.in_app_notifications.is_empty());
+        app.chats[0].locked = false;
+        app.open_chat = Some(CHAT.into());
+        app.maybe_notify(CHAT, &message);
+        assert!(
+            app.in_app_notifications.is_empty(),
+            "the chat being read stays quiet"
+        );
+        app.open_chat = None;
+        app.account_mut().settings.notification_sender = false;
+        for index in 0..6 {
+            message.id = format!("synthetic-{index}");
+            app.maybe_notify(CHAT, &message);
+        }
+        assert_eq!(
+            app.in_app_notifications.len(),
+            crate::ui::notification_overlay::LIMIT
+        );
+        assert!(
+            app.in_app_notifications
+                .iter()
+                .all(|notification| !notification.title.contains("Ada")
+                    && !notification.body.contains("engine"))
+        );
+        let expired = app.in_app_notifications[0].id;
+        app.in_app_notifications[0].expires = std::time::Instant::now() - Duration::from_secs(1);
+        app.apply(Action::OpenInAppNotification(expired), &ctx);
+        assert!(app.actions.is_empty(), "expired cards cannot route an open");
+        let live = app.in_app_notifications.last().unwrap().id;
+        let origin = app.account().id.clone();
+        app.add_account();
+        assert_ne!(app.account().id, origin);
+        app.apply(Action::OpenInAppNotification(live), &ctx);
+        assert_eq!(app.account().id, origin);
+        assert!(app.actions.iter().any(|action| matches!(action, Action::OpenMessage { chat, message } if chat == CHAT && message == "synthetic-5")));
+        app.in_app_notifications.clear();
+        app.lock_app();
+        app.maybe_notify(CHAT, &message);
+        assert!(
+            app.in_app_notifications.is_empty(),
+            "app lock never queues private cards"
+        );
+    }
+
+    #[test]
     fn it_starts_locked_only_with_a_password() {
         assert!(app_with(settings(Some(PASSWORD))).app_lock.is_locked());
         assert!(!app_with(settings(None)).app_lock.is_locked());
@@ -19058,5 +20488,56 @@ fn edit_failure_message(locale: crate::i18n::Locale, error: &EditFailure) -> Str
             crate::i18n::gettext(locale, "The edit was sent but could not be saved locally")
                 .into_owned()
         }
+    }
+}
+
+#[cfg(test)]
+mod restored_account_tests {
+    use super::*;
+
+    #[test]
+    fn resume_persists_explicit_choice_and_requires_the_target_session() {
+        let root = tempfile::tempdir().unwrap();
+        let (mut app, _events) = App::headless(AppDirs::under(root.path()), Settings::default());
+        let id = app.account().id.clone();
+        app.account_mut().settings.archive_only = true;
+        let (backend, mut commands) = Backend::recording();
+        app.account_mut().backend = backend;
+        app.apply(
+            Action::ResumeRestoredAccount(id.clone()),
+            &egui::Context::default(),
+        );
+        assert!(app.account().settings.archive_only);
+        assert!(commands.try_recv().is_err());
+        std::fs::write(
+            app.account().dirs.session_db(),
+            b"synthetic session fixture",
+        )
+        .unwrap();
+        app.apply(Action::ResumeRestoredAccount(id), &egui::Context::default());
+        assert!(!app.account().settings.archive_only);
+        let persisted = crate::settings::AccountSettings::load(&app.account().dirs.settings_file());
+        assert!(!persisted.archive_only);
+        assert!(matches!(
+            commands.try_recv().unwrap(),
+            Command::ResumeRestoredAccount
+        ));
+    }
+
+    #[test]
+    fn cleanup_refuses_an_unrelated_account_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let dirs = crate::paths::AccountDirs {
+            id: AccountId::first(),
+            state: root.path().join("unrelated"),
+            cache: root.path().join("unrelated-cache"),
+        };
+        dirs.ensure().unwrap();
+        std::fs::write(dirs.session_db(), b"preserved synthetic fixture").unwrap();
+        assert!(discard_unregistered_archive_restore(&dirs).is_err());
+        assert_eq!(
+            std::fs::read(dirs.session_db()).unwrap(),
+            b"preserved synthetic fixture"
+        );
     }
 }

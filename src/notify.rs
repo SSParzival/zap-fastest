@@ -15,6 +15,8 @@ use std::time::{Duration, Instant};
 mod badge;
 #[cfg(target_os = "windows")]
 mod badge_windows;
+#[cfg(target_os = "macos")]
+mod macos;
 #[cfg(target_os = "windows")]
 mod windows;
 #[cfg(target_os = "linux")]
@@ -67,24 +69,8 @@ pub struct NotificationTarget {
     pub message: String,
 }
 
-#[cfg(any(target_os = "macos", test))]
+#[cfg(test)]
 const MACOS_APPLICATION_ID: &str = "io.github.eternalwaitt.ZapFaster";
-
-#[cfg(target_os = "macos")]
-fn macos_application_ready() -> bool {
-    static READY: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *READY.get_or_init(|| {
-        // The library's implicit default looks up an app named "use_default"
-        // through AppleScript, which opens macOS's application chooser.
-        match notify_rust::set_application(MACOS_APPLICATION_ID) {
-            Ok(()) => true,
-            Err(_) => {
-                log::warn!("native notification application registration failed");
-                false
-            }
-        }
-    })
-}
 
 /// Notifications that may still wait for a click. Each one waiting holds a
 /// thread, a runtime, and a D-Bus connection, about five file descriptors,
@@ -551,7 +537,36 @@ fn deliver(
     }
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "windows")))]
+#[cfg(target_os = "macos")]
+#[expect(clippy::too_many_arguments)]
+fn deliver(
+    title: &str,
+    body: &str,
+    _picture: Option<&std::path::Path>,
+    _system_sound: bool,
+    native_sound: Option<&str>,
+    target: NotificationTarget,
+    opened: Arc<Mutex<Vec<NotificationTarget>>>,
+    wake: impl Fn() + Send + 'static,
+    mut cancelled: tokio::sync::oneshot::Receiver<Stop>,
+    failed: impl FnOnce(),
+) {
+    if let Some(may_wait) = before_showing(&mut cancelled) {
+        macos::deliver(
+            title,
+            body,
+            native_sound,
+            target,
+            opened,
+            wake,
+            cancelled,
+            may_wait,
+            failed,
+        );
+    }
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
 #[expect(clippy::too_many_arguments)]
 fn deliver(
     title: &str,
@@ -565,25 +580,11 @@ fn deliver(
     mut cancelled: tokio::sync::oneshot::Receiver<Stop>,
     failed: impl FnOnce(),
 ) {
-    // Never fall back to application discovery, including for unbundled builds.
-    #[cfg(target_os = "macos")]
-    if !macos_application_ready() {
-        failed();
-        return;
-    }
     if before_showing(&mut cancelled).is_none() {
         return;
     }
     let mut notification = notify_rust::Notification::new();
     notification.appname("Zap Faster").summary(title).body(body);
-    #[cfg(target_os = "macos")]
-    {
-        let _ = system_sound;
-        if let Some(name) = native_sound {
-            notification.sound_name(name);
-        }
-    }
-    #[cfg(not(target_os = "macos"))]
     let _ = (system_sound, native_sound);
     // Windows uses the image; macOS always uses the app icon.
     if let Some(picture) = picture {

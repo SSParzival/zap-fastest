@@ -25,6 +25,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             ui.set_width(match dialog {
                 Dialog::Shortcuts => shortcuts_width(ui.ctx().content_rect().width()),
                 Dialog::About => 380.0,
+                Dialog::ArchiveBackup { .. } | Dialog::ResumeRestoredAccount(_) => 420.0,
                 Dialog::ConfirmUnlink => 380.0,
                 Dialog::ConfirmRemoveAccount(_) => 380.0,
                 Dialog::ConfirmLeaveGroup(_) => 380.0,
@@ -35,7 +36,9 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 Dialog::ChatInfo(_) if app.gallery.tab.is_some() => {
                     (ui.ctx().content_rect().width() - 64.0).clamp(180.0, 760.0)
                 }
-                Dialog::ChatInfo(_) => 360.0,
+                Dialog::ChatInfo(_) => {
+                    360.0_f32.min((ui.ctx().content_rect().width() - 80.0).max(180.0))
+                }
                 Dialog::ConfirmDeleteChat(_) | Dialog::JoinGroup | Dialog::ConfirmStartOver => {
                     380.0
                 }
@@ -50,6 +53,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 Dialog::CreatePoll(_) => 420.0,
                 Dialog::SendLocation(_) => 420.0,
                 Dialog::PollResults { .. }
+                | Dialog::Reactions { .. }
                 | Dialog::InteractiveList { .. }
                 | Dialog::MessageInfo { .. } => {
                     420.0_f32.min((ui.ctx().content_rect().width() - 64.0).max(180.0))
@@ -63,6 +67,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 Dialog::PollResults { chat, message } => {
                     super::polls::results(app, ui, &chat, &message)
                 }
+                Dialog::Reactions { chat, message } => reaction_results(app, ui, &chat, &message),
                 Dialog::InteractiveList {
                     chat,
                     message,
@@ -71,6 +76,8 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 Dialog::Labels => super::labels::manager(app, ui, &palette),
                 Dialog::Shortcuts => shortcuts(app, ui),
                 Dialog::About => about(app, ui),
+                Dialog::ArchiveBackup { restore } => super::archive_backup::show(app, ui, restore),
+                Dialog::ResumeRestoredAccount(id) => resume_restored_account(app, ui, id),
                 Dialog::ConfirmUnlink => confirm_unlink(app, ui),
                 Dialog::ConfirmRemoveAccount(id) => confirm_remove(app, ui, id),
                 Dialog::ConfirmLeaveGroup(id) => confirm_leave_group(app, ui, &id),
@@ -80,7 +87,9 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 Dialog::NewChat => new_chat(app, ui),
                 Dialog::UnlockLockedChats => unlock_locked_chats(app, ui),
                 Dialog::ConfirmLockChat(id) => confirm_lock_chat(app, ui, &id),
-                Dialog::ChatInfo(id) => chat_info(app, ui, &id),
+                Dialog::ChatInfo(id) => {
+                    chat_info(app, ui, &id);
+                }
                 Dialog::ConfirmDeleteChat(id) => confirm_delete_chat(app, ui, &id),
                 Dialog::ConfirmClearChat(id) => confirm_clear_chat(app, ui, &id),
                 Dialog::ConfirmDeleteMessage {
@@ -117,6 +126,110 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             app.actions.push(Action::CloseDialog);
         }
     }
+}
+
+fn reaction_results(app: &mut App, ui: &mut egui::Ui, chat: &str, id: &str) {
+    use super::widgets;
+    let palette = app.palette;
+    ui.horizontal(|ui| {
+        theme::text(ui, "Reactions", theme::semibold(18.0), palette.text);
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            if theme::icon_button(ui, Icon::X, 16.0, palette.secondary, palette.text, "Close")
+                .clicked()
+            {
+                app.actions.push(Action::CloseDialog);
+            }
+        });
+    });
+    let visible = app
+        .chat(chat)
+        .is_some_and(|chat| !chat.locked || app.locked_folder_open());
+    let row = visible
+        .then(|| {
+            app.conversations
+                .get(chat)
+                .and_then(|conversation| conversation.message(id))
+                .cloned()
+        })
+        .flatten();
+    let Some(message) = row else {
+        widgets::rich_text(
+            ui,
+            "This message is no longer available.",
+            theme::regular(14.0),
+            palette.secondary,
+        );
+        return;
+    };
+    if message.reactions.is_empty() {
+        widgets::rich_text(ui, "No reactions", theme::regular(14.0), palette.secondary);
+        return;
+    }
+    let height = widgets::dialog_scroll_height(ui);
+    egui::ScrollArea::vertical()
+        .id_salt(("reaction-results", chat, id))
+        .max_height(height)
+        .auto_shrink([false, true])
+        .show_rows(ui, 34.0, message.reactions.len(), |ui, range| {
+            for reaction in &message.reactions[range] {
+                ui.horizontal(|ui| {
+                    let emoji = widgets::line(
+                        ui,
+                        &reaction.emoji,
+                        theme::regular(18.0),
+                        palette.text,
+                        32.0,
+                        1,
+                    );
+                    let (rect, _) = ui.allocate_exact_size(vec2(32.0, 30.0), Sense::hover());
+                    emoji.paint(ui, rect.center() - emoji.size() / 2.0, palette.text);
+                    let name = if reaction.from_me {
+                        crate::i18n::gettext(app.locale, "You").into_owned()
+                    } else if app
+                        .settings
+                        .screen_privacy
+                        .hides(crate::settings::ScreenPrivacyWhat::Name, false)
+                    {
+                        crate::i18n::gettext(app.locale, "Participant").into_owned()
+                    } else {
+                        app.display_name_or(&reaction.sender, None)
+                    };
+                    let reserve = if reaction.from_me { 34.0 } else { 0.0 };
+                    let width = (ui.available_width() - reserve).max(20.0);
+                    let name =
+                        widgets::line(ui, &name, theme::regular(14.0), palette.text, width, 1);
+                    let (rect, _) = ui.allocate_exact_size(vec2(width, 30.0), Sense::hover());
+                    name.paint(
+                        ui,
+                        pos2(rect.left(), rect.center().y - name.size().y / 2.0),
+                        palette.text,
+                    );
+                    if reaction.from_me {
+                        ui.add_enabled_ui(
+                            app.link.is_connected() && message.allows_reaction(),
+                            |ui| {
+                                if theme::icon_button(
+                                    ui,
+                                    Icon::X,
+                                    14.0,
+                                    palette.secondary,
+                                    palette.text,
+                                    "Remove reaction",
+                                )
+                                .clicked()
+                                {
+                                    app.actions.push(Action::React {
+                                        chat: chat.into(),
+                                        message: id.into(),
+                                        emoji: String::new(),
+                                    });
+                                }
+                            },
+                        );
+                    }
+                });
+            }
+        });
 }
 
 fn interactive_list(app: &mut App, ui: &mut egui::Ui, chat: &str, message: &str, button: usize) {
@@ -1458,6 +1571,49 @@ fn confirm_unlink(app: &mut App, ui: &mut egui::Ui) {
     });
 }
 
+fn resume_restored_account(app: &mut App, ui: &mut egui::Ui, id: crate::model::AccountId) {
+    let palette = app.palette;
+    let locale = app.locale;
+    title(
+        ui,
+        app,
+        &crate::i18n::gettext(locale, "Resume this restored account?"),
+    );
+    theme::paragraph(
+        ui,
+        &*crate::i18n::gettext(
+            locale,
+            "Close Zap Faster on the original installation before continuing. Both installations share the same linked-device identity and must not connect at the same time. Resuming reconnects to WhatsApp and may send pending messages or account changes from the backup. If the phone has invalidated the session, you will need to link again.",
+        ),
+        theme::regular(13.5),
+        palette.text,
+    );
+    ui.add_space(10.0);
+    ui.horizontal(|ui| {
+        if theme::pill_button(
+            ui,
+            &palette,
+            &crate::i18n::gettext(locale, "Resume connection"),
+            true,
+        )
+        .clicked()
+        {
+            app.actions.push(Action::ResumeRestoredAccount(id));
+            app.actions.push(Action::CloseDialog);
+        }
+        if theme::pill_button(
+            ui,
+            &palette,
+            &crate::i18n::gettext(locale, "Keep offline"),
+            false,
+        )
+        .clicked()
+        {
+            app.actions.push(Action::CloseDialog);
+        }
+    });
+}
+
 fn confirm_remove(app: &mut App, ui: &mut egui::Ui, id: crate::model::AccountId) {
     let palette = app.palette;
     let locale = app.locale;
@@ -1816,6 +1972,10 @@ fn chat_info(app: &mut App, ui: &mut egui::Ui, id: &str) {
         super::gallery::show(app, ui, id);
         return;
     }
+    let content_top = ui.cursor().top();
+    // ScrollArea also caps itself to available height. Area's previous size
+    // must not become that cap, or nested scroll heights oscillate on reflow.
+    ui.set_max_height((ui.ctx().content_rect().height() - 80.0).max(0.0));
     let palette = app.palette;
     // Group members may not have an existing chat.
     let chat = app
@@ -1824,7 +1984,9 @@ fn chat_info(app: &mut App, ui: &mut egui::Ui, id: &str) {
         .unwrap_or_else(|| crate::model::Chat::new(id.to_owned(), app.display_name(id)));
     let has_chat = app.chat(id).is_some();
     let name = app.chat_title(&chat);
-    let heading = if chat.is_group() {
+    let heading = if matches!(chat.community, Some(crate::model::CommunityRole::Parent)) {
+        crate::i18n::gettext(app.locale, "Community")
+    } else if chat.is_group() {
         crate::i18n::gettext(app.locale, "Group")
     } else if chat.is_channel() {
         crate::i18n::gettext(app.locale, "Channel")
@@ -1839,18 +2001,24 @@ fn chat_info(app: &mut App, ui: &mut egui::Ui, id: &str) {
             {
                 app.actions.push(Action::CloseDialog);
             }
-            if has_chat
-                && app.gallery_accessible(id)
-                && theme::soft_button(
-                    ui,
-                    &palette,
-                    Some(Icon::Image),
-                    crate::i18n::gettext(app.locale, "Media, links and docs").as_ref(),
-                    false,
-                )
-                .clicked()
-            {
-                app.actions.push(Action::OpenGallery { chat: id.into() });
+            if has_chat && app.gallery_accessible(id) {
+                let label = crate::i18n::gettext(app.locale, "Media, links and docs");
+                let response = if theme::soft_button_width(ui, &label, true) > ui.available_width()
+                {
+                    theme::icon_button(
+                        ui,
+                        Icon::Image,
+                        16.0,
+                        palette.secondary,
+                        palette.text,
+                        &label,
+                    )
+                } else {
+                    theme::soft_button(ui, &palette, Some(Icon::Image), &label, false)
+                };
+                if response.clicked() {
+                    app.actions.push(Action::OpenGallery { chat: id.into() });
+                }
             }
         });
     });
@@ -1866,6 +2034,9 @@ fn chat_info(app: &mut App, ui: &mut egui::Ui, id: &str) {
     if description.is_some() {
         photo = photo.min((window - 400.0).max(96.0));
     }
+    // Reserve timer controls without moving descriptions and actions below
+    // the window. Pictures can shrink while text keeps its readable size.
+    photo = (photo - 56.0).max(48.0);
     let picture = app.avatar_full(id).or_else(|| app.avatar(id));
     let mine = app.me.as_deref() == Some(id);
     let editable = chat.phone().is_some() && !mine;
@@ -1885,6 +2056,28 @@ fn chat_info(app: &mut App, ui: &mut egui::Ui, id: &str) {
             group_action = group_photo(app, ui, &name, id, photo, picture.as_deref());
         } else {
             super::widgets::avatar(ui, &palette, &name, id, photo, picture.as_deref());
+        }
+        if editable {
+            let label = crate::i18n::gettext(app.locale, "Set local picture");
+            if ui
+                .button(label)
+                .on_hover_text(crate::i18n::gettext(
+                    app.locale,
+                    "Only changes this contact's picture in this account on this computer",
+                ))
+                .clicked()
+            {
+                app.actions.push(Action::PickLocalAvatar(id.to_owned()));
+            }
+            if app
+                .local_avatars
+                .contains_key(&crate::local_avatars::key(id))
+                && ui
+                    .button(crate::i18n::gettext(app.locale, "Reset local picture"))
+                    .clicked()
+            {
+                app.actions.push(Action::ResetLocalAvatar(id.to_owned()));
+            }
         }
         ui.add_space(6.0);
         if let Some(draft) = renaming.as_mut() {
@@ -2069,6 +2262,72 @@ fn chat_info(app: &mut App, ui: &mut egui::Ui, id: &str) {
         // The chat's disappearing-message timer, read-only. A timer WhatsApp
         // turned off reads as "Off", which is a fact; a chat whose timer
         // nobody has mentioned draws nothing rather than guessing.
+        match &chat.community {
+            Some(crate::model::CommunityRole::Member {
+                parent,
+                announcement,
+                general,
+            }) => {
+                let role = if *announcement {
+                    crate::i18n::gettext(app.locale, "Community announcements")
+                } else if *general {
+                    crate::i18n::gettext(app.locale, "Community general chat")
+                } else {
+                    crate::i18n::gettext(app.locale, "Community group")
+                };
+                theme::text(ui, role, theme::regular(13.0), palette.secondary);
+                if let Some(parent_chat) = app.chat(parent).filter(|known| !known.locked) {
+                    let name = app.chat_title(parent_chat);
+                    if theme::soft_button(ui, &palette, Some(Icon::Users), &name, false).clicked() {
+                        app.actions
+                            .push(Action::ShowDialog(Dialog::ChatInfo(parent.clone())));
+                    }
+                }
+            }
+            Some(crate::model::CommunityRole::Parent) => {
+                let mut children: Vec<_> = app
+                    .chats
+                    .iter()
+                    .filter(|known| {
+                        !known.locked
+                            && !known.left
+                            && matches!(&known.community,
+                    Some(crate::model::CommunityRole::Member { parent, .. }) if parent == id)
+                    })
+                    .map(|known| (known.id.clone(), app.chat_title(known)))
+                    .collect();
+                children.sort_by(|a, b| a.1.cmp(&b.1));
+                theme::text(
+                    ui,
+                    crate::i18n::gettext(app.locale, "Community groups"),
+                    theme::bold(13.0),
+                    palette.text,
+                );
+                if children.is_empty() {
+                    theme::text(
+                        ui,
+                        crate::i18n::gettext(app.locale, "No linked groups are known yet."),
+                        theme::regular(13.0),
+                        palette.secondary,
+                    );
+                }
+                egui::ScrollArea::vertical()
+                    .id_salt(("community-children", id))
+                    .max_height(120.0)
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| {
+                        for (child, name) in children {
+                            if theme::soft_button(ui, &palette, Some(Icon::Users), &name, false)
+                                .clicked()
+                            {
+                                app.actions
+                                    .push(Action::ShowDialog(Dialog::ChatInfo(child)));
+                            }
+                        }
+                    });
+            }
+            None => {}
+        }
         let timer = crate::util::disappearing_line(app.locale, chat.ephemeral_expiration);
         // Recorded every frame, drawn or not, so a test reading the marker
         // after the row went away sees nothing instead of the last frame.
@@ -2085,6 +2344,37 @@ fn chat_info(app: &mut App, ui: &mut egui::Ui, id: &str) {
             let drawn = disappearing_timer_row(ui, &palette, &text);
             ui.ctx()
                 .data_mut(|data| data.insert_temp(disappearing_timer_id(), Some(drawn)));
+        }
+        let timer_editable = !chat.locked
+            && !chat.left
+            && !chat.is_channel()
+            && (chat.kind == crate::model::ChatKind::Direct || chat.can_edit_info());
+        if timer_editable {
+            let current = chat.ephemeral_expiration;
+            egui::ComboBox::from_id_salt(("disappearing-timer", id))
+                .width(ui.available_width())
+                .truncate()
+                .selected_text(crate::i18n::gettext(
+                    app.locale,
+                    "Change disappearing messages",
+                ))
+                .show_ui(ui, |ui| {
+                    for (seconds, label) in [
+                        (0, crate::i18n::gettext(app.locale, "Off")),
+                        (86400, crate::i18n::gettext(app.locale, "24 hours")),
+                        (604800, crate::i18n::gettext(app.locale, "7 days")),
+                        (7776000, crate::i18n::gettext(app.locale, "90 days")),
+                    ] {
+                        if ui
+                            .selectable_label(current == Some(seconds), label)
+                            .clicked()
+                            && current != Some(seconds)
+                        {
+                            app.actions
+                                .push(Action::SetDisappearingTimer(id.to_owned(), seconds));
+                        }
+                    }
+                });
         }
         if can_leave {
             ui.add_space(8.0);
@@ -2116,119 +2406,6 @@ fn chat_info(app: &mut App, ui: &mut egui::Ui, id: &str) {
             .push(Action::ShowDialog(Dialog::ConfirmLeaveGroup(id.to_owned())));
     }
     ui.add_space(8.0);
-    let mut description_height = 0.0;
-    if let Some(description) = description {
-        let top = ui.cursor().top();
-        theme::text(
-            ui,
-            crate::i18n::gettext(app.locale, "Description"),
-            theme::medium(12.5),
-            palette.secondary,
-        );
-        ui.add_space(4.0);
-        egui::ScrollArea::vertical()
-            .id_salt("group-description")
-            .max_height((window - photo - 360.0).clamp(32.0, 120.0))
-            .min_scrolled_height(32.0)
-            .auto_shrink([false, true])
-            .show(ui, |ui| {
-                theme::selectable_text(ui, description, theme::regular(13.5), palette.text);
-            });
-        ui.add_space(8.0);
-        description_height = ui.cursor().top() - top;
-    }
-    if chat.is_group() && !chat.participants.is_empty() {
-        let members = app.participant_list(&chat);
-        theme::text(
-            ui,
-            format!("Members ({})", members.len()),
-            theme::medium(12.5),
-            palette.secondary,
-        );
-        ui.add_space(4.0);
-        // Limit the visible rows because groups can have thousands of members.
-        let row_height = 30.0;
-        let rows = ((window - photo - 300.0 - description_height) / row_height)
-            .floor()
-            .clamp(if description_height > 0.0 { 1.0 } else { 2.0 }, 8.0);
-        let mut open = None;
-        egui::ScrollArea::vertical()
-            .id_salt("members")
-            .max_height(row_height * rows)
-            .min_scrolled_height(if description_height > 0.0 {
-                row_height
-            } else {
-                64.0
-            })
-            .auto_shrink([false, true])
-            .show_rows(ui, row_height, members.len(), |ui, range| {
-                ui.spacing_mut().item_spacing.y = 0.0;
-                for (member, name) in &members[range] {
-                    let (rect, response) = ui.allocate_exact_size(
-                        egui::vec2(ui.available_width(), row_height),
-                        egui::Sense::click(),
-                    );
-                    if ui.is_rect_visible(rect) {
-                        if response.hovered() {
-                            super::widgets::dialog_row_highlight(ui, rect, palette.surface_hover);
-                        }
-                        let picture = app.avatar(member);
-                        let avatar = egui::Rect::from_center_size(
-                            egui::pos2(rect.left() + 16.0, rect.center().y),
-                            egui::Vec2::splat(24.0),
-                        );
-                        super::widgets::paint_avatar(
-                            ui,
-                            &palette,
-                            avatar,
-                            name.trim_start_matches('~'),
-                            member,
-                            picture.as_deref(),
-                        );
-                        let line = super::widgets::line(
-                            ui,
-                            name,
-                            theme::regular(13.0),
-                            palette.text,
-                            rect.width() - 40.0,
-                            1,
-                        );
-                        line.paint(
-                            ui,
-                            egui::pos2(rect.left() + 34.0, rect.center().y - line.size().y / 2.0),
-                            palette.text,
-                        );
-                    }
-                    if response
-                        .on_hover_cursor(egui::CursorIcon::PointingHand)
-                        .clicked()
-                    {
-                        open = Some(member.clone());
-                    }
-                }
-            });
-        if let Some(member) = open
-            && Some(member.as_str()) != app.me.as_deref()
-        {
-            app.actions
-                .push(Action::ShowDialog(Dialog::ChatInfo(member)));
-        }
-        ui.add_space(6.0);
-    }
-    if let Some(until) = chat.muted_until {
-        theme::text(
-            ui,
-            if until == 0 {
-                "Muted".to_owned()
-            } else {
-                format!("Muted until {}", crate::util::chat_stamp(app.locale, until))
-            },
-            theme::regular(12.5),
-            palette.secondary,
-        );
-    }
-    ui.add_space(4.0);
-    // Center the available actions below the picture.
     let mut buttons: Vec<(Icon, &str, Vec<Action>)> = Vec::new();
     if !chat.is_group() && !mine {
         buttons.push((
@@ -2299,6 +2476,160 @@ fn chat_info(app: &mut App, ui: &mut egui::Ui, id: &str) {
             ],
         ));
     }
+    let button_font = theme::medium(13.0);
+    let button_height = ui.fonts_mut(|fonts| fonts.row_height(&button_font)) + 14.0;
+    let mut footer_rows = 0usize;
+    let mut row_width = 0.0;
+    for (_, label, _) in &buttons {
+        let width = theme::soft_button_width(ui, label, true);
+        let gap = if row_width > 0.0 {
+            ui.spacing().item_spacing.x
+        } else {
+            0.0
+        };
+        if row_width > 0.0 && row_width + gap + width > ui.available_width() {
+            footer_rows += 1;
+            row_width = width;
+        } else {
+            row_width += gap + width;
+        }
+    }
+    footer_rows += usize::from(row_width > 0.0);
+    let footer_height = footer_rows as f32 * (button_height + ui.spacing().item_spacing.y) + 4.0;
+    let muted_height = if chat.muted_until.is_some() {
+        ui.fonts_mut(|fonts| fonts.row_height(&theme::regular(12.5))) + ui.spacing().item_spacing.y
+    } else {
+        0.0
+    };
+    // Reserve the controls at their actual font metrics. Scrollable content
+    // receives only the space left inside the modal's two window-edge margins.
+    let content_cap = (ui.ctx().content_rect().height() - 80.0).max(0.0);
+    let heading_height = ui.fonts_mut(|fonts| fonts.row_height(&theme::medium(12.5)));
+    let members_heading = if chat.is_group() && !chat.participants.is_empty() {
+        heading_height + ui.spacing().item_spacing.y + 10.0
+    } else {
+        0.0
+    };
+    if let Some(description) = description {
+        theme::text(
+            ui,
+            crate::i18n::gettext(app.locale, "Description"),
+            theme::medium(12.5),
+            palette.secondary,
+        );
+        ui.add_space(4.0);
+        egui::ScrollArea::vertical()
+            .id_salt("group-description")
+            .max_height(
+                (content_cap
+                    - (ui.cursor().top() - content_top)
+                    - footer_height
+                    - muted_height
+                    - members_heading
+                    - 20.0)
+                    .clamp(0.0, 120.0),
+            )
+            .min_scrolled_height(0.0)
+            .auto_shrink([false, true])
+            .show(ui, |ui| {
+                theme::selectable_text(ui, description, theme::regular(13.5), palette.text);
+            });
+        ui.add_space(8.0);
+    }
+    if chat.is_group() && !chat.participants.is_empty() {
+        let members = app.participant_list(&chat);
+        theme::text(
+            ui,
+            crate::i18n::ngettext(
+                app.locale,
+                "{} member",
+                "{} members",
+                u32::try_from(members.len()).unwrap_or(u32::MAX),
+            )
+            .replace("{}", &members.len().to_string()),
+            theme::medium(12.5),
+            palette.secondary,
+        );
+        ui.add_space(4.0);
+        // Limit the visible rows because groups can have thousands of members.
+        let row_height = 30.0;
+        let members_height =
+            (content_cap - (ui.cursor().top() - content_top) - footer_height - muted_height - 6.0)
+                .clamp(0.0, row_height * 8.0);
+        let mut open = None;
+        egui::ScrollArea::vertical()
+            .id_salt("members")
+            .max_height(members_height)
+            .min_scrolled_height(0.0)
+            .auto_shrink([false, true])
+            .show_rows(ui, row_height, members.len(), |ui, range| {
+                ui.spacing_mut().item_spacing.y = 0.0;
+                for (member, name) in &members[range] {
+                    let (rect, response) = ui.allocate_exact_size(
+                        egui::vec2(ui.available_width(), row_height),
+                        egui::Sense::click(),
+                    );
+                    if ui.is_rect_visible(rect) {
+                        if response.hovered() {
+                            super::widgets::dialog_row_highlight(ui, rect, palette.surface_hover);
+                        }
+                        let picture = app.avatar(member);
+                        let avatar = egui::Rect::from_center_size(
+                            egui::pos2(rect.left() + 16.0, rect.center().y),
+                            egui::Vec2::splat(24.0),
+                        );
+                        super::widgets::paint_avatar(
+                            ui,
+                            &palette,
+                            avatar,
+                            name.trim_start_matches('~'),
+                            member,
+                            picture.as_deref(),
+                        );
+                        let line = super::widgets::line(
+                            ui,
+                            name,
+                            theme::regular(13.0),
+                            palette.text,
+                            rect.width() - 40.0,
+                            1,
+                        );
+                        line.paint(
+                            ui,
+                            egui::pos2(rect.left() + 34.0, rect.center().y - line.size().y / 2.0),
+                            palette.text,
+                        );
+                    }
+                    if response
+                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                        .clicked()
+                    {
+                        open = Some(member.clone());
+                    }
+                }
+            });
+        if let Some(member) = open
+            && Some(member.as_str()) != app.me.as_deref()
+        {
+            app.actions
+                .push(Action::ShowDialog(Dialog::ChatInfo(member)));
+        }
+        ui.add_space(6.0);
+    }
+    if let Some(until) = chat.muted_until {
+        theme::text(
+            ui,
+            if until == 0 {
+                "Muted".to_owned()
+            } else {
+                format!("Muted until {}", crate::util::chat_stamp(app.locale, until))
+            },
+            theme::regular(12.5),
+            palette.secondary,
+        );
+    }
+    ui.add_space(4.0);
+    // Center the available actions below the picture.
     let spacing = ui.spacing().item_spacing.x;
     let available = ui.available_width();
     let mut fired: Option<Vec<Action>> = None;
@@ -2438,12 +2769,25 @@ fn group_photo(
 
 /// The group name being typed. Returns `Some(true)` when Enter or the check
 /// submits it, `Some(false)` when the cross cancels it.
+fn group_name_width(available: f32, buttons: f32) -> f32 {
+    (available - buttons).clamp(21.0, 240.0)
+}
+
+#[test]
+fn group_name_edit_width_stays_positive_in_narrow_dialogs() {
+    for available in [0.0, 20.0, 70.0, 100.0, 400.0] {
+        let width = group_name_width(available, 76.0);
+        assert!((21.0..=240.0).contains(&width));
+        assert!(width - 20.0 > 0.0);
+    }
+}
+
 fn group_name_field(app: &App, ui: &mut egui::Ui, draft: &mut String) -> Option<bool> {
     let palette = app.palette;
     let mut outcome = None;
     ui.horizontal(|ui| {
         let buttons = 2.0 * (18.0 + 12.0) + 2.0 * ui.spacing().item_spacing.x;
-        let width = 240.0_f32.min(ui.available_width() - buttons);
+        let width = group_name_width(ui.available_width(), buttons);
         ui.add_space(((ui.available_width() - width - buttons) / 2.0).max(0.0));
         let format = egui::TextFormat::simple(theme::semibold(15.0), palette.text);
         let mut layouter = |ui: &egui::Ui, text: &dyn egui::TextBuffer, wrap: f32| {
@@ -2665,5 +3009,113 @@ mod deletion_count_tests {
                 expected
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod reaction_result_tests {
+    use super::*;
+
+    fn text(shape: &egui::Shape, output: &mut String) {
+        match shape {
+            egui::Shape::Text(shape) => output.push_str(&shape.galley.job.text),
+            egui::Shape::Vec(shapes) => {
+                for shape in shapes {
+                    text(shape, output);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    #[test]
+    fn results_preserve_reactors_and_hide_names_when_private_or_locked() {
+        let directory = tempfile::tempdir().unwrap();
+        let (mut app, _) = App::headless(
+            crate::paths::AppDirs::under(directory.path()),
+            crate::settings::Settings::default(),
+        );
+        let chat = "fixture@s.whatsapp.net";
+        app.chats
+            .push(crate::model::Chat::new(chat.into(), "Synthetic".into()));
+        let mut message = crate::archive::tests::message(chat, "message", 100, false);
+        let reactions = vec![
+            crate::model::Reaction {
+                sender: "actor-one".into(),
+                from_me: false,
+                emoji: "👍".into(),
+            },
+            crate::model::Reaction {
+                sender: "actor-two".into(),
+                from_me: false,
+                emoji: "👍".into(),
+            },
+            crate::model::Reaction {
+                sender: "me".into(),
+                from_me: true,
+                emoji: "❤️".into(),
+            },
+        ];
+        message.reactions = reactions.clone();
+        app.conversations.insert(
+            chat.into(),
+            crate::app::Conversation {
+                messages: vec![message],
+                ..Default::default()
+            },
+        );
+        for (id, name) in [
+            ("actor-one", "First reactor"),
+            ("actor-two", "Second reactor"),
+        ] {
+            app.contacts.insert(
+                id.into(),
+                crate::model::Contact {
+                    id: id.into(),
+                    full_name: Some(name.into()),
+                    ..Default::default()
+                },
+            );
+        }
+        let ctx = egui::Context::default();
+        app.attach(&ctx);
+        let render = |app: &mut App| {
+            let mut frame = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(360.0, 500.0))),
+                    ..Default::default()
+                },
+                |ui| reaction_results(app, ui, chat, "message"),
+            );
+            frame.textures_delta.clear();
+            let mut output = String::new();
+            for shape in frame.shapes {
+                text(&shape.shape, &mut output);
+            }
+            output
+        };
+        let ordinary = render(&mut app);
+        assert!(
+            ordinary.contains("First reactor") && ordinary.contains("Second reactor"),
+            "{ordinary}"
+        );
+        app.settings.screen_privacy.enabled = true;
+        app.settings.screen_privacy.blur_names = true;
+        let private = render(&mut app);
+        assert!(!private.contains("First reactor") && !private.contains("Second reactor"));
+        app.chats[0].locked = true;
+        let locked = render(&mut app);
+        assert!(!locked.contains("First reactor") && !locked.contains("Second reactor"));
+        assert_eq!(
+            app.conversations[chat]
+                .message("message")
+                .unwrap()
+                .reactions,
+            reactions
+        );
+        assert!(
+            app.actions.is_empty(),
+            "opening results must not send reactions"
+        );
     }
 }

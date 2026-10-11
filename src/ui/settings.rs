@@ -398,6 +398,26 @@ fn sections(app: &App) -> Vec<Section> {
             }
         },
     );
+    appearance.row(
+        translated(locale, "Text size"),
+        translated(
+            locale,
+            "Resize text without changing the window or controls.",
+        ),
+        move |ui, app| {
+            let mut scale = app.settings.text_scale;
+            egui::ComboBox::from_id_salt("text-size")
+                .selected_text(format!("{:.0}%", scale * 100.0))
+                .show_ui(ui, |ui| {
+                    for value in [0.85, 1.0, 1.15, 1.3, 1.5] {
+                        ui.selectable_value(&mut scale, value, format!("{:.0}%", value * 100.0));
+                    }
+                });
+            if scale != app.settings.text_scale {
+                app.actions.push(Action::SetTextScale(scale));
+            }
+        },
+    );
     appearance.row(translated(locale, "Language"), "", language_picker);
 
     let mut chats = Section::new(translated(locale, "Chats"));
@@ -437,8 +457,39 @@ fn sections(app: &App) -> Vec<Section> {
     );
     chats.account_toggle(
         translated(locale, "Recover older history in the background"),
-        translated(locale, "Up to five pages per chat this session. Your phone may not send all history. No automatic media downloads."),
+        translated(locale, "Ask your phone for older messages without opening each chat. Your phone may not provide all history."),
         |settings| &mut settings.background_history,
+    );
+    chats.row(
+        translated(locale, "History recovery"),
+        translated(locale, "Full history continues across all eligible chats. Changing the initial sync takes effect the next time you link this account."),
+        |ui, app| {
+            let current = app.account().settings.sync_mode.unwrap_or(crate::settings::SyncMode::Recent);
+            let mut selected = current;
+            egui::ComboBox::from_id_salt("history-recovery-mode")
+                .selected_text(if current == crate::settings::SyncMode::Full { crate::i18n::gettext(app.locale,"Full history") } else { crate::i18n::gettext(app.locale,"Recent history") })
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut selected, crate::settings::SyncMode::Recent, crate::i18n::gettext(app.locale,"Recent history"));
+                    ui.selectable_value(&mut selected, crate::settings::SyncMode::Full, crate::i18n::gettext(app.locale,"Full history"));
+                });
+            if selected != current { app.actions.push(Action::SetSyncMode(selected)); }
+        },
+    );
+    chats.account_toggle(
+        translated(locale, "Keep files in the background archive"),
+        translated(locale, "Download files without opening their chats. Stored in this account's managed archive, separate from your chosen Downloads folder."),
+        |settings| &mut settings.archive_media,
+    );
+    chats.row(
+        translated(locale, "Daily history request limit"),
+        translated(locale, "Full-history recovery pauses at this daily limit and continues the next day. Requests stay at least twenty seconds apart."),
+        |ui, app| {
+            let mut budget = app.account().settings.history_requests_per_day;
+            if ui.add(egui::DragValue::new(&mut budget).range(1..=4000)).changed() {
+                app.account_mut().settings.history_requests_per_day = budget;
+                app.account_mut().mark_settings_dirty();
+            }
+        },
     );
     chats.toggle(
         translated(locale, "Transcribe received voice messages automatically"),
@@ -515,6 +566,25 @@ fn sections(app: &App) -> Vec<Section> {
         },
     );
 
+    let mut audio_devices = Section::new(translated(locale, "Audio devices"));
+    audio_devices.row(translated(locale,"Microphone and sound output"), translated(locale,"Used for voice recording, voice and video playback, and calls. Missing sound outputs fall back to the system default with a warning; recording never switches microphones silently."), |ui,app| {
+        if ui.button(crate::i18n::gettext(app.locale,"Refresh audio devices")).clicked() { app.actions.push(Action::RefreshAudioDevices); }
+        for microphone in [true,false] {
+            let label=if microphone { crate::i18n::gettext(app.locale,"Microphone") } else { crate::i18n::gettext(app.locale,"Sound output") };
+            let selected=if microphone { app.account().settings.call_microphone.clone() } else { app.account().settings.call_speaker.clone() };
+            let devices=if microphone { app.call_devices.microphones.clone() } else { app.call_devices.speakers.clone() };
+            ui.label(label);
+            egui::ComboBox::from_id_salt(("settings-audio-device",microphone)).selected_text(selected.clone().unwrap_or_else(|| crate::i18n::gettext(app.locale,"System default").into_owned())).show_ui(ui,|ui| {
+                let mut choices=vec![(None,crate::i18n::gettext(app.locale,"System default").into_owned())];
+                choices.extend(devices.into_iter().map(|device| (Some(device.id),device.label)));
+                for (device,label) in choices {
+                    if ui.selectable_label(device==selected,label).clicked() {
+                        app.actions.push(if microphone { Action::SetCallMicrophone(device) } else { Action::SetCallSpeaker(device) });
+                    }
+                }
+            });
+        }
+    });
     let mut notifications = Section::new(translated(locale, "Notifications"));
     notifications.account_toggle(
         translated(locale, "Desktop notifications"),
@@ -525,6 +595,14 @@ fn sections(app: &App) -> Vec<Section> {
         |settings| &mut settings.notifications,
     );
     if app.account().settings.notifications {
+        notifications.account_toggle(
+            translated(locale, "In-app notification cards"),
+            translated(
+                locale,
+                "Show notifications inside the window, with the same privacy and mute settings.",
+            ),
+            |settings| &mut settings.in_app_notifications,
+        );
         notifications.account_toggle(
             translated(locale, "Show notification sender"),
             translated(
@@ -600,6 +678,9 @@ fn sections(app: &App) -> Vec<Section> {
         "",
         |settings| &mut settings.send_typing,
     );
+    privacy.account_toggle(translated(locale,"Allow local command-line access"),
+        translated(locale,"Allows this computer's user to read, watch and send in this account. App lock and locked chats stay private."),
+        |settings| &mut settings.cli_access);
     app_lock_rows(app, &mut privacy);
     // The account values live on the phone: they are shown once fetched and
     // edited only while connected with a fresh snapshot.
@@ -667,9 +748,24 @@ fn sections(app: &App) -> Vec<Section> {
 
     let mut system = Section::new(translated(locale, "System"));
     system.toggle(
+        translated(locale, "Unread count on tray icon"),
+        translated(locale, "Show the total unread chat count across accounts, up to 99+. Hidden while the app is locked or screen privacy is on."),
+        |settings| &mut settings.tray_unread_numbers,
+    );
+    system.toggle(
+        translated(locale, "VIP tray indicator"),
+        translated(locale, "Highlight unread VIP chats. Mark a chat as VIP from its menu. Muted, archived and locked chats are excluded."),
+        |settings| &mut settings.tray_vip,
+    );
+    system.toggle(
         translated(locale, "Keep running when the window closes"),
         keyed(translated(locale, "Quit from the tray or with Ctrl+Q.")),
         |settings| &mut settings.keep_running_in_background,
+    );
+    system.toggle(
+        keyed(translated(locale, "Ctrl+W closes the chat")),
+        keyed(translated(locale, "Close the open chat with Ctrl+W instead of closing the window. Turn off to keep the window shortcut.")),
+        |settings| &mut settings.close_chat_with_ctrl_w,
     );
     if app.start_with_system.is_some() {
         system.row(
@@ -850,6 +946,135 @@ fn sections(app: &App) -> Vec<Section> {
             }
         },
     );
+    if let Some(progress) = app.archive_progress {
+        let crate::model::ArchiveRecoveryProgress {
+            pending,
+            paused,
+            downloaded,
+            unavailable,
+            bytes,
+            budget_reached,
+            oldest_saved,
+            phone_history,
+            connected,
+        } = progress;
+        files.row(translated(locale,"Archive progress"), translated(locale,"Counts describe saved files and queued work. Unavailable includes oversized files and clips missing recovery keys; it does not prove that WhatsApp has no copy. History responses do not prove the archive is complete."), move |ui, _app| {
+            ui.label([
+                crate::i18n::ngettext(locale,"{count} file downloaded","{count} files downloaded",downloaded.min(u64::from(u32::MAX)) as u32).replace("{count}",&downloaded.to_string()),
+                crate::i18n::ngettext(locale,"{count} file waiting","{count} files waiting",pending.min(u64::from(u32::MAX)) as u32).replace("{count}",&pending.to_string()),
+                crate::i18n::ngettext(locale,"{count} file cancelled","{count} files cancelled",paused.min(u64::from(u32::MAX)) as u32).replace("{count}",&paused.to_string()),
+                crate::i18n::ngettext(locale,"{count} file unavailable","{count} files unavailable",unavailable.min(u64::from(u32::MAX)) as u32).replace("{count}",&unavailable.to_string()),
+            ].join(" · "));
+            if let Some(bytes) = bytes { ui.label(crate::i18n::gettext(locale,"{size} MiB stored").replace("{size}",&(bytes / (1024 * 1024)).to_string())); }
+            let oldest = oldest_saved.and_then(|timestamp| jiff::Timestamp::from_second(timestamp).ok())
+                .map(|timestamp| timestamp.to_zoned(jiff::tz::TimeZone::UTC).strftime("%Y-%m-%d").to_string());
+            ui.label(oldest.map_or_else(|| crate::i18n::gettext(locale,"Oldest saved message: unknown").into_owned(), |date| crate::i18n::gettext(locale,"Oldest saved message: {date} (UTC)").replace("{date}",&date)));
+            ui.label(if !connected { crate::i18n::gettext(locale,"WhatsApp connection: disconnected") } else { match phone_history {
+                crate::model::HistoryResponseState::Unknown => crate::i18n::gettext(locale,"Phone history: no request observed this session"),
+                crate::model::HistoryResponseState::Waiting => crate::i18n::gettext(locale,"Phone history: waiting for a response"),
+                crate::model::HistoryResponseState::Answered => crate::i18n::gettext(locale,"Phone history: response received"),
+                crate::model::HistoryResponseState::NoResponse => crate::i18n::gettext(locale,"Phone history: request failed or no response yet"),
+            }});
+            if budget_reached {
+                ui.label(if bytes.is_some() { crate::i18n::gettext(locale,"Background downloads paused at the storage limit.") }
+                    else { crate::i18n::gettext(locale,"Background downloads paused: storage usage could not be measured.") });
+            }
+        });
+    }
+    files.row(
+        translated(locale, "Background media storage limit"),
+        translated(locale, "Pause new background downloads at this limit. Existing archived files are kept. Increase it to continue, or use 0 for unlimited (MiB)."),
+        |ui, app| {
+            let mut budget = app.account().settings.background_media_budget_mib;
+            if ui.add(egui::DragValue::new(&mut budget).range(0..=1_048_576).suffix(" MiB")).changed() {
+                app.account_mut().settings.background_media_budget_mib = budget;
+                app.account_mut().mark_settings_dirty();
+            }
+        },
+    );
+    files.row(
+        translated(locale, "Encrypted account backups"),
+        translated(locale, "Save the account and downloaded files with a passphrase. Restore into a separate account, initially offline."),
+        |ui, app| {
+            let palette = app.palette;
+            if ui.add_enabled_ui(!app.backup_busy, |ui| theme::soft_button(ui, &palette, None, &crate::i18n::gettext(app.locale,"Back up…"), false)).inner.clicked() {
+                app.backup_draft = super::archive_backup::BackupDraft::default();
+                app.actions.push(Action::ShowDialog(Dialog::ArchiveBackup { restore: false }));
+            }
+            if theme::soft_button(ui, &palette, None, &crate::i18n::gettext(app.locale,"Restore…"), false).clicked() {
+                app.backup_draft = super::archive_backup::BackupDraft::default();
+                app.actions.push(Action::ShowDialog(Dialog::ArchiveBackup { restore: true }));
+            }
+            if let Some(status) = &app.backup_status { ui.label(status); }
+        },
+    );
+    if app.account().settings.archive_only && app.account().dirs.session_db().is_file() {
+        files.row(
+            translated(locale, "Restored account connection"),
+            translated(
+                locale,
+                "This account stays offline until you resume its saved linked-device session.",
+            ),
+            |ui, app| {
+                if theme::soft_button(
+                    ui,
+                    &app.palette,
+                    None,
+                    &crate::i18n::gettext(app.locale, "Resume connection…"),
+                    false,
+                )
+                .clicked()
+                {
+                    let id = app.account().id.clone();
+                    app.actions
+                        .push(Action::ShowDialog(Dialog::ResumeRestoredAccount(id)));
+                }
+            },
+        );
+    }
+    files.row(
+        translated(locale, "Download folders"),
+        translated(
+            locale,
+            "Organize future downloads in your chosen folder. Existing files stay where they are.",
+        ),
+        |ui, app| {
+            let mut organization = app.settings.download_organization;
+            let before = organization;
+            egui::ComboBox::from_id_salt("download_organization")
+                .selected_text(crate::i18n::gettext(app.locale, organization.label()))
+                .width(200.0_f32.min(ui.available_width()))
+                .show_ui(ui, |ui| {
+                    for option in crate::settings::DownloadOrganization::ALL {
+                        ui.selectable_value(
+                            &mut organization,
+                            option,
+                            crate::i18n::gettext(app.locale, option.label()),
+                        );
+                    }
+                });
+            if organization != before {
+                app.actions.push(Action::SetDownloadOrganization {
+                    organization,
+                    descriptive_names: app.settings.descriptive_download_names,
+                });
+            }
+        },
+    );
+    files.row(
+        translated(locale, "Readable download names"),
+        translated(locale, "Include the chat, message date (UTC), file type and original document name. The private media archive keeps its own files."),
+        |ui, app| {
+            let mut enabled = app.settings.descriptive_download_names;
+            let response = widgets::switch(ui, &app.palette, &mut enabled);
+            theme::reveal_focus(&response);
+            if response.changed() {
+                app.actions.push(Action::SetDownloadOrganization {
+                    organization: app.settings.download_organization, descriptive_names: enabled,
+                });
+            }
+        },
+    );
     files.block(
         vec![
             translated(locale, "Storage used"),
@@ -896,6 +1121,7 @@ fn sections(app: &App) -> Vec<Section> {
         appearance,
         chats,
         notifications,
+        audio_devices,
         privacy,
         screen_privacy,
         system,
@@ -1135,7 +1361,7 @@ fn theme_picker(ui: &mut egui::Ui, app: &mut App) {
             .width(200.0_f32.min(ui.available_width()))
             .height(320.0)
             .show_ui(ui, |ui| {
-                for choice in ThemeChoice::ALL {
+                for &choice in ThemeChoice::ALL {
                     if theme_option(
                         ui,
                         &palette,
@@ -1215,19 +1441,37 @@ fn font_picker(ui: &mut egui::Ui, app: &mut App) {
     use crate::settings::FontChoice;
     let palette = app.palette;
     let selected = app.settings.font;
+    // A file's name is the person's own; keep it as it is.
+    let custom = app
+        .settings
+        .custom_font
+        .as_deref()
+        .and_then(std::path::Path::file_stem)
+        .map(|stem| stem.to_string_lossy().into_owned());
     // "Inter" is a name; "System" is a word.
     let label = |choice: FontChoice| match choice {
         FontChoice::System => crate::i18n::gettext(app.locale, choice.label()).into_owned(),
         FontChoice::Inter => choice.label().to_owned(),
     };
     let response = egui::ComboBox::from_id_salt("interface_font")
-        .selected_text(label(selected))
+        .selected_text(custom.clone().unwrap_or_else(|| label(selected)))
         .width(200.0_f32.min(ui.available_width()))
         .show_ui(ui, |ui| {
             for choice in FontChoice::ALL {
-                if theme_option(ui, &palette, &label(choice), selected == choice) {
+                let chosen = custom.is_none() && selected == choice;
+                if theme_option(ui, &palette, &label(choice), chosen) {
                     app.actions.push(Action::SetFont(choice));
                 }
+            }
+            let pick = match &custom {
+                Some(name) => {
+                    theme_option(ui, &palette, name, true);
+                    crate::i18n::gettext(app.locale, "Choose another font file")
+                }
+                None => crate::i18n::gettext(app.locale, "Choose a font file"),
+            };
+            if theme_option(ui, &palette, &pick, false) {
+                app.actions.push(Action::PickCustomFont);
             }
         });
     theme::reveal_focus(&response.response);
@@ -1978,6 +2222,7 @@ fn account_toggle(
     if changed {
         *field(&mut app.account_mut().settings) = value;
         app.account_mut().mark_settings_dirty();
+        app.sync_automation_authority();
     }
 }
 

@@ -5,6 +5,28 @@ use egui::{Key, Modifiers};
 use crate::app::App;
 use crate::model::{Action, Chat, Dialog, Page, Scroll};
 
+/// Shared by the keyboard and macOS native menu, preserving the window default.
+pub(crate) fn close_shortcut_action(app: &App, ctx: &egui::Context) -> Option<Action> {
+    if !app.settings.close_chat_with_ctrl_w {
+        return Some(Action::CloseWindow);
+    }
+    (!app.app_lock.is_locked()
+        && !app.window_hidden
+        && app.page == Page::Chats
+        && app.open_chat.is_some()
+        && app.dialog.is_none()
+        && !app.show_update
+        && !egui::Popup::is_any_open(ctx)
+        && app.picker.is_none()
+        && app.reaction_target.is_none()
+        && app.recording.is_none()
+        && app.picture_edit.is_none()
+        && app.image_preview.is_none()
+        && !app.video_expanded
+        && app.sticker_view.is_none())
+    .then_some(Action::CloseChat)
+}
+
 /// Routes keyboard commands to actions, respecting overlays and text focus.
 pub fn handle(app: &mut App, ctx: &egui::Context) {
     if app.picture_edit.is_some() {
@@ -19,10 +41,15 @@ pub fn handle(app: &mut App, ctx: &egui::Context) {
         video_keys(app, ctx);
         return;
     }
+    if app.sticker_view.is_some() {
+        sticker_view_keys(app, ctx);
+        return;
+    }
     let editing_text = ctx.text_edit_focused();
     let find = find_action(app);
     let archive = archive_action(app);
     let next_account = next_account_action(app);
+    let close = close_shortcut_action(app, ctx);
     let mut actions = Vec::new();
     ctx.input_mut(|input| {
         let mut key = |modifiers: Modifiers, key: Key, action: Action| {
@@ -79,7 +106,9 @@ pub fn handle(app: &mut App, ctx: &egui::Context) {
         key(Modifiers::COMMAND, Key::B, Action::ToggleSidebar);
         key(Modifiers::COMMAND, Key::Comma, Action::ToggleSettings);
         key(Modifiers::COMMAND, Key::Q, Action::Quit);
-        key(Modifiers::COMMAND, Key::W, Action::CloseWindow);
+        if let Some(close) = close {
+            key(Modifiers::COMMAND, Key::W, close);
+        }
         key(
             Modifiers::COMMAND,
             Key::Slash,
@@ -158,6 +187,10 @@ pub fn handle(app: &mut App, ctx: &egui::Context) {
     let escape = (!menu_open || app.reaction_target.is_some())
         && ctx.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Escape));
     if escape {
+        #[cfg(target_os = "linux")]
+        if super::conversation::stop_middle_scroll(ctx) {
+            return;
+        }
         if app.show_update {
             actions.push(Action::CloseUpdate);
         } else if app.dialog.is_some() && app.group_name_edit.is_some() {
@@ -478,6 +511,20 @@ fn video_keys(app: &mut App, ctx: &egui::Context) {
     app.actions.extend(actions);
 }
 
+/// While the sticker viewer is open, do not type into the chat behind it.
+fn sticker_view_keys(app: &mut App, ctx: &egui::Context) {
+    let close = ctx.input_mut(|input| {
+        let close = input.consume_key(Modifiers::NONE, Key::Escape);
+        input
+            .events
+            .retain(|event| !crate::image_preview::consumes_key(event));
+        close
+    });
+    if close {
+        app.actions.push(Action::CloseStickerPreview);
+    }
+}
+
 /// Ctrl+F searches the open chat, as in WhatsApp, the chat list when no
 /// chat is open, and the settings on the Settings page.
 fn find_action(app: &App) -> Action {
@@ -560,10 +607,7 @@ pub const SHORTCUTS: &[(&str, &str)] = &[
         "Ctrl+Shift+L",
         "Lock Zap Faster (with an app lock password)",
     ),
-    (
-        "Ctrl+W",
-        "Close the window (Zap Faster remains in the tray)",
-    ),
+    ("Ctrl+W", "Close the window or chat (choose in Settings)"),
     ("Ctrl+Q", "Quit"),
 ];
 
@@ -581,6 +625,59 @@ pub fn label(keys: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn close_shortcut_preserves_default_and_uses_platform_command_for_chat_choice() {
+        let (_root, mut app, ids) = app_with_chats(1);
+        let ctx = egui::Context::default();
+        app.open_chat = Some(ids[0].clone());
+        assert!(!press(&mut app, &ctx, Key::W, Modifiers::COMMAND));
+        assert_eq!(app.actions, [Action::CloseWindow]);
+        app.settings.close_chat_with_ctrl_w = true;
+        for modifiers in [
+            Modifiers {
+                ctrl: true,
+                command: true,
+                ..Modifiers::NONE
+            },
+            Modifiers {
+                mac_cmd: true,
+                command: true,
+                ..Modifiers::NONE
+            },
+        ] {
+            app.actions.clear();
+            assert!(!press(&mut app, &ctx, Key::W, modifiers));
+            assert_eq!(app.actions, [Action::CloseChat]);
+        }
+        app.actions.clear();
+        assert!(press(&mut app, &ctx, Key::W, Modifiers::NONE));
+        assert!(app.actions.is_empty());
+    }
+
+    #[test]
+    fn close_chat_shortcut_does_not_close_window_or_hidden_chat() {
+        let (_root, mut app, ids) = app_with_chats(1);
+        app.settings.close_chat_with_ctrl_w = true;
+        assert!(close_shortcut_action(&app, &egui::Context::default()).is_none());
+        app.open_chat = Some(ids[0].clone());
+        app.dialog = Some(Dialog::Shortcuts);
+        assert!(close_shortcut_action(&app, &egui::Context::default()).is_none());
+        app.dialog = None;
+        app.page = Page::Settings;
+        assert!(close_shortcut_action(&app, &egui::Context::default()).is_none());
+        app.page = Page::Chats;
+        app.window_hidden = true;
+        assert!(close_shortcut_action(&app, &egui::Context::default()).is_none());
+        app.window_hidden = false;
+        app.app_lock.lock();
+        assert!(close_shortcut_action(&app, &egui::Context::default()).is_none());
+        app.settings.close_chat_with_ctrl_w = false;
+        assert_eq!(
+            close_shortcut_action(&app, &egui::Context::default()),
+            Some(Action::CloseWindow)
+        );
+    }
 
     #[test]
     fn ctrl_f_searches_the_open_chat_the_list_or_the_settings() {

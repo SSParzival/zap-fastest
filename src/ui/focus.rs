@@ -34,6 +34,8 @@ pub enum Stop {
     /// One chip in the label row, by its position among the labels.
     Label(u8),
     ManageLabels,
+    NotificationOpen(u64),
+    NotificationDismiss(u64),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -42,11 +44,70 @@ struct Move {
     steps: i32,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Section {
+    Sidebar,
+    Messages,
+    Composer,
+    Notifications,
+}
+
+#[derive(Clone, Copy)]
+struct SectionMove {
+    from: Option<Section>,
+    steps: i32,
+}
+
 #[derive(Clone, Default)]
 struct Order {
     frame: Option<u64>,
     controls: Vec<(Stop, Id)>,
     movement: Option<Move>,
+    sections: Vec<(Section, Id)>,
+    section_movement: Option<SectionMove>,
+}
+
+pub(crate) fn section(response: &Response, section: Section) {
+    if response.enabled() && response.ctx.content_rect().intersects(response.rect) {
+        response.ctx.data_mut(|data| {
+            let order = data.get_temp_mut_or_default::<Order>(order_id());
+            if !order.sections.iter().any(|(known, _)| *known == section) {
+                order.sections.push((section, response.id));
+            }
+        });
+    }
+}
+
+fn stop_section(stop: Stop) -> Section {
+    match stop {
+        Stop::NotificationOpen(_) | Stop::NotificationDismiss(_) => Section::Notifications,
+        Stop::Composer | Stop::Send | Stop::Attach | Stop::Emoji => Section::Composer,
+        Stop::PhoneLink(_)
+        | Stop::ChatSearch
+        | Stop::ChatSearchClose
+        | Stop::ChatSearchDate
+        | Stop::ChatSearchField
+        | Stop::ChatSearchDay
+        | Stop::Back
+        | Stop::Profile => Section::Messages,
+        _ => Section::Sidebar,
+    }
+}
+
+fn next_section(order: &Order) -> Option<Id> {
+    let movement = order.section_movement?;
+    let mut sections = order.sections.clone();
+    sections.sort_by_key(|(section, _)| *section);
+    if sections.is_empty() {
+        return None;
+    }
+    let index = movement
+        .from
+        .and_then(|from| sections.iter().position(|(section, _)| *section == from))
+        .map_or(if movement.steps < 0 { 0 } else { -1 }, |index| {
+            index as i32
+        });
+    Some(sections[(index + movement.steps).rem_euclid(sections.len() as i32) as usize].1)
 }
 
 fn order_id() -> Id {
@@ -61,6 +122,12 @@ pub trait TabStop: Sized {
 
 impl TabStop for Response {
     fn tab_stop(self, stop: Stop) -> Self {
+        if matches!(
+            stop,
+            Stop::Composer | Stop::Search | Stop::NotificationOpen(_)
+        ) {
+            section(&self, stop_section(stop));
+        }
         if self.enabled() {
             // `reveal_focus` has queued the scroll while this control's
             // scroll area is open. Re-layout so its ring is visible now.
@@ -109,19 +176,26 @@ pub(crate) fn control(ctx: &Context, stop: Stop) -> Option<Id> {
 pub fn begin(ctx: &Context, active: bool) {
     let mut pressed = false;
     let mut steps = 0;
+    let mut section_steps = 0;
     if active {
         ctx.input_mut(|input| {
             input.events.retain(|event| {
                 if let egui::Event::Key {
-                    key: egui::Key::Tab,
+                    key,
                     pressed: true,
                     modifiers,
                     ..
                 } = event
+                    && matches!(key, egui::Key::Tab | egui::Key::F6)
                     && (!modifiers.any() || modifiers.shift_only())
                 {
-                    pressed = true;
-                    steps += if modifiers.shift { -1 } else { 1 };
+                    let direction = if modifiers.shift { -1 } else { 1 };
+                    if *key == egui::Key::F6 {
+                        section_steps += direction;
+                    } else {
+                        pressed = true;
+                        steps += direction;
+                    }
                     false
                 } else {
                     true
@@ -145,15 +219,33 @@ pub fn begin(ctx: &Context, active: bool) {
                     .map(|(stop, _)| *stop),
                 steps,
             });
+            order.section_movement = (active && section_steps != 0).then(|| SectionMove {
+                from: order
+                    .controls
+                    .iter()
+                    .find(|(_, id)| Some(*id) == focused)
+                    .map(|(stop, _)| stop_section(*stop))
+                    .or_else(|| {
+                        order
+                            .sections
+                            .iter()
+                            .find(|(_, id)| Some(*id) == focused)
+                            .map(|(section, _)| *section)
+                    }),
+                steps: section_steps,
+            });
         }
         let target = active
             .then(|| {
-                order
-                    .movement
-                    .and_then(|movement| next(&order.controls, movement))
+                next_section(order).or_else(|| {
+                    order
+                        .movement
+                        .and_then(|movement| next(&order.controls, movement))
+                })
             })
             .flatten();
         order.controls.clear();
+        order.sections.clear();
         target
     });
     if active && (pressed || target.is_some()) {
@@ -172,9 +264,11 @@ pub fn finish(ctx: &Context, active: bool) {
     let target = ctx.data_mut(|data| {
         let order = data.get_temp_mut_or_default::<Order>(order_id());
         order.controls.sort_by_key(|(stop, _)| *stop);
-        order
-            .movement
-            .and_then(|movement| next(&order.controls, movement))
+        next_section(order).or_else(|| {
+            order
+                .movement
+                .and_then(|movement| next(&order.controls, movement))
+        })
     });
     if active
         && !egui::Popup::is_any_open(ctx)
@@ -222,6 +316,57 @@ pub fn stops(ctx: &Context) -> Vec<(Stop, Id)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn f6_cycles_real_sections_in_both_directions_without_advancing_on_relayout() {
+        let ctx = Context::default();
+        let draw = |ui: &mut egui::Ui| {
+            begin(ui.ctx(), true);
+            ui.button("Chat search").tab_stop(Stop::Search);
+            let message = ui.button("Synthetic message actions");
+            section(&message, Section::Messages);
+            ui.button("Message composer").tab_stop(Stop::Composer);
+            finish(ui.ctx(), true);
+        };
+        let mut output = ctx.run_ui(egui::RawInput::default(), draw);
+        output.textures_delta.clear();
+        let ids = ctx.data(|data| data.get_temp::<Order>(order_id()).unwrap().sections);
+        let id = |section| ids.iter().find(|(known, _)| *known == section).unwrap().1;
+        ctx.memory_mut(|memory| memory.request_focus(id(Section::Sidebar)));
+        for (shift, expected) in [
+            (false, Section::Messages),
+            (false, Section::Composer),
+            (false, Section::Sidebar),
+            (true, Section::Composer),
+        ] {
+            let mut passes = 0;
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    events: vec![egui::Event::Key {
+                        key: egui::Key::F6,
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers: if shift {
+                            egui::Modifiers::SHIFT
+                        } else {
+                            egui::Modifiers::NONE
+                        },
+                    }],
+                    ..Default::default()
+                },
+                |ui| {
+                    draw(ui);
+                    passes += 1;
+                    if passes == 1 {
+                        ui.ctx().request_discard("F6 section fixture relayout");
+                    }
+                },
+            );
+            output.textures_delta.clear();
+            assert_eq!(ctx.memory(|memory| memory.focused()), Some(id(expected)));
+        }
+    }
 
     #[test]
     fn navigation_wraps_and_skips_missing_controls_in_both_directions() {

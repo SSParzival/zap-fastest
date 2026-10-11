@@ -24,9 +24,14 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
             260.0..=520.0
         })
         .show_separator_line(false)
-        .frame(Frame::new().fill(palette.panel).inner_margin(Margin::ZERO));
+        .frame(
+            Frame::new()
+                .fill(palette.sidebar())
+                .inner_margin(Margin::ZERO),
+        );
     let response = panel.show(ui, |ui| {
         header(app, ui);
+        super::banner(app, ui);
         list(app, ui);
     });
     let width = response.response.rect.width();
@@ -47,6 +52,7 @@ pub fn full_show(app: &mut App, ui: &mut egui::Ui) {
         .frame(Frame::new().fill(palette.panel).inner_margin(Margin::ZERO))
         .show(ui, |ui| {
             header(app, ui);
+            super::banner(app, ui);
             list(app, ui);
         });
 }
@@ -146,11 +152,12 @@ fn header(app: &mut App, ui: &mut egui::Ui) {
                         {
                             app.actions.push(Action::ToggleStarred);
                         }
-                        theme::text(
+                        header_title(
                             ui,
                             crate::i18n::gettext(app.locale, "Starred").as_ref(),
                             theme::bold(20.0),
                             palette.text,
+                            header_buttons(ui.ctx(), true),
                         );
                     } else if app.show_archived || app.locked_folder {
                         if theme::icon_button(
@@ -169,7 +176,7 @@ fn header(app: &mut App, ui: &mut egui::Ui) {
                                 app.actions.push(Action::CloseLockedFolder);
                             }
                         }
-                        theme::text(
+                        header_title(
                             ui,
                             if app.locked_folder {
                                 "Locked chats"
@@ -178,17 +185,19 @@ fn header(app: &mut App, ui: &mut egui::Ui) {
                             },
                             theme::bold(20.0),
                             palette.text,
+                            header_buttons(ui.ctx(), true),
                         );
                     } else {
                         // Our avatar opens the account switcher, with the
                         // profile and settings below the accounts.
                         super::accounts::avatar_button(app, ui, 34.0).tab_stop(Stop::Profile);
                         ui.add_space(2.0);
-                        theme::text(
+                        header_title(
                             ui,
-                            crate::i18n::gettext(app.locale, "Chats"),
+                            &crate::i18n::gettext(app.locale, "Chats"),
                             theme::bold(20.0),
                             palette.text,
+                            header_buttons(ui.ctx(), true),
                         );
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -290,6 +299,38 @@ fn header(app: &mut App, ui: &mut egui::Ui) {
         });
 }
 
+/// Starred messages, New chat, Settings off macOS, and the wide-window toggle.
+fn header_buttons(ctx: &egui::Context, settings: bool) -> usize {
+    2 + usize::from(settings) + usize::from(!super::narrow(ctx))
+}
+
+/// A long translated title must leave room for every header control.
+fn header_title(
+    ui: &mut egui::Ui,
+    text: &str,
+    font: egui::FontId,
+    color: egui::Color32,
+    buttons: usize,
+) {
+    let width = ui
+        .painter()
+        .layout_no_wrap(text.to_owned(), font.clone(), color)
+        .size()
+        .x;
+    if title_fits(
+        width,
+        ui.available_width(),
+        buttons,
+        ui.spacing().item_spacing.x,
+    ) {
+        theme::text(ui, text, font, color);
+    }
+}
+
+fn title_fits(width: f32, available: f32, buttons: usize, spacing: f32) -> bool {
+    width + buttons as f32 * (theme::ICON_BUTTON + spacing) + spacing <= available
+}
+
 /// Where the chat list header's first row was laid out, for layout tests.
 pub(crate) fn header_row_id() -> egui::Id {
     egui::Id::new("chat-list-header-row")
@@ -322,11 +363,12 @@ fn macos_header(app: &mut App, ui: &mut egui::Ui) {
                     {
                         app.actions.push(Action::ToggleStarred);
                     }
-                    theme::text(
+                    header_title(
                         ui,
                         crate::i18n::gettext(app.locale, "Starred").as_ref(),
                         theme::bold(16.0),
                         palette.text,
+                        header_buttons(ui.ctx(), false),
                     );
                 } else if app.show_archived || app.locked_folder {
                     if theme::icon_button(
@@ -345,7 +387,7 @@ fn macos_header(app: &mut App, ui: &mut egui::Ui) {
                             app.actions.push(Action::CloseLockedFolder);
                         }
                     }
-                    theme::text(
+                    header_title(
                         ui,
                         if app.locked_folder {
                             "Locked chats"
@@ -354,17 +396,19 @@ fn macos_header(app: &mut App, ui: &mut egui::Ui) {
                         },
                         theme::bold(16.0),
                         palette.text,
+                        header_buttons(ui.ctx(), false),
                     );
                 } else {
                     // Our avatar opens the account switcher here as on the
                     // other platforms, after the traffic lights' inset.
                     super::accounts::avatar_button(app, ui, 30.0).tab_stop(Stop::Profile);
                     ui.add_space(2.0);
-                    theme::text(
+                    header_title(
                         ui,
-                        crate::i18n::gettext(app.locale, "Chats"),
+                        &crate::i18n::gettext(app.locale, "Chats"),
                         theme::bold(20.0),
                         palette.text,
+                        header_buttons(ui.ctx(), false),
                     );
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -455,6 +499,20 @@ pub(super) const CHIP_FADE: f32 = 16.0;
 /// Filter chips under the search field. Search lists every match, so the
 /// chips hide there.
 fn filter_chips(app: &mut App, ui: &mut egui::Ui) {
+    if app.account().settings.focus_enabled {
+        let palette = app.palette;
+        if theme::soft_button(
+            ui,
+            &palette,
+            Some(Icon::X),
+            &crate::i18n::gettext(app.locale, "Leave focus mode"),
+            false,
+        )
+        .clicked()
+        {
+            app.actions.push(Action::SetFocusMode(false));
+        }
+    }
     if app.show_starred {
         // The starred panel replaces the chat list, so its filters go with it.
         return;
@@ -566,7 +624,11 @@ fn filter_chips(app: &mut App, ui: &mut egui::Ui) {
     // scrolls on.
     let hidden = output.content_size.x - output.state.offset.x - output.inner_rect.width();
     if hidden > 0.5 {
-        widgets::fade_right(ui, output.inner_rect, CHIP_FADE, palette.panel);
+        // A translucent sidebar would show the fade as a band; the chips
+        // are only cut there.
+        if !palette.vibrant() {
+            widgets::fade_right(ui, output.inner_rect, CHIP_FADE, palette.panel);
+        }
     }
     labels::chip_row(app, ui, &palette);
 }
@@ -1420,7 +1482,7 @@ fn row(app: &mut App, ui: &mut egui::Ui, chat: &Chat) -> egui::Response {
             egui::WidgetType::SelectableLabel,
             ui.is_enabled(),
             selected,
-            unread_announcement(&title, chat),
+            unread_announcement(if hidden_name { "Chat" } else { &title }, chat),
         )
     });
     if ui.is_rect_visible(rect) {
@@ -1593,6 +1655,13 @@ fn row(app: &mut App, ui: &mut egui::Ui, chat: &Chat) -> egui::Response {
                 sender.paint(ui, pos2(x, line_y), preview_color);
                 x += width;
                 cover_left = x;
+            }
+            if let Some(media) = last.media
+                && badge_right - x >= 22.0
+            {
+                let rect = Rect::from_min_size(pos2(x, line_y), Vec2::splat(16.0));
+                theme::paint_icon(ui, preview_media_icon(media), rect, 14.0, preview_color);
+                x += 20.0;
             }
             let words = widgets::line(
                 ui,
@@ -1767,7 +1836,11 @@ pub fn compact_show(app: &mut App, ui: &mut egui::Ui) {
         .resizable(false)
         .exact_size(compact_width(ui.ctx()))
         .show_separator_line(false)
-        .frame(Frame::new().fill(palette.panel).inner_margin(Margin::ZERO));
+        .frame(
+            Frame::new()
+                .fill(palette.sidebar())
+                .inner_margin(Margin::ZERO),
+        );
     let response = panel.show(ui, |ui| {
         let inset = theme::traffic_light_inset(ui.ctx());
         if inset > 0.0 {
@@ -1776,6 +1849,7 @@ pub fn compact_show(app: &mut App, ui: &mut egui::Ui) {
                 ui.allocate_exact_size(vec2(ui.available_width(), COMPACT_HEADER), Sense::hover());
             super::titlebar_drag(ui, strip);
         }
+        super::banner(app, ui);
         ui.allocate_ui_with_layout(
             vec2(
                 ui.available_width(),
@@ -1943,7 +2017,7 @@ fn compact_row(app: &mut App, ui: &mut egui::Ui, chat: &Chat) -> egui::Response 
             egui::WidgetType::SelectableLabel,
             ui.is_enabled(),
             selected,
-            unread_announcement(&title, chat),
+            unread_announcement(if hidden_name { "Chat" } else { &title }, chat),
         )
     });
     if ui.is_rect_visible(rect) {
@@ -2090,6 +2164,18 @@ fn context_menu(app: &mut App, ui: &mut egui::Ui, chat: &Chat, palette: &Palette
         }
     }
     sound_menu(app, ui, palette, chat);
+    let vip = app.account().settings.vip_chats.contains(&chat.id);
+    let vip_label = if vip {
+        crate::i18n::gettext(app.locale, "Remove VIP indicator")
+    } else {
+        crate::i18n::gettext(app.locale, "Mark as VIP")
+    };
+    if widgets::menu_item(ui, palette, Some(Icon::Star), &vip_label) {
+        app.actions.push(Action::SetVipChat {
+            chat: chat.id.clone(),
+            enabled: !vip,
+        });
+    }
     labels::chat_menu(app, ui, chat, palette);
     if widgets::menu_item(
         ui,
@@ -2138,6 +2224,18 @@ fn unread_announcement(title: &str, chat: &Chat) -> String {
         format!("{title}, unread")
     } else {
         format!("{title}, {} unread messages", chat.unread)
+    }
+}
+
+fn preview_media_icon(media: crate::model::PreviewMedia) -> Icon {
+    use crate::model::PreviewMedia;
+    match media {
+        PreviewMedia::Image => Icon::Image,
+        PreviewMedia::Video => Icon::Video,
+        PreviewMedia::Audio => Icon::Music,
+        PreviewMedia::Voice => Icon::Mic,
+        PreviewMedia::Document => Icon::FileText,
+        PreviewMedia::Sticker => Icon::Sticker,
     }
 }
 
@@ -2217,6 +2315,15 @@ fn sound_menu(app: &mut App, ui: &mut egui::Ui, palette: &Palette, chat: &Chat) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn header_titles_leave_room_for_all_buttons() {
+        assert!(title_fits(100.0, 222.0, 3, 8.0));
+        assert!(!title_fits(100.0, 221.0, 3, 8.0));
+        assert!(!title_fits(100.0, 222.0, 4, 8.0));
+        assert!(title_fits(100.0, 260.0, 4, 8.0));
+    }
+
     use crate::paths::AppDirs;
     use crate::settings::Settings;
 

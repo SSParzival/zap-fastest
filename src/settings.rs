@@ -5,6 +5,28 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+/// Folder layout for downloaded attachments, independent of the private archive.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DownloadOrganization {
+    #[default]
+    Flat,
+    ByChat,
+    ByChatMonth,
+}
+
+impl DownloadOrganization {
+    pub const ALL: [Self; 3] = [Self::Flat, Self::ByChat, Self::ByChatMonth];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Flat => "One folder",
+            Self::ByChat => "Account and chat",
+            Self::ByChatMonth => "Account, chat and month",
+        }
+    }
+}
+
 /// Verifying the locked-chat code costs about 20 ms, paid once per distinct
 /// typed string. ponytail: fixed cost, revisit if it lags the search field.
 const CHAT_LOCK_ROUNDS: std::num::NonZeroU32 = std::num::NonZeroU32::new(200_000).unwrap();
@@ -33,16 +55,23 @@ pub enum ThemeChoice {
     Dark,
     Light,
     System,
+    /// macOS's greys, light or dark as the system is, with bubbles shaped as
+    /// Messages draws them.
+    Messages,
 }
 
 impl ThemeChoice {
-    pub const ALL: [ThemeChoice; 3] = [Self::System, Self::Light, Self::Dark];
+    /// The choices Settings offers, on every platform. Messages shows the
+    /// desktop through its window where the platform can, and is opaque in
+    /// its own colours elsewhere (see [`crate::backdrop`]).
+    pub const ALL: &[ThemeChoice] = &[Self::System, Self::Light, Self::Dark, Self::Messages];
 
     pub fn label(self) -> &'static str {
         match self {
             Self::Dark => "Dark",
             Self::Light => "Light",
             Self::System => "Follow system",
+            Self::Messages => "Messages",
         }
     }
 }
@@ -466,8 +495,15 @@ pub struct Settings {
     #[serde(default)]
     pub version: u32,
     pub theme: ThemeChoice,
+    /// Whether a `"system"` theme is really Messages. The file says
+    /// `"system"` for Messages, which releases before it read as Follow
+    /// system instead of rejecting the whole file; this marks the rest.
+    #[serde(skip_serializing)]
+    pub(crate) messages_theme: bool,
     /// The interface's typeface.
     pub font: FontChoice,
+    /// Process-owned copy of a chosen interface font.
+    pub custom_font: Option<std::path::PathBuf>,
     /// Renderer applied before any emoji are used at startup.
     pub emoji_renderer: EmojiRenderer,
     /// Interface language. `None` follows the operating system's locale.
@@ -488,12 +524,19 @@ pub struct Settings {
     pub system_theme_cache: Option<crate::theme::CustomTheme>,
     /// egui zoom factor.
     pub zoom: f32,
+    /// Text size independent of window and control zoom.
+    pub text_scale: f32,
+    pub tray_unread_numbers: bool,
+    pub tray_vip: bool,
     pub sidebar_width: f32,
     /// Width of the search pane beside the open chat.
     pub search_pane_width: f32,
     /// Whether Enter sends. Off, Enter adds a line and Ctrl+Enter (Cmd+Enter
     /// on macOS) sends.
     pub enter_sends: bool,
+    /// Ctrl+W (Command+W on macOS) closes the visible chat instead of the window.
+    /// Off preserves the existing window-close shortcut on every platform.
+    pub close_chat_with_ctrl_w: bool,
     /// Keep the chat list's scroll position after sending instead of jumping
     /// to the top. Off by default, matching the usual WhatsApp behavior.
     pub keep_chat_list_position: bool,
@@ -545,6 +588,10 @@ pub struct Settings {
     /// Folder for new downloads. `None` keeps them in the cache. Files
     /// already downloaded stay where they are when this changes.
     pub download_folder: Option<std::path::PathBuf>,
+    /// Layout of future downloads in a user-selected folder. Existing files stay put.
+    pub download_organization: DownloadOrganization,
+    /// Include the chat, message date and media type in future download names.
+    pub descriptive_download_names: bool,
     /// Archived chats stay archived when a message arrives or is sent, as
     /// with the phone's "Keep chats archived". Off, a new message brings the
     /// chat back to the list.
@@ -605,16 +652,22 @@ impl Default for Settings {
         Self {
             version: SETTINGS_VERSION,
             theme: ThemeChoice::Dark,
+            messages_theme: false,
             font: FontChoice::System,
+            custom_font: None,
             emoji_renderer: EmojiRenderer::System,
             interface_language: None,
             custom_theme: None,
             custom_theme_cache: None,
             system_theme_cache: None,
             zoom: 1.0,
+            text_scale: 1.0,
+            tray_unread_numbers: false,
+            tray_vip: false,
             sidebar_width: 320.0,
             search_pane_width: 380.0,
             enter_sends: true,
+            close_chat_with_ctrl_w: false,
             keep_chat_list_position: false,
             convert_typed_emoticons: false,
             send_read_receipts: true,
@@ -637,6 +690,8 @@ impl Default for Settings {
             mention_sound: NotificationSound::Alert,
             group_sounds: true,
             download_folder: None,
+            download_organization: DownloadOrganization::Flat,
+            descriptive_download_names: false,
             keep_chats_archived: true,
             proxy: String::new(),
             check_for_updates: true,
@@ -755,16 +810,33 @@ impl Settings {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let contents = serde_json::to_string_pretty(self).map_err(std::io::Error::other)?;
+        let contents =
+            serde_json::to_string_pretty(&self.to_file()?).map_err(std::io::Error::other)?;
         let temp = path.with_extension("json.tmp");
         std::fs::write(&temp, contents)?;
         std::fs::rename(&temp, path)
+    }
+
+    /// The settings as the file stores them: Messages is written as Follow
+    /// system plus a mark, so older releases still read the file.
+    fn to_file(&self) -> std::io::Result<serde_json::Value> {
+        let mut value = serde_json::to_value(self).map_err(std::io::Error::other)?;
+        if self.theme == ThemeChoice::Messages
+            && let Some(fields) = value.as_object_mut()
+        {
+            fields.insert("theme".into(), serde_json::to_value(ThemeChoice::System)?);
+            fields.insert("messages_theme".into(), true.into());
+        }
+        Ok(value)
     }
 
     /// Brings a file written before [`SETTINGS_VERSION`] up to date. Each
     /// step runs once: the next save records the version, so a colour chosen
     /// again afterwards is kept.
     fn migrate(&mut self) {
+        if std::mem::take(&mut self.messages_theme) && self.theme == ThemeChoice::System {
+            self.theme = ThemeChoice::Messages;
+        }
         if self.version < 1 {
             // Old files store every field, so a default colour cannot be told
             // from a chosen one; the old defaults move to the new one.
@@ -839,10 +911,33 @@ impl Settings {
     }
 }
 
+/// History requested when pairing a companion, independently of later recovery.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SyncMode {
+    Recent,
+    Full,
+}
+
 /// Preferences that belong to one WhatsApp account.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AccountSettings {
+    /// Explicit local read/watch/send automation authority, disabled by default.
+    pub cli_access: bool,
+    /// A restored archive is permanently offline and never starts a protocol session.
+    pub archive_only: bool,
+    pub call_microphone: Option<String>,
+    pub call_speaker: Option<String>,
+    /// None means a new, unpaired account still needs its setup choice.
+    pub sync_mode: Option<SyncMode>,
+    /// Fetch attachments into the managed account archive without opening chats.
+    pub archive_media: bool,
+    /// Background archival downloads pause at this size, without deleting files.
+    /// Zero means unlimited. Applies only to the account's managed media folder.
+    pub background_media_budget_mib: u32,
+    /// Maximum automatic full-history requests per UTC day; saved across restarts.
+    pub history_requests_per_day: u32,
     /// Recover a bounded amount of phone history without opening each chat.
     pub background_history: bool,
     pub send_read_receipts: bool,
@@ -851,6 +946,8 @@ pub struct AccountSettings {
     pub auto_download: bool,
     pub last_chat: Option<String>,
     pub notifications: bool,
+    /// Local notification cards in the visible window, off unless requested.
+    pub in_app_notifications: bool,
     /// Which chats notify once, then stay quiet for ten minutes.
     pub limit_notifications: NotificationLimit,
     pub notification_sender: bool,
@@ -858,22 +955,48 @@ pub struct AccountSettings {
     pub save_contacts_to_phone: bool,
     /// This account's copy of the chosen chat wallpaper image.
     pub wallpaper_image: Option<std::path::PathBuf>,
+    /// Last normal list; searches, archive and locked folders are transient.
+    pub last_filter: crate::model::ChatFilter,
+    pub last_label: Option<String>,
+    pub vip_chats: Vec<String>,
+    pub focus_enabled: bool,
+    pub focus_labels: Vec<String>,
+    /// Mentions/replies may notify outside the selected focus labels.
+    pub focus_mentions: bool,
+    /// First label in the label manager with an override wins overlaps.
+    pub label_sounds: std::collections::BTreeMap<String, NotificationSound>,
 }
 
 impl Default for AccountSettings {
     fn default() -> Self {
         Self {
+            cli_access: false,
+            sync_mode: None,
+            archive_only: false,
+            call_microphone: None,
+            call_speaker: None,
+            archive_media: false,
+            background_media_budget_mib: 20 * 1024,
+            history_requests_per_day: 1000,
             background_history: false,
             send_read_receipts: true,
             send_typing: true,
             auto_download: true,
             last_chat: None,
             notifications: true,
+            in_app_notifications: false,
             limit_notifications: NotificationLimit::Off,
             notification_sender: true,
             notification_content: true,
             save_contacts_to_phone: true,
             wallpaper_image: None,
+            last_filter: crate::model::ChatFilter::All,
+            last_label: None,
+            vip_chats: Vec::new(),
+            focus_enabled: false,
+            focus_labels: Vec::new(),
+            focus_mentions: true,
+            label_sounds: Default::default(),
         }
     }
 }
@@ -881,17 +1004,33 @@ impl Default for AccountSettings {
 impl AccountSettings {
     pub fn from_legacy(settings: &Settings) -> Self {
         Self {
+            cli_access: false,
+            sync_mode: None,
+            archive_only: false,
+            call_microphone: None,
+            call_speaker: None,
+            archive_media: false,
+            background_media_budget_mib: 20 * 1024,
+            history_requests_per_day: 1000,
             background_history: false,
             send_read_receipts: settings.send_read_receipts,
             send_typing: settings.send_typing,
             auto_download: settings.auto_download,
             last_chat: settings.last_chat.clone(),
             notifications: settings.notifications,
+            in_app_notifications: false,
             limit_notifications: NotificationLimit::Off,
             notification_sender: true,
             notification_content: true,
             save_contacts_to_phone: settings.save_contacts_to_phone,
             wallpaper_image: settings.wallpaper_image.clone(),
+            last_filter: crate::model::ChatFilter::All,
+            last_label: None,
+            vip_chats: Vec::new(),
+            focus_enabled: false,
+            focus_labels: Vec::new(),
+            focus_mentions: true,
+            label_sounds: Default::default(),
         }
     }
 
@@ -913,6 +1052,30 @@ impl AccountSettings {
         let temp = path.with_extension("json.tmp");
         std::fs::write(&temp, contents)?;
         std::fs::rename(&temp, path)
+    }
+}
+
+#[cfg(test)]
+mod list_preference_tests {
+    use super::*;
+
+    #[test]
+    fn old_and_unknown_filter_preferences_preserve_other_account_settings() {
+        let old: AccountSettings = serde_json::from_str(r#"{"notifications":false}"#).unwrap();
+        assert_eq!(old.last_filter, crate::model::ChatFilter::All);
+        let unknown: AccountSettings =
+            serde_json::from_str(r#"{"notifications":false,"last_filter":"FutureFilter"}"#)
+                .unwrap();
+        assert_eq!(unknown.last_filter, crate::model::ChatFilter::All);
+        assert!(!unknown.notifications);
+        let grouped = AccountSettings {
+            last_filter: crate::model::ChatFilter::Groups,
+            last_label: Some("synthetic".into()),
+            ..AccountSettings::default()
+        };
+        let read_back: AccountSettings =
+            serde_json::from_str(&serde_json::to_string(&grouped).unwrap()).unwrap();
+        assert_eq!(read_back, grouped);
     }
 }
 
@@ -969,9 +1132,14 @@ impl AccountRoster {
             std::fs::create_dir_all(parent)?;
         }
         let contents = serde_json::to_string_pretty(self).map_err(std::io::Error::other)?;
-        let temp = path.with_extension("json.tmp");
-        std::fs::write(&temp, contents)?;
-        std::fs::rename(&temp, path)
+        let mut temporary = tempfile::NamedTempFile::new_in(
+            path.parent()
+                .ok_or_else(|| std::io::Error::other("Account roster has no parent"))?,
+        )?;
+        std::io::Write::write_all(&mut temporary, contents.as_bytes())?;
+        temporary.as_file().sync_all()?;
+        crate::archive::backup::durable_move(temporary.path(), path, true)
+            .map_err(std::io::Error::other)
     }
 
     pub fn allocate(&mut self) -> crate::model::AccountId {
@@ -1021,6 +1189,34 @@ mod tests {
     /// Settings written before the font could be chosen draw with the
     /// platform's; the choice is saved by name.
     #[test]
+    fn close_chat_shortcut_defaults_to_window_and_round_trips() {
+        let older: Settings = serde_json::from_str(r#"{"theme":"light"}"#).unwrap();
+        assert!(!older.close_chat_with_ctrl_w);
+        let chosen = Settings {
+            close_chat_with_ctrl_w: true,
+            ..Settings::default()
+        };
+        let saved = serde_json::to_string(&chosen).unwrap();
+        let restored: Settings = serde_json::from_str(&saved).unwrap();
+        assert!(restored.close_chat_with_ctrl_w);
+    }
+
+    #[test]
+    fn custom_font_defaults_and_round_trips() {
+        let old: Settings = serde_json::from_str(r#"{"theme":"light"}"#).unwrap();
+        assert!(old.custom_font.is_none());
+        let picked: Settings = serde_json::from_str(r#"{"custom_font":"/x/font.ttf"}"#).unwrap();
+        assert_eq!(
+            picked.custom_font.as_deref(),
+            Some(std::path::Path::new("/x/font.ttf"))
+        );
+        assert_eq!(
+            serde_json::to_value(picked).unwrap()["custom_font"],
+            "/x/font.ttf"
+        );
+    }
+
+    #[test]
     fn the_font_defaults_to_the_platform_and_is_saved_by_name() {
         let older: Settings = serde_json::from_str(r#"{"theme":"light"}"#).unwrap();
         assert_eq!(older.font, FontChoice::System);
@@ -1042,6 +1238,44 @@ mod tests {
         let saved = serde_json::to_value(&disabled).unwrap();
         assert_eq!(saved["restore_last_chat"], false);
         assert_eq!(saved["last_chat"], "chat");
+    }
+
+    /// The Messages theme is saved by name, and palettes cached before
+    /// bubble styles existed keep WhatsApp's bubbles.
+    #[test]
+    fn messages_theme_round_trips_and_old_palettes_keep_whatsapp_bubbles() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let settings = Settings {
+            theme: ThemeChoice::Messages,
+            ..Settings::default()
+        };
+        settings.save(&path).unwrap();
+        // Releases before Messages read the file, and see Follow system.
+        let written: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(written["theme"], "system");
+        assert_eq!(written["messages_theme"], true);
+        assert_eq!(Settings::load(&path).theme, ThemeChoice::Messages);
+        // Follow system stays Follow system, without the mark.
+        let system = Settings {
+            theme: ThemeChoice::System,
+            ..Settings::default()
+        };
+        system.save(&path).unwrap();
+        assert!(
+            !std::fs::read_to_string(&path)
+                .unwrap()
+                .contains("messages_theme")
+        );
+        assert_eq!(Settings::load(&path).theme, ThemeChoice::System);
+        // Files written by development builds before this still load.
+        let parsed: Settings = serde_json::from_str(r#"{"theme":"messages"}"#).expect("parses");
+        assert_eq!(parsed.theme, ThemeChoice::Messages);
+        let mut cached = serde_json::to_value(crate::theme::Palette::dark()).unwrap();
+        cached.as_object_mut().unwrap().remove("bubbles");
+        let cached: crate::theme::Palette = serde_json::from_value(cached).unwrap();
+        assert_eq!(cached.bubbles, crate::theme::BubbleStyle::WhatsApp);
     }
 
     #[test]
@@ -1461,5 +1695,28 @@ mod giphy_tests {
             assert_eq!(limit.applies(false), direct, "{limit:?} for direct chats");
             assert_eq!(limit.applies(true), group, "{limit:?} for groups");
         }
+    }
+}
+
+#[cfg(test)]
+mod automation_settings_tests {
+    use super::*;
+    #[test]
+    fn cli_authority_is_opt_in_and_account_persisted() {
+        assert!(!AccountSettings::default().cli_access);
+        assert!(
+            !serde_json::from_str::<AccountSettings>("{}")
+                .unwrap()
+                .cli_access
+        );
+        let settings = AccountSettings {
+            cli_access: true,
+            ..Default::default()
+        };
+        assert!(
+            serde_json::from_str::<AccountSettings>(&serde_json::to_string(&settings).unwrap())
+                .unwrap()
+                .cli_access
+        );
     }
 }

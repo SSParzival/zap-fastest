@@ -171,6 +171,7 @@ pub(super) struct Control {
     card: Option<usize>,
     total: Option<u64>,
     limit: u64,
+    motion: bool,
 }
 
 impl Control {
@@ -192,6 +193,7 @@ impl Control {
         limit: u64,
     ) -> Self {
         Self {
+            motion: false,
             token,
             commands,
             chat,
@@ -207,6 +209,11 @@ impl Control {
     pub fn cancel(&self) {
         self.cancelled.store(true, Ordering::Release);
         self.wake.notify_one();
+    }
+
+    pub fn for_motion(mut self) -> Self {
+        self.motion = true;
+        self
     }
     pub fn cancelled(&self) -> bool {
         self.cancelled.load(Ordering::Acquire)
@@ -234,6 +241,16 @@ impl Control {
         }
     }
     pub fn progress(&self, bytes: u64) {
+        if self.motion {
+            let _ = self.commands.send(Command::MotionTransferProgress {
+                chat: self.chat.clone(),
+                message: self.message.clone(),
+                token: self.token,
+                bytes,
+                total: self.total,
+            });
+            return;
+        }
         let _ = self.commands.send(Command::TransferProgress {
             chat: self.chat.clone(),
             message: self.message.clone(),
@@ -406,6 +423,48 @@ mod tests {
         let path = writer.path.clone();
         drop(writer);
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn motion_progress_keeps_its_message_identity_and_stream_cleanup() {
+        let (_directory, mut writer, mut receiver) = writer(8);
+        writer.control = writer.control.clone().for_motion();
+        writer.write_all(&[1; 4]).unwrap();
+        assert!(matches!(
+            receiver.try_recv(),
+            Ok(Command::MotionTransferProgress {
+                token: 42,
+                bytes: 4,
+                total: Some(8),
+                ..
+            })
+        ));
+        writer.control.cancel();
+        assert_eq!(
+            writer.write(&[2]).unwrap_err().kind(),
+            io::ErrorKind::Interrupted
+        );
+        let path = writer.path.clone();
+        drop(writer);
+        assert!(!path.exists());
+    }
+
+    #[tokio::test]
+    async fn motion_cancellation_interrupts_a_waiting_network_operation() {
+        let (_directory, writer, _) = writer(8);
+        let control = writer.control.clone().for_motion();
+        let operation = control.run(
+            Duration::from_secs(60),
+            std::future::pending::<Result<(), String>>(),
+        );
+        tokio::pin!(operation);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(1), &mut operation)
+                .await
+                .is_err()
+        );
+        control.cancel();
+        assert_eq!(operation.await.unwrap_err(), "Download cancelled");
     }
 
     #[test]

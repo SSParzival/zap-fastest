@@ -1,0 +1,35 @@
+# Keeping a WhatsApp archive
+
+Zap Faster connects directly from your computer using [whatsapp-rust](https://github.com/oxidezap/whatsapp-rust). It does not use Baileys or a hosted backend. Each linked account has its own encrypted message archive and media folder.
+
+Before linking a new account, choose **Recent sync** or **Full sync**. Recent keeps the ordinary linking behavior. Full requests the larger initial history profile, then continues requesting older messages across eligible chats, including archived chats. Full also enables background attachment recovery. It can take a long time and use substantial internet traffic and disk space. Keep your phone connected when possible.
+
+Full means requesting everything the phone and WhatsApp make available. It cannot guarantee your entire lifetime of messages or recover media that neither the servers nor your phone can supply. The supported initial full profile asks for 365 days; older pages use the phone's on-demand history API. The [protocol library documents the pairing profile](https://github.com/oxidezap/whatsapp-rust/blob/94c53e833805c58c9f5966b08d08c990650a651e/wacore/src/store/device.rs).
+
+In Settings, you can change the recovery mode, turn background media recovery on or off, set a daily history request budget, and set the background media storage budget. Changing the mode on an existing link changes background recovery immediately. The initial pairing profile changes only when that account is linked again. Relinking is never automatic.
+
+History requests are paced, rotate between chats, and save their request budget and retry progress across restarts. Locked chats and locally deleted history remain protected. Recovery pauses while the app is locked. Opening a chat or requesting a history repair takes priority over automatic recovery. A phone that has not answered is not proof that history is complete.
+
+Background attachments go into the account's managed media folder, independently of the chat currently open. The queue persists across restarts and handles ordinary attachments, carousel images, and motion clips. Two background jobs can run at once. The automatic 64 MiB attachment limit applies; larger files remain available through explicit downloads where supported. Expired ordinary attachments and motion clips ask the phone to re-upload once. Motion clips retained by older versions may lack their original clip message identity; those clips can still download while available, but cannot safely request a re-upload after they expire. A later history delivery can supply the missing identity.
+
+The background media budget defaults to 20 GiB per account. Reaching it pauses new background downloads and keeps existing files. Set it to zero for unlimited recovery, or increase it to continue. Usage includes every file already in the account's managed media folder, including manual downloads, staging files and files left by older versions. Files outside that folder are separate from this budget. The scheduler reserves the maximum automatic attachment size for each running job, so it may pause shortly before the exact limit. This budget does not delete files or block an explicit manual download.
+
+While recovery is enabled and the account is connected and unlocked, completed jobs are checked in batches of up to 32. Each scan resumes after restart and waits five minutes between completed rounds. A confirmed missing file in this account's managed folder is queued again; external files, links and unreadable paths are preserved. New motion clip identities or changed attachment source bytes can retry an unavailable job. Repeating the same history snapshot does not reset retries, and user-cancelled jobs stay paused.
+
+Files settings shows completed, waiting, cancelled, and unavailable media counts, managed storage usage, and the oldest saved message date. Unavailable includes files above the automatic size limit and legacy clips without recovery identities; it does not prove that WhatsApp has no copy. Phone history status describes requests and responses observed in the current session, not whether your phone is online. These observations do not prove that every WhatsApp message or attachment has arrived.
+
+Motion clip downloads use the same verified streaming transfer and two-transfer limit as ordinary attachments. Click a downloading clip's cancel button to stop it. Cancelling a background file keeps that job paused across restarts; an explicit download can recover it later. Closing the connection or preparing a backup cancels running transfers without permanently cancelling their background jobs.
+
+Before acknowledging downloaded history, Zap Faster stages its compressed bytes in the encrypted archive through the library's [history capture hook](https://github.com/oxidezap/whatsapp-rust/blob/94c53e833805c58c9f5966b08d08c990650a651e/src/types/durability_hook.rs). Unindexed chunks replay after restart and retry after a failed storage write while the app stays open. The staging payload is released only after supported message and side-entry writes succeed and message rows have been read back; only its receipt digest remains. This prevents staging from becoming a second retained copy of messages deleted later. Unsupported entries and malformed message envelopes are deliberately skipped by the parser and are not counted as recovered messages. A chunk that cannot be decompressed or parsed remains staged instead of being marked recovered.
+
+Use [organized downloads](download-organization.md) for readable copies in your chosen folder, and [encrypted backups](archive-backups.md) to carry the archive and downloaded attachments to another computer. Existing files are not silently rearranged.
+
+Restart replay preserves chat metadata already stored, so an older staged chunk cannot overwrite newer chat names and preferences. History does not carry a reliable generation stamp for every chat field. If an initial metadata update failed after the chat already existed, replay may recover the messages without restoring every old snapshot preference.
+
+Logging out records a durable cleanup intent before deleting account data. If archive or account-file cleanup fails, linking waits until cleanup succeeds, including after restart. Old capture writers and queued protocol callbacks cannot publish into the next linked identity. A saved archive without a linked device identity is preserved and cannot be used for a fresh pairing in that slot; back it up or open it offline, and use another account slot to link.
+
+Completed background job counts record prior successful fetches; they do not audit
+files deleted outside Zap Faster. Jobs marked unavailable do not automatically
+requeue when later history supplies a missing motion identity. An explicit retry
+can recover the file. These remaining recovery gaps do not establish that
+WhatsApp has lost the attachment.

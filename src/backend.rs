@@ -151,6 +151,33 @@ pub struct CreatedPoll {
 
 #[derive(Debug)]
 pub enum Command {
+    Automation(crate::automation::Pending),
+    StartCall {
+        chat: ChatId,
+    },
+    StartVideoCall {
+        chat: ChatId,
+    },
+    CallPrepared {
+        generation: u64,
+        result: Result<Box<crate::calls::Call>, String>,
+    },
+    CallVideoPrepared {
+        generation: u64,
+        result: Result<Box<crate::camera::VideoSession>, String>,
+    },
+    AnswerCall,
+    AnswerVideoCall,
+    DeclineCall,
+    HangupCall,
+    SetCallMuted(bool),
+    SetCallVideo(bool),
+    SetCallMicrophone(Option<String>),
+    SetCallSpeaker(Option<String>),
+    LoadCallLog,
+    RefreshAudioDevices,
+    CallDevicesDiscovered(crate::calls::DeviceList),
+    CallPrivacyPaused(bool),
     LoadGallery {
         chat: ChatId,
         token: u64,
@@ -363,8 +390,12 @@ pub enum Command {
         name: String,
     },
     /// Account-local opt-in recovery; paused while the app is locked.
+    ConfigureSync(crate::settings::SyncMode),
     BackgroundHistory {
+        daily_budget: u32,
+        media_budget_mib: u32,
         enabled: bool,
+        media: bool,
         paused: bool,
         focused: Option<ChatId>,
     },
@@ -450,6 +481,17 @@ pub enum Command {
     },
     /// Syncs chat mute state. `Some(0)` is indefinite and `None` unmutes.
     SetMuted(ChatId, Option<i64>),
+    SetDisappearingTimer {
+        chat: ChatId,
+        seconds: u32,
+    },
+    DisappearingTimerSet {
+        generation: u64,
+        chat: ChatId,
+        seconds: u32,
+        requested_at: i64,
+        error: Option<String>,
+    },
     /// Locks or unlocks a chat (the locked folder).
     SetLocked(ChatId, bool),
     /// Creates a label; the worker owns the clock for its id.
@@ -552,6 +594,8 @@ pub enum Command {
         about: Option<String>,
     },
     /// Asks for a picture and makes it our profile picture.
+    PickLocalAvatar(ChatId),
+    ResetLocalAvatar(ChatId),
     PickProfilePicture,
     /// Internal: a picked picture, cropped and encoded as JPEG.
     SetProfilePicture(Vec<u8>),
@@ -581,6 +625,13 @@ pub enum Command {
     },
     /// Where new downloads go; `None` is the cache.
     SetDownloadFolder(Option<std::path::PathBuf>),
+    ExportArchiveBackup(crate::archive::backup::BackupPassphrase),
+    /// Explicitly resume a restored, currently offline linked-device session.
+    ResumeRestoredAccount,
+    SetDownloadOrganization {
+        organization: crate::settings::DownloadOrganization,
+        descriptive_names: bool,
+    },
     /// Whether archived chats stay archived when a new message arrives or is
     /// sent; when not, a new message unarchives the chat here.
     SetKeepChatsArchived(bool),
@@ -862,7 +913,15 @@ pub enum Command {
         token: u64,
     },
     /// Internal motion-clip download result.
+    MotionTransferProgress {
+        chat: ChatId,
+        message: String,
+        token: u64,
+        bytes: u64,
+        total: Option<u64>,
+    },
     MotionDownloaded {
+        token: u64,
         chat: ChatId,
         id: String,
         result: Result<PathBuf, String>,
@@ -911,6 +970,12 @@ pub enum Command {
         recipients: Vec<String>,
         lids: Vec<(String, String)>,
         stored: tokio::sync::mpsc::UnboundedSender<bool>,
+    },
+    GroupCommunity {
+        chat: ChatId,
+        generation: u64,
+        request_generation: u64,
+        role: Option<crate::model::CommunityRole>,
     },
     /// Internal group metadata result.
     GroupInfo {
@@ -1008,6 +1073,13 @@ pub enum SendFailure {
 
 #[derive(Debug)]
 pub enum Event {
+    ArchiveProgress(crate::model::ArchiveRecoveryProgress),
+    Call(Box<crate::calls::CallUpdate>),
+    CallPreparing(bool),
+    CallDismissed,
+    CallDevices(Box<crate::calls::DeviceList>),
+    CallLog(Vec<crate::archive::CallRecord>),
+    ArchiveBackupFinished(Result<Option<crate::archive::backup::BackupSummary>, String>),
     Gallery {
         chat: ChatId,
         token: u64,
@@ -1030,6 +1102,12 @@ pub enum Event {
     },
 
     /// A rejected edit retains its correction and target for the composer.
+    MotionTransferProgress {
+        chat: ChatId,
+        message: String,
+        bytes: u64,
+        total: Option<u64>,
+    },
     EditRefused {
         chat: ChatId,
         id: String,
@@ -1284,6 +1362,10 @@ pub enum Event {
     DownloadFolderPicked(std::path::PathBuf),
     /// The copy of a chosen wallpaper image, or why it could not be used.
     WallpaperImagePicked(Result<std::path::PathBuf, String>),
+    LocalAvatarChanged {
+        id: ChatId,
+        result: Result<Option<PathBuf>, String>,
+    },
     /// An audio file chosen as a notification sound.
     NotificationSoundPicked {
         mention: bool,

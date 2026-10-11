@@ -71,6 +71,7 @@ pub enum Notice {
     /// Zap Faster cannot decode this video, so it should open in the system player.
     Unsupported(PathBuf),
     OutputUnavailable,
+    OutputFallback(String),
 }
 
 /// What the decoder thread hands to the interface thread.
@@ -279,14 +280,23 @@ impl Stretching {
 impl Sound {
     /// Opens the file's sound, paused at `from`. A video without a sound
     /// track, or a computer without an output device, plays silently.
-    fn open(path: &Path, from: Duration, muted: bool, speed: f32, waker: Waker) -> Option<Self> {
+    fn open(
+        path: &Path,
+        from: Duration,
+        muted: bool,
+        speed: f32,
+        waker: Waker,
+        preferred: Option<&str>,
+    ) -> Result<Option<Self>, ()> {
         // Checks there is sound to play before opening the device.
-        let decoder = sound_decoder(path, from)?;
-        let device = match crate::audio::open_output() {
+        let Some(decoder) = sound_decoder(path, from) else {
+            return Ok(None);
+        };
+        let device = match crate::audio::open_output_on(preferred) {
             Ok(device) => device,
             Err(error) => {
                 log::warn!("video plays without sound: {error}");
-                return None;
+                return Err(());
             }
         };
         let sink = rodio::Player::connect_new(device.mixer());
@@ -306,7 +316,7 @@ impl Sound {
         } else {
             sound.sink.append(decoder);
         }
-        Some(sound)
+        Ok(Some(sound))
     }
 
     /// Queues the sound again from `from`, paused. A fresh player keeps the
@@ -688,6 +698,8 @@ pub struct Player {
     side: u32,
     /// Playback speed, kept from one video to the next.
     speed: f32,
+    output_device: Option<String>,
+    pending_notice: Option<Notice>,
 }
 
 impl Player {
@@ -700,7 +712,13 @@ impl Player {
             seen: Cell::new(Instant::now()),
             side: MAX_SIDE,
             speed: 1.0,
+            output_device: None,
+            pending_notice: None,
         }
+    }
+
+    pub fn set_output_device(&mut self, device: Option<String>) {
+        self.output_device = device;
     }
 
     pub fn speed(&self) -> f32 {
@@ -862,6 +880,7 @@ impl Player {
     /// Stops playback and releases the decoder, the texture, and the device.
     pub fn stop(&mut self) {
         self.session = None;
+        self.pending_notice = None;
     }
 
     /// Whether a video is playing or about to.
@@ -933,10 +952,24 @@ impl Player {
             decoded: false,
             texture: None,
             clock,
-            sound: self
-                .audible
-                .then(|| Sound::open(path, from, self.muted, self.speed, self.waker.clone()))
-                .flatten(),
+            sound: if self.audible {
+                match Sound::open(
+                    path,
+                    from,
+                    self.muted,
+                    self.speed,
+                    self.waker.clone(),
+                    self.output_device.as_deref(),
+                ) {
+                    Ok(sound) => sound,
+                    Err(()) => {
+                        self.pending_notice = Some(Notice::OutputUnavailable);
+                        None
+                    }
+                }
+            } else {
+                None
+            },
             total: Duration::ZERO,
             side: self.side,
             resize: None,
@@ -946,6 +979,9 @@ impl Player {
     /// Takes decoded frames, shows the one that is due, and schedules the
     /// next repaint while the video plays.
     pub fn poll(&mut self, ctx: &egui::Context) -> Option<Notice> {
+        if let Some(notice) = self.pending_notice.take() {
+            return Some(notice);
+        }
         let session = self.session.as_mut()?;
         let now = Instant::now();
         if now.saturating_duration_since(self.seen.get()) > UNSEEN {
@@ -1014,11 +1050,12 @@ impl Player {
         if session.state != State::Playing {
             return None;
         }
-        if session
-            .sound
-            .as_mut()
-            .is_some_and(|sound| sound.device.route_changed())
-        {
+        if session.sound.as_mut().is_some_and(|sound| {
+            !sound
+                .device
+                .matches_preference(self.output_device.as_deref())
+                || sound.device.route_changed()
+        }) {
             let from = session.clock.position(now);
             session.sound = Sound::open(
                 &session.path,
@@ -1026,13 +1063,23 @@ impl Player {
                 self.muted,
                 self.speed,
                 self.waker.clone(),
-            );
+                self.output_device.as_deref(),
+            )
+            .ok()
+            .flatten();
             if let Some(sound) = &session.sound {
                 sound.sink.play();
             } else {
                 session.pause(now);
                 return Some(Notice::OutputUnavailable);
             }
+        }
+        if let Some(notice) = session
+            .sound
+            .as_mut()
+            .and_then(|sound| sound.device.take_notice())
+        {
+            return Some(Notice::OutputFallback(notice));
         }
         let sound = session.sound.as_ref().and_then(Sound::position);
         if let Some(sound) = sound {
@@ -1361,7 +1408,11 @@ impl Output<'_> {
 
 /// Turns one decoded frame into an upright picture no larger than `side`
 /// on its longest side.
-fn picture(yuv: &openh264::decoder::DecodedYUV<'_>, turns: u8, side: u32) -> Option<ColorImage> {
+pub(crate) fn picture(
+    yuv: &openh264::decoder::DecodedYUV<'_>,
+    turns: u8,
+    side: u32,
+) -> Option<ColorImage> {
     use openh264::formats::YUVSource;
 
     let (width, height) = yuv.dimensions();

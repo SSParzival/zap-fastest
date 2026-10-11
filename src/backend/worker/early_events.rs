@@ -30,6 +30,7 @@ pub(super) struct WaitingReaction {
     pub(super) body: HistoryReactionBody,
     /// When the reactor sent it, in milliseconds; the newest per sender wins.
     pub(super) sent_at: i64,
+    pub(super) live_activity: bool,
     queued: Instant,
 }
 
@@ -49,6 +50,7 @@ impl WaitingReaction {
             from_me,
             body,
             sent_at,
+            live_activity: false,
             queued: Instant::now(),
         }
     }

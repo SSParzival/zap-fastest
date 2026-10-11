@@ -126,10 +126,8 @@ pub struct Label {
 }
 
 /// Chat-list filter chosen from the chips under the search field.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ChatFilter {
-    #[default]
-    All,
     Unread,
     /// One-to-one chats: neither groups nor broadcasts.
     Private,
@@ -139,6 +137,9 @@ pub enum ChatFilter {
     /// Followed channels (newsletters), kept out of the other filters as in
     /// the official apps.
     Channels,
+    #[default]
+    #[serde(other)]
+    All,
 }
 
 impl ChatFilter {
@@ -175,6 +176,16 @@ impl ChatFilter {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CommunityRole {
+    Parent,
+    Member {
+        parent: ChatId,
+        announcement: bool,
+        general: bool,
+    },
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Chat {
     pub id: ChatId,
@@ -207,6 +218,7 @@ pub struct Chat {
     /// Group description: `None` until metadata is fetched, `Some("")`
     /// when fetched without a description, otherwise the original text.
     pub group_description: Option<String>,
+    pub community: Option<CommunityRole>,
     /// Whether this is an announcement group where we cannot post.
     pub read_only: bool,
     /// Whether we confirmed leaving this group or channel. Kept apart from
@@ -240,7 +252,19 @@ pub struct LastMessage {
     /// The whole message behind `summary`, every line of it: the chat row
     /// shows it in a tooltip when the one-line preview cannot.
     pub full: String,
+    /// Derived from the archived content, never inferred from preview wording.
+    pub media: Option<PreviewMedia>,
     pub status: Delivery,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PreviewMedia {
+    Image,
+    Video,
+    Audio,
+    Voice,
+    Document,
+    Sticker,
 }
 
 impl Chat {
@@ -263,6 +287,7 @@ impl Chat {
             favorite_position: 0,
             participants: Vec::new(),
             group_description: None,
+            community: None,
             read_only: false,
             left: false,
             info_locked: None,
@@ -577,6 +602,12 @@ pub struct Reaction {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum Content {
+    /// Call metadata translated by the worker; never a sendable message.
+    Call {
+        video: bool,
+        outcome: String,
+        seconds: Option<u64>,
+    },
     Text {
         text: String,
         #[serde(default)]
@@ -904,6 +935,21 @@ impl Content {
         }
     }
 
+    /// A typed media hint for chat previews, independent of translated labels.
+    pub fn preview_media(&self) -> Option<PreviewMedia> {
+        match self {
+            Self::Image { .. } => Some(PreviewMedia::Image),
+            Self::Video { .. } => Some(PreviewMedia::Video),
+            Self::Audio {
+                voice_note: true, ..
+            } => Some(PreviewMedia::Voice),
+            Self::Audio { .. } => Some(PreviewMedia::Audio),
+            Self::Document { .. } => Some(PreviewMedia::Document),
+            Self::Sticker { .. } => Some(PreviewMedia::Sticker),
+            _ => None,
+        }
+    }
+
     /// The whole message as [`Self::summary`] would label it: every line of
     /// a text or a photo or video caption. Other content has nothing more
     /// to say than its summary.
@@ -962,6 +1008,20 @@ impl Content {
 
     pub fn summary(&self) -> String {
         match self {
+            Self::Call {
+                video,
+                outcome,
+                seconds,
+            } => {
+                let kind = if *video { "Video call" } else { "Voice call" };
+                match seconds {
+                    Some(seconds) => format!(
+                        "{kind}: {outcome} ({})",
+                        crate::util::duration((*seconds).min(u32::MAX as u64) as u32)
+                    ),
+                    None => format!("{kind}: {outcome}"),
+                }
+            }
             Self::Text { text, .. } | Self::Interactive { text, .. } => {
                 text.lines().next().unwrap_or_default().to_owned()
             }
@@ -1191,6 +1251,30 @@ impl StorageStats {
             track * (bytes as f32 / total as f32)
         }
     }
+}
+
+/// Observed history request responses, not the phone's connectivity status.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum HistoryResponseState {
+    #[default]
+    Unknown,
+    Waiting,
+    Answered,
+    NoResponse,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ArchiveRecoveryProgress {
+    pub pending: u64,
+    pub paused: u64,
+    pub downloaded: u64,
+    pub unavailable: u64,
+    pub bytes: Option<u64>,
+    pub budget_reached: bool,
+    /// Aggregate archive metadata, never an inference about phone completeness.
+    pub oldest_saved: Option<i64>,
+    pub phone_history: HistoryResponseState,
+    pub connected: bool,
 }
 
 /// A motion photo's clip. Its download keys stay in the archive.
@@ -1659,6 +1743,10 @@ pub struct Gif {
 pub enum Dialog {
     Shortcuts,
     About,
+    ArchiveBackup {
+        restore: bool,
+    },
+    ResumeRestoredAccount(AccountId),
     ConfirmUnlink,
     ConfirmRemoveAccount(AccountId),
     /// Phone number used for pairing-code linking.
@@ -1709,6 +1797,11 @@ pub enum Dialog {
     /// Picks the spot to send, from coordinates or a map link.
     SendLocation(ChatId),
     PollResults {
+        chat: ChatId,
+        message: String,
+    },
+    /// Complete per-reactor details for an archived message.
+    Reactions {
         chat: ChatId,
         message: String,
     },
@@ -1885,6 +1978,21 @@ impl MessagePinDuration {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Action {
+    ToggleCallLog,
+    StartCall(ChatId),
+    StartVideoCall(ChatId),
+    AnswerCall,
+    AnswerVideoCall,
+    DeclineCall,
+    HangupCall,
+    SetCallMuted(bool),
+    SetCallVideo(bool),
+    SetCallMicrophone(Option<String>),
+    SetCallSpeaker(Option<String>),
+    RefreshAudioDevices,
+    /// Save the account's history choice before requesting its pairing code.
+    ChooseSync(crate::settings::SyncMode),
+    SetSyncMode(crate::settings::SyncMode),
     CancelQueued {
         chat: ChatId,
         id: String,
@@ -2072,6 +2180,9 @@ pub enum Action {
     ZoomImageOut,
     FitImage,
     CloseImagePreview,
+    /// Shows a downloaded sticker with a favorite toggle.
+    PreviewSticker(PathBuf),
+    CloseStickerPreview,
     OpenFile(PathBuf),
     /// Opens Zap Faster's log, or shows it in its folder when no application
     /// takes it, and says so when neither works.
@@ -2130,6 +2241,8 @@ pub enum Action {
     EndSweep,
     /// Leaves selection mode.
     CancelSelection,
+    /// Stars eligible messages in the current selection without resending content.
+    StarSelection(bool),
     /// Loads an outgoing message into the composer for editing.
     Edit(String),
     CancelEdit,
@@ -2289,6 +2402,17 @@ pub enum Action {
     ToggleSidebar,
     ToggleScreenPrivacy,
     SetChatFilter(ChatFilter),
+    SetFocusMode(bool),
+    SetVipChat {
+        chat: ChatId,
+        enabled: bool,
+    },
+    SetFocusLabels(Vec<String>),
+    SetFocusMentions(bool),
+    SetLabelSound {
+        label: String,
+        sound: Option<crate::settings::NotificationSound>,
+    },
     /// Picks the label the chat list shows; `None` shows every chat.
     SelectLabel(Option<String>),
     /// Replaces the labels worn by one chat.
@@ -2351,6 +2475,8 @@ pub enum Action {
     SetTheme(crate::settings::ThemeChoice),
     /// Draws the interface in the platform's font or in the bundled Inter.
     SetFont(crate::settings::FontChoice),
+    PickCustomFont,
+    SetCustomFont(PathBuf),
     /// Chooses the emoji source to use after restarting Zap Faster.
     SetEmojiRenderer(crate::settings::EmojiRenderer),
     SetInterfaceLanguage(Option<crate::i18n::Locale>),
@@ -2396,6 +2522,8 @@ pub enum Action {
         about: Option<String>,
     },
     /// Asks for a picture and makes it our profile picture.
+    PickLocalAvatar(ChatId),
+    ResetLocalAvatar(ChatId),
     PickProfilePicture,
     /// Opens the group name editor in the group info dialog, starting from
     /// the current name.
@@ -2413,6 +2541,13 @@ pub enum Action {
     RemoveGroupPicture(ChatId),
     /// Sets or resets (`None`) the folder for new downloads.
     SetDownloadFolder(Option<PathBuf>),
+    ExportArchiveBackup(crate::archive::backup::BackupPassphrase),
+    RestoreArchiveBackup(crate::archive::backup::BackupPassphrase),
+    ResumeRestoredAccount(AccountId),
+    SetDownloadOrganization {
+        organization: crate::settings::DownloadOrganization,
+        descriptive_names: bool,
+    },
     /// Keeps archived chats archived when a new message comes, or not.
     SetKeepChatsArchived(bool),
     /// Saves the proxy setting and reconnects. Empty follows the environment.
@@ -2420,6 +2555,7 @@ pub enum Action {
     /// Plays a notification sound once, as a preview.
     PreviewSound(crate::settings::NotificationSound),
     ZoomBy(f32),
+    SetTextScale(f32),
     ResetZoom,
     /// Requests a pairing code for a phone number.
     PairWithPhone(String),
@@ -2446,6 +2582,8 @@ pub enum Action {
     Quit,
     /// Shows the window, creating it when running headless.
     ShowWindow,
+    OpenInAppNotification(u64),
+    DismissInAppNotification(u64),
     /// Closes the window while keeping the app in the tray.
     HideWindow,
     /// Applies the configured close-button behavior.
@@ -2460,6 +2598,7 @@ pub enum Action {
     RemoveAccount(AccountId),
     /// Mutes until Unix time, indefinitely with `Some(0)`, or unmutes with `None`.
     SetMuted(ChatId, Option<i64>),
+    SetDisappearingTimer(ChatId, u32),
     /// Moves a chat into or out of the locked folder.
     SetLocked(ChatId, bool),
     /// Sends pending attachments with the composer text as caption.
@@ -3155,4 +3294,11 @@ mod tests {
         assert!(live(true).live_location_over(1_000, 1_000));
         assert!(!Content::text("hi").live_location_over(0, i64::MAX));
     }
+}
+
+/// Which side placed an account-local call.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CallDirection {
+    Incoming,
+    Outgoing,
 }

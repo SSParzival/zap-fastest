@@ -1413,7 +1413,7 @@ mod tests {
             .iter()
             .map(|(_, id)| id.as_str())
             .collect();
-        assert_eq!(started, ["s2", "s3"].into());
+        assert_eq!(started, HashSet::from(["s2", "s3"]));
     }
 
     /// Archives a sticker someone sent in `chat`, with its file on disk.

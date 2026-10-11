@@ -75,7 +75,9 @@ fn entries(app: &mut App) -> Vec<Entry> {
             let me = account.me.clone().unwrap_or_default();
             let picture = (!me.is_empty()).then(|| account.avatar(&me)).flatten();
             let name = account.display_label(locale);
-            let detail = if account.is_linked() {
+            let detail = if account.settings.archive_only {
+                gettext(locale, "Offline archive").into_owned()
+            } else if account.is_linked() {
                 account
                     .phone()
                     .filter(|phone| *phone != name)
@@ -229,8 +231,13 @@ fn row_label(app: &App, entry: &Entry) -> String {
     if entry.unread > 0 {
         label.push_str(", ");
         label.push_str(
-            &gettext(app.locale, "{count} unread chats")
-                .replace("{count}", &entry.unread.to_string()),
+            &crate::i18n::ngettext(
+                app.locale,
+                "{count} unread chat",
+                "{count} unread chats",
+                entry.unread,
+            )
+            .replace("{count}", &entry.unread.to_string()),
         );
     }
     label

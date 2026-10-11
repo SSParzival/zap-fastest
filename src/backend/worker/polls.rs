@@ -213,6 +213,7 @@ impl Worker {
                 encrypted: None,
             };
             if let Err(error) = self.archive.save_poll_vote(&vote) {
+                self.history_storage_ok.set(false);
                 log::warn!("could not store historical poll votes: {error}");
             } else {
                 accepted += 1;
@@ -243,6 +244,7 @@ impl Worker {
             && let Err(error) = self.archive.save_poll(&row.chat, &row.id, creator, secret)
         {
             log::warn!("could not save a poll definition: {error}");
+            self.history_storage_ok.set(false);
         }
     }
 
@@ -640,6 +642,7 @@ impl Worker {
             encrypted: Some(update.encode_to_vec()),
         };
         if let Err(error) = self.archive.save_poll_vote(&vote) {
+            self.history_storage_ok.set(false);
             log::warn!("could not store a poll vote: {error}");
         }
         self.pump_poll_votes();

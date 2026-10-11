@@ -9,7 +9,8 @@ use crate::qr::Qr;
 use crate::theme::{self, Icon};
 
 pub fn show(app: &mut App, ui: &mut egui::Ui) {
-    card(app, ui, "login", "A native WhatsApp client.", body);
+    let tagline = crate::i18n::gettext(app.locale, "A native WhatsApp client.");
+    card(app, ui, "login", &tagline, body);
 }
 
 /// The centred card of the linking and lock screens: the logo, the name,
@@ -77,23 +78,50 @@ pub(super) fn card(
 
 fn body(app: &mut App, ui: &mut egui::Ui) {
     let palette = app.palette;
+    if matches!(
+        app.link,
+        LinkStatus::Unlinked {
+            qr: None,
+            pair_code: None,
+            pairing_phone: None
+        }
+    ) && app.account().settings.sync_mode.is_none()
+    {
+        sync_choice(app, ui);
+        return;
+    }
     match app.link.clone() {
         LinkStatus::Starting | LinkStatus::Connecting => {
-            busy(ui, palette.accent, "Connecting to WhatsApp…");
+            busy(
+                ui,
+                palette.accent,
+                &crate::i18n::gettext(app.locale, "Connecting to WhatsApp…"),
+            );
         }
         LinkStatus::Connected | LinkStatus::Disconnected { .. } => {
-            busy(ui, palette.accent, "Linked. Waiting for your chats…");
+            busy(
+                ui,
+                palette.accent,
+                &crate::i18n::gettext(app.locale, "Linked. Waiting for your chats…"),
+            );
         }
         LinkStatus::LoggedOut => {
             theme::icon(ui, Icon::Smartphone, 28.0, palette.warning);
             theme::paragraph(
                 ui,
-                "This computer was unlinked from your phone. Requesting a new code.",
+                &*crate::i18n::gettext(
+                    app.locale,
+                    "This computer was unlinked from your phone. Requesting a new code.",
+                ),
                 theme::regular(14.0),
                 palette.text,
             );
             ui.add_space(8.0);
-            busy(ui, palette.accent, "Requesting a new code…");
+            busy(
+                ui,
+                palette.accent,
+                &crate::i18n::gettext(app.locale, "Requesting a new code…"),
+            );
         }
         LinkStatus::Failed(message) => {
             let key_lost = archive_key_lost(&message);
@@ -108,10 +136,25 @@ fn body(app: &mut App, ui: &mut egui::Ui) {
             );
             ui.add_space(12.0);
             ui.horizontal(|ui| {
-                if theme::pill_button(ui, &palette, "Try again", true).clicked() {
+                if theme::pill_button(
+                    ui,
+                    &palette,
+                    &crate::i18n::gettext(app.locale, "Try again"),
+                    true,
+                )
+                .clicked()
+                {
                     app.actions.push(Action::Reconnect);
                 }
-                if key_lost && theme::pill_button(ui, &palette, "Start over…", false).clicked() {
+                if key_lost
+                    && theme::pill_button(
+                        ui,
+                        &palette,
+                        &crate::i18n::gettext(app.locale, "Start over…"),
+                        false,
+                    )
+                    .clicked()
+                {
                     app.actions
                         .push(Action::ShowDialog(crate::model::Dialog::ConfirmStartOver));
                 }
@@ -128,12 +171,17 @@ fn body(app: &mut App, ui: &mut egui::Ui) {
                 busy(
                     ui,
                     palette.accent,
-                    &format!("Requesting a code for +{phone}…"),
+                    &crate::i18n::gettext(app.locale, "Requesting a code for +{phone}…")
+                        .replace("{phone}", &phone),
                 );
             } else if let Some(qr) = qr {
                 qr_view(app, ui, &qr);
             } else {
-                busy(ui, palette.accent, "Waiting for a code from WhatsApp…");
+                busy(
+                    ui,
+                    palette.accent,
+                    &crate::i18n::gettext(app.locale, "Waiting for a code from WhatsApp…"),
+                );
             }
         }
     }
@@ -141,7 +189,10 @@ fn body(app: &mut App, ui: &mut egui::Ui) {
     ui.add_space(18.0);
     theme::paragraph(
         ui,
-        "Unofficial client. Using it may be against WhatsApp's terms of service.",
+        &*crate::i18n::gettext(
+            app.locale,
+            "Unofficial client. Using it may be against WhatsApp's terms of service.",
+        ),
         theme::regular(11.5),
         palette.dim,
     );
@@ -165,7 +216,7 @@ fn qr_view(app: &mut App, ui: &mut egui::Ui, code: &str) {
     let palette = app.palette;
     theme::text(
         ui,
-        "Link this computer",
+        &*crate::i18n::gettext(app.locale, "Link this computer"),
         theme::semibold(16.0),
         palette.text,
     );
@@ -180,9 +231,12 @@ fn qr_view(app: &mut App, ui: &mut egui::Ui, code: &str) {
     }
     ui.add_space(4.0);
     let steps = [
-        "Open WhatsApp on your phone",
-        "Tap Menu or Settings, then Linked devices",
-        "Tap Link a device and point the phone at this code",
+        &*crate::i18n::gettext(app.locale, "Open WhatsApp on your phone"),
+        &*crate::i18n::gettext(app.locale, "Tap Menu or Settings, then Linked devices"),
+        &*crate::i18n::gettext(
+            app.locale,
+            "Tap Link a device and point the phone at this code",
+        ),
     ];
     for (index, step) in steps.iter().enumerate() {
         ui.horizontal(|ui| {
@@ -199,7 +253,7 @@ fn qr_view(app: &mut App, ui: &mut egui::Ui, code: &str) {
     ui.add_space(10.0);
     if theme::link(
         ui,
-        "Link with phone number instead",
+        &*crate::i18n::gettext(app.locale, "Link with phone number instead"),
         theme::medium(13.0),
         palette.link,
     )
@@ -213,14 +267,14 @@ fn pair_code_view(app: &mut App, ui: &mut egui::Ui, code: &str, phone: Option<&s
     let palette = app.palette;
     theme::text(
         ui,
-        "Enter this code on your phone",
+        &*crate::i18n::gettext(app.locale, "Enter this code on your phone"),
         theme::semibold(16.0),
         palette.text,
     );
     if let Some(phone) = phone {
         theme::text(
             ui,
-            format!("for +{phone}"),
+            crate::i18n::gettext(app.locale, "for +{phone}").replace("{phone}", phone),
             theme::regular(13.0),
             palette.secondary,
         );
@@ -240,9 +294,12 @@ fn pair_code_view(app: &mut App, ui: &mut egui::Ui, code: &str, phone: Option<&s
         });
     ui.add_space(8.0);
     let steps = [
-        "Open WhatsApp on your phone",
-        "Tap Menu or Settings, then Linked devices",
-        "Tap Link a device, then Link with phone number instead",
+        &*crate::i18n::gettext(app.locale, "Open WhatsApp on your phone"),
+        &*crate::i18n::gettext(app.locale, "Tap Menu or Settings, then Linked devices"),
+        &*crate::i18n::gettext(
+            app.locale,
+            "Tap Link a device, then Link with phone number instead",
+        ),
     ];
     for (index, step) in steps.iter().enumerate() {
         ui.horizontal(|ui| {
@@ -259,7 +316,15 @@ fn pair_code_view(app: &mut App, ui: &mut egui::Ui, code: &str, phone: Option<&s
     ui.add_space(10.0);
     ui.horizontal(|ui| {
         ui.add_space((ui.available_width() - 200.0).max(0.0) / 2.0);
-        if theme::soft_button(ui, &palette, Some(Icon::Copy), "Copy code", false).clicked() {
+        if theme::soft_button(
+            ui,
+            &palette,
+            Some(Icon::Copy),
+            &crate::i18n::gettext(app.locale, "Copy code"),
+            false,
+        )
+        .clicked()
+        {
             app.actions.push(Action::CopyText(code.to_owned()));
         }
     });
@@ -271,6 +336,73 @@ fn archive_key_lost(message: &str) -> bool {
     message.contains("OS keyring key is missing")
         || message.contains("archive key in the OS keyring is invalid")
         || message.contains("could not be unlocked with its OS keyring key")
+}
+
+/// One account-owned choice before its pairing code is requested.
+fn sync_choice(app: &mut App, ui: &mut egui::Ui) {
+    let palette = app.palette;
+    theme::paragraph(
+        ui,
+        &*crate::i18n::gettext(app.locale, "How much history would you like to sync?"),
+        theme::semibold(18.0),
+        palette.text,
+    );
+    ui.add_space(12.0);
+    theme::paragraph(
+        ui,
+        &*crate::i18n::gettext(
+            app.locale,
+            "Full history recovers as much as WhatsApp makes available, with older messages and files continuing in the background.",
+        ),
+        theme::regular(14.0),
+        palette.text,
+    );
+    ui.add_space(8.0);
+    theme::paragraph(
+        ui,
+        &*crate::i18n::gettext(
+            app.locale,
+            "This can take a long time and use significant internet data and disk space. Keep your phone online during recovery. Some older messages or files may be unavailable.",
+        ),
+        theme::regular(12.5),
+        palette.secondary,
+    );
+    ui.add_space(14.0);
+    if theme::pill_button(
+        ui,
+        &palette,
+        &crate::i18n::gettext(app.locale, "Full history"),
+        true,
+    )
+    .clicked()
+    {
+        app.actions
+            .push(Action::ChooseSync(crate::settings::SyncMode::Full));
+    }
+    ui.add_space(12.0);
+    theme::paragraph(
+        ui,
+        &*crate::i18n::gettext(
+            app.locale,
+            "Recent history starts with recent conversations for a quicker setup. You can enable older-history recovery later in Settings.",
+        ),
+        theme::regular(13.0),
+        palette.secondary,
+    );
+    if theme::soft_button(
+        ui,
+        &palette,
+        None,
+        &crate::i18n::gettext(app.locale, "Recent history"),
+        false,
+    )
+    .clicked()
+    {
+        app.actions
+            .push(Action::ChooseSync(crate::settings::SyncMode::Recent));
+    }
+    ui.add_space(12.0);
+    super::accounts::login_choices(app, ui);
 }
 
 #[cfg(test)]

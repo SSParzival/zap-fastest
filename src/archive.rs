@@ -12,10 +12,22 @@ use crate::model::{
 };
 
 mod archive_sync;
+mod automation;
+pub mod backup;
+mod call_log;
+mod communities;
+mod disappearing;
 mod drafts;
 mod encryption;
 mod gallery;
+pub mod history_capture;
+mod media_jobs;
+pub mod storage;
+pub use call_log::CallRecord;
+pub use media_jobs::MediaJob;
 mod outgoing;
+#[cfg(test)]
+mod performance;
 pub use encryption::{archive_key_identity, copy_archive_key, forget_archive_key};
 mod favorites;
 pub use favorites::Favorite;
@@ -121,10 +133,18 @@ CREATE TABLE IF NOT EXISTS motion_clips (
     parent TEXT NOT NULL,
     sender TEXT NOT NULL,
     raw BLOB NOT NULL,
+    child_id TEXT,
     PRIMARY KEY (chat, parent, sender)
 );
 CREATE TRIGGER IF NOT EXISTS delete_motion_clips AFTER DELETE ON messages BEGIN
     DELETE FROM motion_clips WHERE chat = OLD.chat AND parent = OLD.id;
+END;
+CREATE TABLE IF NOT EXISTS reaction_activity (
+ chat TEXT NOT NULL,id TEXT NOT NULL,sender TEXT NOT NULL,sent_at INTEGER NOT NULL,
+ PRIMARY KEY(chat,id,sender)
+);
+CREATE TRIGGER IF NOT EXISTS delete_reaction_activity AFTER DELETE ON messages BEGIN
+ DELETE FROM reaction_activity WHERE chat=OLD.chat AND id=OLD.id;
 END;
 CREATE INDEX IF NOT EXISTS messages_stickers ON messages (from_me, timestamp)
     WHERE CASE WHEN json_valid(content) THEN json_extract(content, '$.kind') = 'sticker'
@@ -200,10 +220,11 @@ const CHAT_COLUMNS: &str =
                     c.pinned_at, c.ephemeral_expiration, c.locked, c.group_subject_known,
                     c.notification_sound, c.marked_unread,
                     (SELECT f.position FROM favorites f WHERE f.chat = c.id), c.left,
-                    c.info_locked, c.group_admin, c.group_description";
+                    c.info_locked, c.group_admin, c.group_description, c.community";
 
 /// Adds columns introduced after the initial schema when missing.
 const MIGRATIONS: &[(&str, &str, &str)] = &[
+    ("motion_clips", "child_id", "TEXT"),
     ("message_removals", "account", "TEXT NOT NULL DEFAULT ''"),
     (
         "pending_message_removals",
@@ -242,6 +263,7 @@ const MIGRATIONS: &[(&str, &str, &str)] = &[
     ("chats", "info_locked", "INTEGER"),
     ("chats", "group_admin", "INTEGER NOT NULL DEFAULT 0"),
     ("chats", "group_description", "TEXT"),
+    ("chats", "community", "TEXT"),
     // Set once the phone says it holds nothing older than what it sent.
     ("chats", "history_start", "INTEGER NOT NULL DEFAULT 0"),
     ("contacts", "first_name", "TEXT"),
@@ -299,6 +321,7 @@ fn chat_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Chat> {
                 sender_name: row.get(9)?,
                 summary: content.summary(),
                 full: content.full_summary(),
+                media: content.preview_media(),
                 status: status_from_rank(row.get(11)?),
             })
         }
@@ -335,6 +358,17 @@ fn chat_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Chat> {
         info_locked: row.get(23)?,
         admin: row.get(24)?,
         group_description: row.get(25)?,
+        community: row
+            .get::<_, Option<String>>(26)?
+            .map(|value| serde_json::from_str(&value))
+            .transpose()
+            .map_err(|error| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    26,
+                    rusqlite::types::Type::Text,
+                    Box::new(error),
+                )
+            })?,
     })
 }
 
@@ -470,6 +504,7 @@ impl Archive {
     fn prepare(connection: Connection) -> Result<Self> {
         connection.execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL;")?;
         connection.execute_batch(SCHEMA)?;
+        connection.execute_batch(history_capture::SCHEMA)?;
         connection.execute_batch(outgoing::SCHEMA)?;
         connection.execute_batch(labels::SCHEMA)?;
         connection.execute_batch(polls::SCHEMA)?;
@@ -491,6 +526,9 @@ impl Archive {
             }
         }
         Self::add_downloaded_marker(&connection)?;
+        media_jobs::install(&connection)?;
+        connection.execute_batch(call_log::SCHEMA)?;
+        connection.execute_batch(disappearing::SCHEMA)?;
         // Scheduling is session-only. No prior worker owns these rows now.
         // A queued row was not sent; a Pending row may have been transmitted.
         connection.execute(
@@ -1166,12 +1204,29 @@ impl Archive {
         sender: &str,
         raw: &[u8],
     ) -> Result<bool> {
+        self.put_motion_clip_with_id(chat, parent, sender, raw, None)
+    }
+
+    /// The child identity is required to ask the phone to re-upload this clip.
+    /// Older archives keep NULL, never substituting the photo's identity.
+    pub fn put_motion_clip_with_id(
+        &self,
+        chat: &str,
+        parent: &str,
+        sender: &str,
+        raw: &[u8],
+        child_id: Option<&str>,
+    ) -> Result<bool> {
         if self.message_removed(chat, parent)? {
             return Ok(false);
         }
         self.connection.execute(
-            "INSERT OR REPLACE INTO motion_clips (chat, parent, sender, raw) VALUES (?1, ?2, ?3, ?4)",
-            params![chat, parent, sender, raw],
+            "INSERT INTO motion_clips (chat, parent, sender, raw, child_id) VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(chat,parent,sender) DO UPDATE SET
+              child_id=CASE WHEN excluded.child_id IS NOT NULL THEN excluded.child_id
+                            WHEN motion_clips.raw=excluded.raw THEN motion_clips.child_id ELSE NULL END,
+              raw=excluded.raw",
+            params![chat, parent, sender, raw, child_id.filter(|id| !id.is_empty())],
         )?;
         Ok(self
             .connection
@@ -1186,6 +1241,19 @@ impl Archive {
                 "SELECT c.raw FROM motion_clips c
                  JOIN messages m ON m.chat = c.chat AND m.id = c.parent AND m.sender = c.sender
                  WHERE c.chat = ?1 AND c.parent = ?2",
+                params![chat, parent],
+                |row| row.get(0),
+            )
+            .optional()
+    }
+
+    /// Returns only a protocol identity whose sender matches the photo.
+    pub fn motion_child_id(&self, chat: &str, parent: &str) -> Result<Option<String>> {
+        self.connection
+            .query_row(
+                "SELECT c.child_id FROM motion_clips c
+             JOIN messages m ON m.chat=c.chat AND m.id=c.parent AND m.sender=c.sender
+             WHERE c.chat=?1 AND c.parent=?2 AND c.child_id IS NOT NULL",
                 params![chat, parent],
                 |row| row.get(0),
             )
@@ -1356,6 +1424,23 @@ impl Archive {
         transaction.execute("INSERT INTO stars(chat,id,starred,starred_at) SELECT ?2,id,starred,starred_at FROM stars WHERE chat=?1 ON CONFLICT(chat,id) DO UPDATE SET starred=excluded.starred,starred_at=excluded.starred_at WHERE excluded.starred_at>stars.starred_at OR (excluded.starred_at=stars.starred_at AND excluded.starred=0)",params![lid_chat,phone_chat])?;
         transaction.execute("INSERT INTO message_pins(chat,id,pinned,pinned_at,changed_at,expires_at,by_me,sender) SELECT ?2,id,pinned,pinned_at,changed_at,expires_at,by_me,sender FROM message_pins WHERE chat=?1 ON CONFLICT(chat,id) DO UPDATE SET pinned=excluded.pinned,pinned_at=excluded.pinned_at,changed_at=excluded.changed_at,expires_at=excluded.expires_at,by_me=excluded.by_me,sender=excluded.sender WHERE excluded.changed_at>message_pins.changed_at OR (excluded.changed_at=message_pins.changed_at AND excluded.pinned=0)",params![lid_chat,phone_chat])?;
         transaction.execute("INSERT OR IGNORE INTO pin_notices(chat,id,pinned_at,expires_at,by_me,sender) SELECT ?2,id,pinned_at,expires_at,by_me,sender FROM pin_notices WHERE chat=?1",params![lid_chat,phone_chat])?;
+        transaction.execute("INSERT INTO media_jobs(chat,id,card,attempts,next_attempt,state) SELECT ?2,id,card,attempts,next_attempt,state FROM media_jobs WHERE chat=?1 ON CONFLICT(chat,id,card) DO UPDATE SET attempts=MAX(media_jobs.attempts,excluded.attempts),next_attempt=MAX(media_jobs.next_attempt,excluded.next_attempt),state=MAX(media_jobs.state,excluded.state)",params![lid_chat,phone_chat])?;
+        transaction.execute("INSERT INTO managed_exports(chat,id,card,root,destination,attempts,next_attempt,state) SELECT ?2,id,card,root,destination,attempts,next_attempt,state FROM managed_exports WHERE chat=?1 ON CONFLICT(chat,id,card) DO NOTHING",params![lid_chat,phone_chat])?;
+        transaction.execute("INSERT INTO reaction_activity(chat,id,sender,sent_at) SELECT CASE WHEN chat=?1 THEN ?2 ELSE chat END,id,CASE WHEN sender=?1 THEN ?2 ELSE sender END,sent_at FROM reaction_activity WHERE chat=?1 OR sender=?1 ON CONFLICT(chat,id,sender) DO UPDATE SET sent_at=MAX(reaction_activity.sent_at,excluded.sent_at)",params![lid_chat,phone_chat])?;
+        transaction.execute("DELETE FROM reaction_activity WHERE sender=?1", [&lid_chat])?;
+        transaction.execute("INSERT INTO disappearing_messages(chat,id,expires_at,kept,keep_at)
+            SELECT ?2,id,expires_at,kept,keep_at FROM disappearing_messages WHERE chat=?1
+            ON CONFLICT(chat,id) DO UPDATE SET expires_at=COALESCE(disappearing_messages.expires_at,excluded.expires_at),
+            kept=CASE WHEN excluded.keep_at>disappearing_messages.keep_at OR (excluded.keep_at=disappearing_messages.keep_at AND excluded.kept=1) THEN excluded.kept ELSE disappearing_messages.kept END,
+            keep_at=MAX(disappearing_messages.keep_at,excluded.keep_at)", params![lid_chat,phone_chat])?;
+        transaction.execute(
+            "DELETE FROM disappearing_messages WHERE chat=?1",
+            [lid_chat.as_str()],
+        )?;
+        transaction.execute(
+            "UPDATE call_log SET chat=?2 WHERE chat=?1",
+            params![lid_chat, phone_chat],
+        )?;
         // Preserve the newest pending intent and its globally unique callback token.
         transaction.execute("DELETE FROM star_changes WHERE chat IN (?1,?2) AND sequence < (SELECT MAX(newest.sequence) FROM star_changes newest WHERE newest.id=star_changes.id AND newest.chat IN (?1,?2))",params![lid_chat,phone_chat])?;
         transaction.execute(
@@ -1477,10 +1562,17 @@ impl Archive {
     /// keeps the reactions already stored. Inserting a message is therefore one
     /// write instead of a read followed by a write.
     pub fn insert_message(&self, message: &Message, raw: Option<&[u8]>) -> Result<()> {
+        // Keep the message and its derived rows one durable change. Callers
+        // already inside a history transaction keep ownership of that boundary.
+        let transaction = self
+            .connection
+            .is_autocommit()
+            .then(|| self.connection.unchecked_transaction())
+            .transpose()?;
         if self.message_removed(&message.chat, &message.id)? {
             return Ok(());
         }
-        self.connection.execute(
+        self.connection.prepare_cached(
             "INSERT INTO messages (chat, id, sender, sender_name, from_me, timestamp, content, status, quoted, reactions, edited, raw, thumbnail, mentions, forwarded, delivered_at, read_at, history_order)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?19)
              ON CONFLICT(chat, id) DO UPDATE SET
@@ -1504,8 +1596,7 @@ impl Archive {
                 mentions = excluded.mentions,
                 forwarded = excluded.forwarded,
                 delivered_at = COALESCE(delivered_at, excluded.delivered_at),
-                read_at = COALESCE(read_at, excluded.read_at)",
-            params![
+                read_at = COALESCE(read_at, excluded.read_at)")?.execute(params![
                 message.chat,
                 message.id,
                 message.sender,
@@ -1529,8 +1620,7 @@ impl Archive {
                 // An explicit failure still writes over a further state.
                 status_rank(Delivery::Failed),
                 message.history_order,
-            ],
-        )?;
+            ])?;
         if matches!(message.content, Content::Image { motion: None, .. }) {
             self.connection
                 .execute(MARK_MOTION, params![message.chat, message.id])?;
@@ -1550,6 +1640,9 @@ impl Archive {
                 "DELETE FROM transcriptions WHERE chat = ?1 AND message = ?2",
                 params![message.chat, message.id],
             )?;
+        }
+        if let Some(transaction) = transaction {
+            transaction.commit()?;
         }
         Ok(())
     }
@@ -2160,6 +2253,11 @@ impl Archive {
         for table in [
             "messages",
             "motion_clips",
+            "media_jobs",
+            "managed_exports",
+            "reaction_activity",
+            "call_log",
+            "disappearing_messages",
             "group_receipts",
             "polls",
             "poll_history",
@@ -2596,6 +2694,58 @@ impl Archive {
         Ok(Some(message))
     }
 
+    pub(crate) fn set_reaction_with_activity(
+        &self,
+        chat: &str,
+        id: &str,
+        sender: &str,
+        from_me: bool,
+        emoji: &str,
+        live_sent_at: Option<i64>,
+    ) -> Result<(Option<Message>, bool)> {
+        let transaction = self
+            .connection
+            .is_autocommit()
+            .then(|| self.connection.unchecked_transaction())
+            .transpose()?;
+        let mut bumped = false;
+        if let Some(sent_at) = live_sent_at.filter(|sent_at| {
+            *sent_at > 0 && *sent_at / 1000 <= crate::util::now().saturating_add(300)
+        }) {
+            let previous: Option<i64> = self
+                .connection
+                .query_row(
+                    "SELECT sent_at FROM reaction_activity WHERE chat=?1 AND id=?2 AND sender=?3",
+                    params![chat, id, sender],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            if previous.is_some_and(|previous| previous >= sent_at) {
+                let message = self.message(chat, id)?;
+                if let Some(transaction) = transaction {
+                    transaction.commit()?;
+                }
+                return Ok((message, false));
+            }
+            if self.message(chat, id)?.is_some() {
+                self.connection.execute("INSERT INTO reaction_activity(chat,id,sender,sent_at) VALUES(?1,?2,?3,?4) ON CONFLICT(chat,id,sender) DO UPDATE SET sent_at=excluded.sent_at",params![chat,id,sender,sent_at])?;
+                if !emoji.is_empty()
+                    && !self.message_removed(chat, id)?
+                    && !self
+                        .removal_point(chat)?
+                        .is_some_and(|through| sent_at / 1000 <= through)
+                {
+                    bumped=self.connection.execute("UPDATE chats SET last_activity=?2 WHERE id=?1 AND last_activity<?2 AND locked=0",params![chat,sent_at/1000])?>0;
+                }
+            }
+        }
+        let message = self.set_reaction(chat, id, sender, from_me, emoji)?;
+        if let Some(transaction) = transaction {
+            transaction.commit()?;
+        }
+        Ok((message, bumped))
+    }
+
     pub fn upsert_contact(&self, contact: &Contact) -> Result<()> {
         self.connection.execute(
             "INSERT INTO contacts (id, full_name, first_name, push_name) VALUES (?1, ?2, ?3, ?4)
@@ -2682,14 +2832,175 @@ impl Archive {
 
     /// Clears all archived data during unlinking.
     pub fn clear(&self) -> Result<()> {
-        self.connection.execute_batch(
-            "DELETE FROM stars; DELETE FROM star_changes; DELETE FROM message_pins; DELETE FROM pin_notices; DELETE FROM outgoing_queue; DELETE FROM poll_history; DELETE FROM poll_votes; DELETE FROM polls; DELETE FROM group_receipts; DELETE FROM transcriptions; DELETE FROM messages; DELETE FROM motion_clips; DELETE FROM chats; DELETE FROM chat_removals; DELETE FROM message_removals; DELETE FROM pending_message_removals; DELETE FROM contacts; DELETE FROM meta; DELETE FROM lids; DELETE FROM drafts; DELETE FROM local_chat_labels; DELETE FROM local_labels; DELETE FROM removed_recent_stickers; DELETE FROM favorite_stickers; DELETE FROM favorites; DELETE FROM favorite_changes;",
-        )
+        let transaction = self.connection.unchecked_transaction()?;
+        transaction.execute(
+            "UPDATE history_capture_identity SET generation=generation+1 WHERE singleton=1",
+            [],
+        )?;
+        transaction.execute("DELETE FROM captured_history", [])?;
+        transaction.execute_batch(
+            "DELETE FROM call_log; DELETE FROM synced_call_log; DELETE FROM stickers; DELETE FROM media_jobs; DELETE FROM stars; DELETE FROM star_changes; DELETE FROM message_pins; DELETE FROM pin_notices; DELETE FROM outgoing_queue; DELETE FROM poll_history; DELETE FROM poll_votes; DELETE FROM polls; DELETE FROM group_receipts; DELETE FROM transcriptions; DELETE FROM messages; DELETE FROM motion_clips; DELETE FROM chats; DELETE FROM chat_removals; DELETE FROM message_removals; DELETE FROM pending_message_removals; DELETE FROM contacts; DELETE FROM meta; DELETE FROM lids; DELETE FROM drafts; DELETE FROM local_chat_labels; DELETE FROM local_labels; DELETE FROM removed_recent_stickers; DELETE FROM favorite_stickers; DELETE FROM favorites; DELETE FROM favorite_changes;",
+        )?;
+        transaction.commit()
     }
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
+    #[test]
+    fn only_new_live_nonempty_reactions_promote_chat_activity_atomically() {
+        let archive = Archive::in_memory().unwrap();
+        let chat = "fixture@s.whatsapp.net";
+        archive.ensure_chat(chat, "Synthetic").unwrap();
+        let row = message(chat, "original", 100, false);
+        archive.insert_message(&row, None).unwrap();
+        let (_, bumped) = archive
+            .set_reaction_with_activity(chat, "original", "reactor", false, "fixture", None)
+            .unwrap();
+        assert!(!bumped);
+        assert_eq!(archive.chat(chat).unwrap().unwrap().last_activity, 100);
+        assert!(
+            archive
+                .set_reaction_with_activity(
+                    chat,
+                    "original",
+                    "reactor",
+                    false,
+                    "fixture",
+                    Some(200_000)
+                )
+                .unwrap()
+                .1
+        );
+        assert!(
+            !archive
+                .set_reaction_with_activity(
+                    chat,
+                    "original",
+                    "reactor",
+                    false,
+                    "fixture",
+                    Some(200_000)
+                )
+                .unwrap()
+                .1
+        );
+        assert!(
+            !archive
+                .set_reaction_with_activity(chat, "original", "reactor", false, "", Some(300_000))
+                .unwrap()
+                .1
+        );
+        assert!(
+            !archive
+                .set_reaction_with_activity(
+                    chat,
+                    "original",
+                    "reactor",
+                    false,
+                    "stale",
+                    Some(250_000)
+                )
+                .unwrap()
+                .1
+        );
+        assert!(
+            archive
+                .message(chat, "original")
+                .unwrap()
+                .unwrap()
+                .reactions
+                .is_empty()
+        );
+        assert_eq!(archive.chat(chat).unwrap().unwrap().last_activity, 200);
+        archive.connection.execute_batch("CREATE TRIGGER fail_reaction_activity BEFORE UPDATE OF last_activity ON chats BEGIN SELECT RAISE(ABORT,'synthetic failure'); END").unwrap();
+        assert!(
+            archive
+                .set_reaction_with_activity(
+                    chat,
+                    "original",
+                    "reactor",
+                    false,
+                    "retry",
+                    Some(400_000)
+                )
+                .is_err()
+        );
+        assert!(
+            archive
+                .message(chat, "original")
+                .unwrap()
+                .unwrap()
+                .reactions
+                .is_empty()
+        );
+        archive
+            .connection
+            .execute_batch("DROP TRIGGER fail_reaction_activity")
+            .unwrap();
+        assert!(
+            archive
+                .set_reaction_with_activity(
+                    chat,
+                    "original",
+                    "reactor",
+                    false,
+                    "retry",
+                    Some(400_000)
+                )
+                .unwrap()
+                .1
+        );
+        assert_eq!(
+            archive
+                .message(chat, "original")
+                .unwrap()
+                .unwrap()
+                .timestamp,
+            100
+        );
+        assert_eq!(
+            archive.messages(chat, None, 50).unwrap().len(),
+            1,
+            "reactions do not manufacture messages"
+        );
+    }
+
+    #[test]
+    fn chat_preview_media_is_derived_from_archived_content_not_caption_words() {
+        let archive = Archive::in_memory().unwrap();
+        let chat = "fixture@s.whatsapp.net";
+        archive.ensure_chat(chat, "Synthetic").unwrap();
+        let mut row = message(chat, "document", 100, false);
+        row.content = Content::Document {
+            media: crate::model::Media {
+                mime: "application/pdf".into(),
+                size: 42,
+                width: None,
+                height: None,
+                path: None,
+                state: crate::model::MediaState::Idle,
+                album: None,
+            },
+            file_name: "Synthetic.pdf".into(),
+            caption: None,
+            pages: Some(1),
+        };
+        archive.insert_message(&row, None).unwrap();
+        assert_eq!(
+            archive.chat(chat).unwrap().unwrap().last.unwrap().media,
+            Some(crate::model::PreviewMedia::Document)
+        );
+        row.id = "text".into();
+        row.timestamp = 101;
+        row.content = Content::text("Photo: Video: Document: ordinary text");
+        archive.insert_message(&row, None).unwrap();
+        assert_eq!(
+            archive.chat(chat).unwrap().unwrap().last.unwrap().media,
+            None
+        );
+    }
+
     pub(crate) fn set_archive_update_failure(archive: &super::Archive, fail: bool) {
         archive.connection.execute_batch(if fail {
             "CREATE TRIGGER reject_archive_update BEFORE UPDATE OF archived ON chats BEGIN SELECT RAISE(ABORT, 'fixture failure'); END;"
@@ -2750,6 +3061,44 @@ pub(crate) mod tests {
                 .map(|position| position.timestamp),
             Some(100)
         );
+    }
+
+    #[test]
+    fn message_and_derived_activity_roll_back_together_and_preserve_outer_transaction() {
+        let archive = Archive::in_memory().unwrap();
+        let chat = "synthetic@s.whatsapp.net";
+        archive.ensure_chat(chat, "Fixture").unwrap();
+        archive
+            .connection
+            .execute_batch(
+                "CREATE TEMP TRIGGER fail_activity BEFORE UPDATE OF last_activity ON chats
+             BEGIN SELECT RAISE(ABORT, 'fixture failure'); END;",
+            )
+            .unwrap();
+        assert!(
+            archive
+                .insert_message(&message(chat, "failed", 100, false), None)
+                .is_err()
+        );
+        assert!(archive.message(chat, "failed").unwrap().is_none());
+        archive
+            .connection
+            .execute_batch("DROP TRIGGER fail_activity")
+            .unwrap();
+        {
+            let outer = archive.connection.unchecked_transaction().unwrap();
+            archive
+                .insert_message(&message(chat, "outer", 200, false), None)
+                .unwrap();
+            assert!(archive.message(chat, "outer").unwrap().is_some());
+            outer.rollback().unwrap();
+        }
+        assert!(archive.message(chat, "outer").unwrap().is_none());
+        archive
+            .insert_message(&message(chat, "durable", 300, false), None)
+            .unwrap();
+        assert!(archive.connection.is_autocommit());
+        assert_eq!(archive.chat(chat).unwrap().unwrap().last_activity, 300);
     }
 
     /// Failed unlink cannot apply the previous account's terminal barriers.
@@ -4176,6 +4525,28 @@ pub(crate) mod tests {
     /// receipt. The builder checks each table, so a missing row cannot let a
     /// broken purge pass.
     #[test]
+    fn legacy_motion_clip_identity_migration_preserves_raw_without_guessing() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE motion_clips (
+            chat TEXT NOT NULL,parent TEXT NOT NULL,sender TEXT NOT NULL,raw BLOB NOT NULL,
+            PRIMARY KEY(chat,parent,sender));
+            INSERT INTO motion_clips VALUES ('fixture','photo','fixture',X'0102');",
+            )
+            .unwrap();
+        let archive = Archive::prepare(connection).unwrap();
+        let (raw, identity): (Vec<u8>, Option<String>) = archive
+            .connection
+            .query_row("SELECT raw,child_id FROM motion_clips", [], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })
+            .unwrap();
+        assert_eq!(raw, vec![1, 2]);
+        assert_eq!(identity, None);
+    }
+
+    #[test]
     fn only_the_sender_of_a_photo_gives_it_a_motion_clip() {
         let archive = Archive::in_memory().expect("archive");
         let chat = "group@g.us";
@@ -4212,12 +4583,56 @@ pub(crate) mod tests {
         );
         assert!(!marked(&archive));
         assert_eq!(archive.motion_clip(chat, "photo").unwrap(), None);
+        archive
+            .put_motion_clip_with_id(
+                chat,
+                "photo",
+                "mallory@s.whatsapp.net",
+                b"theirs",
+                Some("wrong-child"),
+            )
+            .unwrap();
+        assert_eq!(archive.motion_child_id(chat, "photo").unwrap(), None);
         assert!(
             archive
                 .put_motion_clip(chat, "photo", "alice@s.whatsapp.net", b"hers")
                 .unwrap()
         );
         assert!(marked(&archive));
+        assert_eq!(archive.motion_child_id(chat, "photo").unwrap(), None);
+        archive
+            .put_motion_clip_with_id(
+                chat,
+                "photo",
+                "alice@s.whatsapp.net",
+                b"hers",
+                Some("actual-child"),
+            )
+            .unwrap();
+        assert_eq!(
+            archive.motion_child_id(chat, "photo").unwrap().as_deref(),
+            Some("actual-child")
+        );
+        archive
+            .put_motion_clip(chat, "photo", "alice@s.whatsapp.net", b"hers")
+            .unwrap();
+        assert_eq!(
+            archive.motion_child_id(chat, "photo").unwrap().as_deref(),
+            Some("actual-child")
+        );
+        archive
+            .put_motion_clip(chat, "photo", "alice@s.whatsapp.net", b"changed")
+            .unwrap();
+        assert_eq!(archive.motion_child_id(chat, "photo").unwrap(), None);
+        archive
+            .put_motion_clip_with_id(
+                chat,
+                "photo",
+                "alice@s.whatsapp.net",
+                b"hers",
+                Some("actual-child"),
+            )
+            .unwrap();
         assert_eq!(
             archive.motion_clip(chat, "photo").unwrap().as_deref(),
             Some(&b"hers"[..])

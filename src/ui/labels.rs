@@ -221,6 +221,35 @@ pub fn chat_menu(app: &mut App, ui: &mut egui::Ui, chat: &Chat, palette: &Palett
 /// The manager: create, rename, recolour and delete labels.
 pub fn manager(app: &mut App, ui: &mut egui::Ui, palette: &Palette) {
     let locale = app.locale;
+    let mut enabled = app.account().settings.focus_enabled;
+    if ui
+        .add_enabled(
+            !app.account().settings.focus_labels.is_empty(),
+            egui::Checkbox::new(&mut enabled, gettext(locale, "Focus on selected labels")),
+        )
+        .changed()
+    {
+        app.actions.push(Action::SetFocusMode(enabled));
+    }
+    let mut mentions = app.account().settings.focus_mentions;
+    if ui
+        .checkbox(
+            &mut mentions,
+            gettext(locale, "Allow mentions and replies outside focus labels"),
+        )
+        .changed()
+    {
+        app.actions.push(Action::SetFocusMentions(mentions));
+    }
+    theme::paragraph(
+        ui,
+        gettext(
+            locale,
+            "Focus filters this account's chat list and notifications. Chat sounds take priority, then mention sounds. Other messages use the first assigned label sound in this list.",
+        ),
+        theme::regular(12.5),
+        palette.secondary,
+    );
     ui.horizontal(|ui| {
         theme::text(
             ui,
@@ -325,6 +354,53 @@ pub fn manager(app: &mut App, ui: &mut egui::Ui, palette: &Palette) {
     let mut save: Option<(String, String, String)> = None;
     let mut delete: Option<String> = None;
     for (label, count) in wearing {
+        ui.horizontal_wrapped(|ui| {
+            let mut chosen = app.account().settings.focus_labels.contains(&label.id);
+            if ui
+                .checkbox(&mut chosen, gettext(locale, "Include in focus"))
+                .changed()
+            {
+                let mut labels = app.account().settings.focus_labels.clone();
+                if chosen {
+                    labels.push(label.id.clone());
+                } else {
+                    labels.retain(|id| id != &label.id);
+                }
+                app.actions.push(Action::SetFocusLabels(labels));
+            }
+            let current = app.account().settings.label_sounds.get(&label.id).cloned();
+            use crate::settings::NotificationSound;
+            let options = [
+                (None, gettext(locale, "Default sound")),
+                (Some(NotificationSound::Receive), gettext(locale, "Pidgin")),
+                (
+                    Some(NotificationSound::Alert),
+                    gettext(locale, "Pidgin alert"),
+                ),
+                (
+                    Some(NotificationSound::System),
+                    gettext(locale, "System sound"),
+                ),
+                (Some(NotificationSound::None), gettext(locale, "No sound")),
+            ];
+            let selected = options
+                .iter()
+                .find(|(sound, _)| *sound == current)
+                .map(|(_, label)| label.as_ref())
+                .unwrap_or("Custom sound");
+            egui::ComboBox::from_id_salt(("label-sound", &label.id))
+                .selected_text(selected)
+                .show_ui(ui, |ui| {
+                    for (sound, text) in options {
+                        if ui.selectable_label(sound == current, text).clicked() {
+                            app.actions.push(Action::SetLabelSound {
+                                label: label.id.clone(),
+                                sound,
+                            });
+                        }
+                    }
+                });
+        });
         let rect = ui
             .allocate_exact_size(vec2(ui.available_width(), ROW_HEIGHT), Sense::hover())
             .0;

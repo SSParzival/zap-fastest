@@ -268,7 +268,7 @@ impl Worker {
         self.pump_outgoing_at(now);
     }
 
-    fn link_up(&self) -> bool {
+    pub(super) fn link_up(&self) -> bool {
         self.client.is_some() && self.status == super::LinkStatus::Connected
     }
 

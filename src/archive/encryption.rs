@@ -35,6 +35,115 @@ pub(super) fn key_for(path: &Path) -> Result<Zeroizing<[u8; 32]>> {
     key_from_entry(path, &entry)
 }
 
+/// Identity reserved for a new account folder without publishing that folder.
+pub(super) fn restore_key_identity(parent: &Path, account: &str) -> Result<String> {
+    ensure!(
+        crate::model::AccountId::is_safe(account),
+        "Invalid restored account identifier"
+    );
+    let resolved = parent.canonicalize()?.join(account);
+    Ok(identity_for_resolved(&resolved))
+}
+
+pub(super) fn restore_key_digest(key: &[u8]) -> String {
+    Sha256::digest(key)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+pub(super) fn ensure_restore_key_available(identity: &str) -> Result<()> {
+    let entry = platform_store()?
+        .build("rocks.zapfast.ZapFast", identity, None)
+        .map_err(keyring_error)?;
+    match entry.get_secret() {
+        Err(keyring_core::Error::NoEntry) => Ok(()),
+        Ok(secret) => {
+            let _secret = Zeroizing::new(secret);
+            anyhow::bail!(
+                "The restore destination already has an archive credential; choose another account"
+            )
+        }
+        Err(error) => Err(keyring_error(error)),
+    }
+}
+
+pub(super) fn validate_owned_restore_key(
+    identity: &str,
+    digest: &str,
+    allow_missing: bool,
+) -> Result<()> {
+    let entry = platform_store()?
+        .build("rocks.zapfast.ZapFast", identity, None)
+        .map_err(keyring_error)?;
+    match entry.get_secret() {
+        Err(keyring_core::Error::NoEntry) if allow_missing => Ok(()),
+        Err(keyring_core::Error::NoEntry) => {
+            anyhow::bail!("The registered restore key is missing; its account files were preserved")
+        }
+        Err(error) => Err(keyring_error(error)),
+        Ok(secret) => {
+            let secret = decoded_key(secret)?;
+            ensure!(
+                restore_key_digest(secret.as_ref()) == digest,
+                "Restore credential ownership changed; account files were preserved"
+            );
+            Ok(())
+        }
+    }
+}
+
+/// The transaction is durable before this write. Existing credentials are never replaced.
+pub(super) fn save_new_restore_key(identity: &str, key: &[u8; 32]) -> Result<()> {
+    let entry = platform_store()?
+        .build("rocks.zapfast.ZapFast", identity, None)
+        .map_err(keyring_error)?;
+    save_new_restore_key_in(&entry, key)
+}
+
+fn save_new_restore_key_in(entry: &keyring_core::Entry, key: &[u8; 32]) -> Result<()> {
+    match entry.get_secret() {
+        Err(keyring_core::Error::NoEntry) => {}
+        Ok(secret) => {
+            let _secret = Zeroizing::new(secret);
+            anyhow::bail!(
+                "The restore destination already has an archive credential; choose another account"
+            )
+        }
+        Err(error) => return Err(keyring_error(error)),
+    }
+    entry.set_secret(&stored_key(key)).map_err(keyring_error)?;
+    let saved = decoded_key(entry.get_secret().map_err(keyring_error)?)?;
+    ensure!(
+        saved.as_slice() == key,
+        "The OS keyring did not retain the restore key"
+    );
+    Ok(())
+}
+
+/// Deletes only the credential whose digest was reserved by this transaction.
+pub(super) fn forget_owned_restore_key(identity: &str, digest: &str) -> Result<()> {
+    let entry = platform_store()?
+        .build("rocks.zapfast.ZapFast", identity, None)
+        .map_err(keyring_error)?;
+    forget_owned_restore_key_in(&entry, digest)
+}
+
+fn forget_owned_restore_key_in(entry: &keyring_core::Entry, digest: &str) -> Result<()> {
+    match entry.get_secret() {
+        Err(keyring_core::Error::NoEntry) => Ok(()),
+        Err(error) => Err(keyring_error(error)),
+        Ok(secret) => {
+            let secret = decoded_key(secret)?;
+            ensure!(
+                restore_key_digest(secret.as_ref()) == digest,
+                "Restore credential ownership changed; it was preserved"
+            );
+            entry.delete_credential().map_err(keyring_error)
+        }
+    }
+}
+
 /// Copies the keyring entry when an archive moves to another folder.
 pub fn copy_archive_key(old_archive: &Path, new_archive: &Path) -> Result<()> {
     if plaintext(old_archive)? {
@@ -66,15 +175,7 @@ fn copy_archive_key_in(
         .map_err(keyring_error)
         .context("The OS keyring could not open Zap Faster's archive key")?;
     let key = match old_entry.get_secret() {
-        Ok(secret) => {
-            ensure!(
-                secret.len() == 32,
-                "The archive key in the OS keyring is invalid"
-            );
-            let mut key = Zeroizing::new([0; 32]);
-            key.copy_from_slice(&secret);
-            key
-        }
+        Ok(secret) => decoded_key(secret)?,
         Err(keyring_core::Error::NoEntry) => {
             ensure!(
                 plaintext(old_archive)?,
@@ -83,8 +184,7 @@ fn copy_archive_key_in(
             return Ok(());
         }
         Err(error) => {
-            return Err(keyring_error(error))
-                .context("Unlock your OS keyring and restart Zap Faster");
+            return Err(keyring_error(error)).context(keyring_recovery());
         }
     };
     let new_entry = store
@@ -92,16 +192,16 @@ fn copy_archive_key_in(
         .map_err(keyring_error)
         .context("The OS keyring could not open Zap Faster's archive key")?;
     new_entry
-        .set_secret(key.as_ref())
+        .set_secret(&stored_key(&key))
         .map_err(keyring_error)
         .context("Could not save the archive key in the OS keyring")?;
     // Read back before the only copy of the history moves under this key.
-    let saved = Zeroizing::new(
+    let saved = decoded_key(
         new_entry
             .get_secret()
             .map_err(keyring_error)
             .context("Could not verify the copied archive key")?,
-    );
+    )?;
     ensure!(
         saved.as_slice() == key.as_ref(),
         "The OS keyring did not retain the copied archive key"
@@ -129,14 +229,67 @@ pub fn archive_key_identity(path: &Path) -> Result<String> {
 fn identity_for(parent: &Path) -> Result<String> {
     // Separate profiles must not overwrite each other's keys. The credential
     // label contains a digest, never a user path, phone number or message data.
-    let digest = Sha256::digest(parent.canonicalize()?.as_os_str().as_encoded_bytes());
-    Ok(format!(
+    Ok(identity_for_resolved(&parent.canonicalize()?))
+}
+
+fn identity_for_resolved(parent: &Path) -> String {
+    format!(
         "archive-{}",
-        digest
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect::<String>()
-    ))
+        restore_key_digest(parent.as_os_str().as_encoded_bytes())
+    )
+}
+
+// KDE Wallet's Secret Service bridge stores UTF-8 secrets only. Keep legacy
+// binary credentials readable; new Linux credentials use a versioned text form.
+const TEXT_KEY_PREFIX: &[u8] = b"zapfast-key-v1:";
+
+fn text_key(key: &[u8; 32]) -> Zeroizing<Vec<u8>> {
+    use std::fmt::Write;
+    let mut text =
+        Zeroizing::new(String::from_utf8(TEXT_KEY_PREFIX.to_vec()).expect("ASCII prefix"));
+    for byte in key {
+        write!(&mut *text, "{byte:02x}").expect("writing to String");
+    }
+    Zeroizing::new(text.as_bytes().to_vec())
+}
+
+fn stored_key(key: &[u8; 32]) -> Zeroizing<Vec<u8>> {
+    if cfg!(target_os = "linux") {
+        text_key(key)
+    } else {
+        Zeroizing::new(key.to_vec())
+    }
+}
+
+fn decoded_key(secret: Vec<u8>) -> Result<Zeroizing<[u8; 32]>> {
+    let secret = Zeroizing::new(secret);
+    let mut key = Zeroizing::new([0; 32]);
+    if secret.len() == 32 {
+        key.copy_from_slice(&secret);
+        return Ok(key);
+    }
+    let text = secret
+        .strip_prefix(TEXT_KEY_PREFIX)
+        .filter(|text| text.len() == 64)
+        .context("The archive key in the OS keyring is invalid")?;
+    for (output, pair) in key.iter_mut().zip(text.as_chunks::<2>().0) {
+        let pair =
+            std::str::from_utf8(pair).context("The archive key in the OS keyring is invalid")?;
+        *output =
+            u8::from_str_radix(pair, 16).context("The archive key in the OS keyring is invalid")?;
+    }
+    Ok(key)
+}
+
+fn keyring_recovery() -> &'static str {
+    #[cfg(target_os = "linux")]
+    {
+        "Start a Secret Service provider in your desktop session (GNOME Keyring, or KWallet with Secret Service support), unlock its login collection, then choose Try again. Zap Faster needs the session D-Bus service org.freedesktop.secrets; the archive has not been replaced"
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        "Unlock your OS keyring, then choose Try again"
+    }
 }
 
 fn platform_store() -> Result<std::sync::Arc<dyn CredentialStoreApi>> {
@@ -146,30 +299,17 @@ fn platform_store() -> Result<std::sync::Arc<dyn CredentialStoreApi>> {
     let store = apple_native_keyring_store::keychain::Store::new();
     #[cfg(windows)]
     let store = windows_native_keyring_store::Store::new();
-    Ok(store
-        .map_err(keyring_error)
-        .context("Unlock your OS keyring and restart Zap Faster")?
+    Ok(store.map_err(keyring_error).context(keyring_recovery())?
         as std::sync::Arc<dyn CredentialStoreApi>)
 }
 
 fn key_from_entry(path: &Path, entry: &keyring_core::Entry) -> Result<Zeroizing<[u8; 32]>> {
     match entry.get_secret() {
-        Ok(secret) => {
-            let secret = Zeroizing::new(secret);
-            // Start over moves the unreadable archive aside but leaves its
-            // credential behind. Replace an invalid credential only when no
-            // archive remains at this path, never while protecting an archive.
-            if secret.len() != 32 && !path.try_exists()? {
-                return create_key(entry);
-            }
-            ensure!(
-                secret.len() == 32,
-                "The archive key in the OS keyring is invalid"
-            );
-            let mut key = Zeroizing::new([0; 32]);
-            key.copy_from_slice(&secret);
-            Ok(key)
-        }
+        Ok(secret) => match decoded_key(secret) {
+            Ok(key) => Ok(key),
+            Err(_) if !path.try_exists()? => create_key(entry),
+            Err(error) => Err(error),
+        },
         Err(keyring_core::Error::NoEntry) => {
             ensure!(
                 plaintext(path)?,
@@ -177,9 +317,7 @@ fn key_from_entry(path: &Path, entry: &keyring_core::Entry) -> Result<Zeroizing<
             );
             create_key(entry)
         }
-        Err(error) => {
-            Err(keyring_error(error)).context("Unlock your OS keyring and restart Zap Faster")
-        }
+        Err(error) => Err(keyring_error(error)).context(keyring_recovery()),
     }
 }
 
@@ -211,16 +349,16 @@ fn create_key(entry: &keyring_core::Entry) -> Result<Zeroizing<[u8; 32]>> {
     let mut key = Zeroizing::new([0; 32]);
     getrandom::fill(key.as_mut()).context("Could not generate an archive key")?;
     entry
-        .set_secret(key.as_ref())
+        .set_secret(&stored_key(&key))
         .map_err(keyring_error)
         .context("Could not save the archive key in the OS keyring")?;
     // Read back before touching the only copy of the message history.
-    let saved = Zeroizing::new(
+    let saved = decoded_key(
         entry
             .get_secret()
             .map_err(keyring_error)
             .context("Could not verify the saved archive key")?,
-    );
+    )?;
     ensure!(
         saved.as_slice() == key.as_ref(),
         "The OS keyring did not retain the archive key"
@@ -228,7 +366,7 @@ fn create_key(entry: &keyring_core::Entry) -> Result<Zeroizing<[u8; 32]>> {
     Ok(key)
 }
 
-fn key_literal(key: &[u8; 32]) -> Zeroizing<String> {
+pub(super) fn key_literal(key: &[u8; 32]) -> Zeroizing<String> {
     use std::fmt::Write;
     let mut literal = Zeroizing::new(String::with_capacity(67));
     literal.push_str("x'");
@@ -239,7 +377,7 @@ fn key_literal(key: &[u8; 32]) -> Zeroizing<String> {
     literal
 }
 
-fn keyed(path: &Path, key: &[u8; 32]) -> Result<Connection> {
+pub(super) fn keyed(path: &Path, key: &[u8; 32]) -> Result<Connection> {
     let connection = Connection::open(path)?;
     connection.pragma_update(None, "key", &*key_literal(key))?;
     let version: String = connection
@@ -341,6 +479,19 @@ pub(super) fn open(path: &Path, key: &[u8; 32]) -> Result<Connection> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn credential_text_roundtrips_all_bytes_and_keeps_legacy_binary_keys() {
+        let key = std::array::from_fn(|index| (index * 8) as u8);
+        let text = text_key(&key);
+        assert!(std::str::from_utf8(&text).is_ok());
+        assert_eq!(*decoded_key(text.to_vec()).unwrap(), key);
+        assert_eq!(*decoded_key(key.to_vec()).unwrap(), key);
+        assert!(decoded_key(b"zapfast-key-v1:bad".to_vec()).is_err());
+        let mut invalid = text.to_vec();
+        *invalid.last_mut().unwrap() = b'z';
+        assert!(decoded_key(invalid).is_err());
+    }
+
     fn directory() -> tempfile::TempDir {
         tempfile::tempdir().unwrap()
     }
@@ -349,6 +500,34 @@ mod tests {
         connection
             .query_row("SELECT value FROM secrets", [], |row| row.get(0))
             .unwrap()
+    }
+
+    #[test]
+    fn restore_credentials_refuse_existing_keys_and_only_rollback_their_own_key() {
+        let store = keyring_core::mock::Store::new().unwrap();
+        let entry = store
+            .build("restore-fixture", "synthetic-key", None)
+            .unwrap();
+        save_new_restore_key_in(&entry, &[7; 32]).unwrap();
+        assert!(save_new_restore_key_in(&entry, &[8; 32]).is_err());
+        assert!(forget_owned_restore_key_in(&entry, &restore_key_digest(&[8; 32])).is_err());
+        assert_eq!(*decoded_key(entry.get_secret().unwrap()).unwrap(), [7; 32]);
+        forget_owned_restore_key_in(&entry, &restore_key_digest(&[7; 32])).unwrap();
+        assert!(matches!(
+            entry.get_secret(),
+            Err(keyring_core::Error::NoEntry)
+        ));
+    }
+
+    #[test]
+    fn reserved_restore_identity_matches_the_published_account_folder() {
+        let directory = directory();
+        let reserved = restore_key_identity(directory.path(), "2").unwrap();
+        fs::create_dir(directory.path().join("2")).unwrap();
+        assert_eq!(
+            reserved,
+            archive_key_identity(&directory.path().join("2/archive.db")).unwrap()
+        );
     }
 
     #[test]
@@ -393,11 +572,9 @@ mod tests {
         mock.set_error(keyring_core::Error::PlatformFailure(Box::new(
             std::io::Error::other("locked"),
         )));
-        assert!(
-            key_from_entry(&path, &entry)
-                .unwrap_err()
-                .to_string()
-                .contains("Unlock")
+        assert_eq!(
+            key_from_entry(&path, &entry).unwrap_err().to_string(),
+            keyring_recovery()
         );
         assert_eq!(fs::read(&path).unwrap(), original);
     }
@@ -468,7 +645,7 @@ mod tests {
             // The recovery action keeps the old archive before retrying unlock.
             fs::rename(&path, &kept).unwrap();
             let key = key_from_entry(&path, &entry).unwrap();
-            assert_eq!(entry.get_secret().unwrap(), key.as_slice());
+            assert_eq!(*decoded_key(entry.get_secret().unwrap()).unwrap(), *key);
             assert_eq!(*key_from_entry(&path, &entry).unwrap(), *key);
             assert!(!path.exists());
             assert_eq!(fs::read(&kept).unwrap(), original);

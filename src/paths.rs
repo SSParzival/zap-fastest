@@ -16,11 +16,32 @@ pub struct AppDirs {
     pub cache: PathBuf,
     /// Per-user directory for the single-instance lock and control socket.
     pub runtime: PathBuf,
+    /// Explicitly opted-in portable process preferences. Identity stays in standard directories.
+    pub portable_settings: Option<PathBuf>,
+}
+
+/// A separate preferences marker is required; the updater's installation marker is insufficient.
+fn portable_settings_beside(executable: &Path) -> Option<PathBuf> {
+    let parent = executable.parent()?;
+    let marker = parent.join("zap-faster-portable-settings.txt");
+    let metadata = std::fs::symlink_metadata(&marker).ok()?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() || metadata.len() > 128 {
+        return None;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        if metadata.file_attributes() & 0x400 != 0 {
+            return None;
+        }
+    }
+    (std::fs::read_to_string(marker).ok()?.trim() == "zap-faster-portable-settings-v1")
+        .then(|| parent.join("settings.json"))
 }
 
 impl AppDirs {
     pub fn discover() -> Self {
-        match Self::of("zapfast") {
+        let mut dirs = match Self::of("zapfast") {
             Some(dirs) => dirs,
             None => {
                 let fallback = std::env::current_dir().unwrap_or_default();
@@ -29,9 +50,14 @@ impl AppDirs {
                     state: fallback.join("zapfast-state"),
                     cache: fallback.join("zapfast-cache"),
                     runtime: fallback.join("zapfast-run"),
+                    portable_settings: None,
                 }
             }
+        };
+        if let Ok(executable) = std::env::current_exe() {
+            dirs.portable_settings = portable_settings_beside(&executable);
         }
+        dirs
     }
 
     /// Standard platform directories for the app.
@@ -43,6 +69,7 @@ impl AppDirs {
             .unwrap_or_else(|| project.data_local_dir().to_path_buf());
         Some(Self {
             config: project.config_dir().to_path_buf(),
+            portable_settings: None,
             runtime: runtime_dir(&project, &state),
             state,
             cache: project.cache_dir().to_path_buf(),
@@ -80,6 +107,7 @@ impl AppDirs {
     pub fn under(root: &std::path::Path) -> Self {
         Self {
             config: root.join("config"),
+            portable_settings: None,
             state: root.join("state"),
             cache: root.join("cache"),
             runtime: root.join("run"),
@@ -87,7 +115,9 @@ impl AppDirs {
     }
 
     pub fn settings_file(&self) -> PathBuf {
-        self.config.join("settings.json")
+        self.portable_settings
+            .clone()
+            .unwrap_or_else(|| self.config.join("settings.json"))
     }
 
     /// Ordered list of account ids and the active one.
@@ -268,6 +298,12 @@ impl AppDirs {
     /// sits beside saved stickers rather than in the cache.
     pub fn wallpaper_file(&self, extension: &str) -> PathBuf {
         self.state.join(format!("wallpaper.{extension}"))
+    }
+
+    /// ZapFast's copy of the font file chosen in Settings. User data, so it
+    /// sits in the state directory beside the wallpaper image.
+    pub fn custom_font_dir(&self) -> PathBuf {
+        self.state.join("font")
     }
 
     /// Cached profile-picture path. `full` selects the info-dialog size.
@@ -557,16 +593,47 @@ mod tests {
     }
 
     #[test]
+    fn portable_preferences_are_explicit_and_do_not_move_identity() {
+        let root = tempfile::tempdir().unwrap();
+        let executable = root.path().join("zap-faster.exe");
+        assert!(portable_settings_beside(&executable).is_none());
+        std::fs::write(
+            root.path().join("zap-faster-portable.txt"),
+            "zap-faster-portable-v1",
+        )
+        .unwrap();
+        assert!(portable_settings_beside(&executable).is_none());
+        let marker = root.path().join("zap-faster-portable-settings.txt");
+        std::fs::write(&marker, "invalid").unwrap();
+        assert!(portable_settings_beside(&executable).is_none());
+        std::fs::write(&marker, "zap-faster-portable-settings-v1\n").unwrap();
+        let mut dirs = AppDirs::under(&root.path().join("standard"));
+        let previous = dirs.clone();
+        dirs.portable_settings = portable_settings_beside(&executable);
+        assert_eq!(dirs.settings_file(), root.path().join("settings.json"));
+        assert_eq!(dirs.accounts_file(), previous.accounts_file());
+        assert_eq!(dirs.state, previous.state);
+        assert_eq!(dirs.cache, previous.cache);
+        assert_eq!(dirs.runtime, previous.runtime);
+        assert_eq!(
+            dirs.account(&AccountId::first()).archive_db(),
+            previous.account(&AccountId::first()).archive_db()
+        );
+    }
+
+    #[test]
     fn shared_config_and_state_directory_moves_once() {
         let root = root("shared");
         let old = AppDirs {
             config: root.join("old/data"),
+            portable_settings: None,
             state: root.join("old/data"),
             cache: root.join("old/cache"),
             runtime: root.join("old/run"),
         };
         let new = AppDirs {
             config: root.join("new/data"),
+            portable_settings: None,
             state: root.join("new/data"),
             cache: root.join("new/cache"),
             runtime: root.join("new/run"),

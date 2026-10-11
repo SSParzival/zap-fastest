@@ -1,11 +1,14 @@
 //! Window layout: panels, overlays, keyboard shortcuts.
 
 pub mod accounts;
+pub mod archive_backup;
+pub mod call;
 pub mod chats;
 pub mod conversation;
 pub mod dialogs;
 pub(crate) mod focus;
 pub mod gallery;
+mod glass;
 pub mod image_editor;
 pub mod image_preview;
 pub mod keys;
@@ -14,6 +17,7 @@ pub mod locations;
 pub mod lock;
 pub mod login;
 pub mod message_info;
+pub(crate) mod notification_overlay;
 pub mod pane;
 pub mod picker;
 pub mod polls;
@@ -30,6 +34,9 @@ use crate::model::{Action, Page, SidebarDisplayMode, ToastKind};
 use crate::theme::{self, Icon};
 
 pub fn show(app: &mut App, ui: &mut egui::Ui) {
+    let _text_scale = theme::text_scale(ui.ctx(), app.settings.text_scale);
+    // The root Ui predates this frame's context style update.
+    ui.set_style(ui.ctx().global_style());
     let ctx = ui.ctx().clone();
     let ctx = &ctx;
     track_keyboard_focus(ctx);
@@ -41,6 +48,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         focus_ring(app, ctx);
         return;
     }
+    call::show(app, ctx);
     keys::handle(app, ctx);
     history_buttons(app, ctx);
     let main_navigation = app.is_linked()
@@ -51,6 +59,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         && app.reaction_target.is_none()
         && app.recording.is_none()
         && app.image_preview.is_none()
+        && app.sticker_view.is_none()
         && !app.video_expanded
         && app.picture_edit.is_none()
         && app.emoji_start.is_none()
@@ -73,10 +82,6 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         focus_ring(app, ctx);
         return;
     }
-    let macos = theme::macos_chrome(ctx);
-    if !macos {
-        banner(app, ui);
-    }
     let narrow = narrow(ctx);
     let list_only = narrow && app.page == Page::Chats && app.current_chat().is_none();
     let view = narrow.then_some(if list_only {
@@ -90,16 +95,18 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         None => main_view(app, ui, list_only),
     }
     slide_shield(ctx, narrow, slide.is_some());
-    focus::finish(ctx, main_navigation);
     update::show(app, ctx);
     picker::show(app, ctx);
     dialogs::show(app, ctx);
     image_preview::show(app, ctx);
+    image_preview::show_sticker(app, ctx);
     video_preview::show(app, ctx);
     image_editor::show(app, ctx);
     drop_target(app, ctx);
     toasts(app, ctx);
     focus_ring(app, ctx);
+    notification_overlay::show(app, ctx);
+    focus::finish(ctx, main_navigation);
 }
 
 /// The chat list, or the open chat or page with the list beside it unless
@@ -240,7 +247,10 @@ pub(crate) fn narrow(ctx: &egui::Context) -> bool {
 }
 
 fn central_background(app: &App) -> egui::Color32 {
-    if app.page == Page::Chats {
+    if app.page == Page::Chats && app.palette.vibrant() {
+        // The conversation paints its own translucent background.
+        egui::Color32::TRANSPARENT
+    } else if app.page == Page::Chats {
         app.settings.wallpaper_background(&app.palette)
     } else {
         app.palette.panel
@@ -270,6 +280,7 @@ fn central_frame(app: &App) -> Frame {
 /// message selection, or a menu.
 fn history_buttons(app: &mut App, ctx: &egui::Context) {
     if app.image_preview.is_some()
+        || app.sticker_view.is_some()
         || app.video_expanded
         || app.dialog.is_some()
         || app.show_update
@@ -435,13 +446,16 @@ fn drop_target(app: &mut App, ctx: &egui::Context) {
 /// Connection and history-sync banner.
 fn banner(app: &mut App, ui: &mut egui::Ui) {
     let palette = app.palette;
+    let locale = app.locale;
+    use crate::i18n::gettext;
     let update = app.update.clone();
     let (icon, text, color, retry, download) = match &app.link {
         LinkStatus::Connected if app.syncing => (
             Icon::Refresh,
             match app.sync_percent {
-                Some(percent) => format!("Loading chat history… {percent}%"),
-                None => "Loading chat history…".to_owned(),
+                Some(percent) => gettext(locale, "Loading chat history… {percent}%")
+                    .replace("{percent}", &percent.to_string()),
+                None => gettext(locale, "Loading chat history…").into_owned(),
             },
             palette.accent,
             false,
@@ -451,7 +465,8 @@ fn banner(app: &mut App, ui: &mut egui::Ui) {
             let update = update.as_ref().expect("checked above");
             (
                 Icon::Info,
-                format!("Zap Faster {} is available", update.version),
+                gettext(locale, "Zap Faster {version} is available")
+                    .replace("{version}", &update.version.to_string()),
                 palette.accent,
                 false,
                 Some(update.url.clone()),
@@ -460,14 +475,14 @@ fn banner(app: &mut App, ui: &mut egui::Ui) {
         LinkStatus::Connected => return,
         LinkStatus::Starting | LinkStatus::Connecting => (
             Icon::Refresh,
-            "Connecting to WhatsApp…".to_owned(),
+            gettext(locale, "Connecting to WhatsApp…").into_owned(),
             palette.secondary,
             false,
             None,
         ),
         LinkStatus::Disconnected { reason } => (
             Icon::WifiOff,
-            format!("Offline ({reason}). Reconnecting…"),
+            gettext(locale, "Offline ({reason}). Reconnecting…").replace("{reason}", reason),
             palette.warning,
             true,
             None,
@@ -481,21 +496,28 @@ fn banner(app: &mut App, ui: &mut egui::Ui) {
         ),
         LinkStatus::Unlinked { .. } | LinkStatus::LoggedOut => (
             Icon::Smartphone,
-            "Not linked to a phone".to_owned(),
+            gettext(locale, "Not linked to a phone").into_owned(),
             palette.warning,
             false,
             None,
         ),
     };
-    egui::Panel::top("banner")
-        .show_separator_line(false)
-        .frame(
-            Frame::new()
-                .fill(palette.panel)
-                .inner_margin(Margin::symmetric(14, 6)),
-        )
+    if ui.available_width() < 120.0 {
+        let response = theme::icon_button(ui, icon, 18.0, color, palette.text, &text);
+        if response.clicked() {
+            if download.is_some() {
+                app.actions.push(Action::ShowUpdate);
+            } else if retry {
+                app.actions.push(Action::Reconnect);
+            }
+        }
+        return;
+    }
+    Frame::new()
+        .fill(palette.panel)
+        .inner_margin(Margin::symmetric(14, 6))
         .show(ui, |ui| {
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 // Progress/connection events wake the window. A long history
                 // sync must not redraw every message just to spin this icon.
                 theme::icon(ui, icon, 15.0, color);

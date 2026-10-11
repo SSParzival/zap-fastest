@@ -85,6 +85,23 @@ pub struct Palette {
     pub link: Color32,
     /// Read-receipt blue.
     pub read: Color32,
+    /// How message bubbles are shaped. Neither palette files nor the copy
+    /// of a palette cached in settings can set it, so custom themes keep
+    /// WhatsApp's: only the built-in Messages palettes choose another.
+    #[serde(skip)]
+    pub bubbles: BubbleStyle,
+}
+
+/// The shape of message bubbles.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BubbleStyle {
+    /// Softly rounded, lifted by a shadow, with a tail at the top of a run.
+    #[default]
+    WhatsApp,
+    /// As macOS Messages draws them: rounder, flat, with a curled tail under
+    /// the last message of a run.
+    Messages,
 }
 
 impl Palette {
@@ -114,6 +131,69 @@ impl Palette {
             bubble_out: Color32::from_rgb(0x00, 0x5c, 0x4b),
             link: Color32::from_rgb(0x53, 0xbd, 0xeb),
             read: Color32::from_rgb(0x53, 0xbd, 0xeb),
+            bubbles: BubbleStyle::WhatsApp,
+        }
+    }
+
+    /// A dark theme in the neutral greys of macOS, with bubbles shaped as
+    /// Messages draws them and a green of its own for yours, livelier than
+    /// WhatsApp's `#005c4b` and still readable under white text.
+    pub fn messages() -> Self {
+        Self {
+            dark: true,
+            window: Color32::from_rgb(0x1e, 0x1e, 0x1e),
+            panel: Color32::from_rgb(0x26, 0x26, 0x27),
+            surface: Color32::from_rgb(0x32, 0x32, 0x34),
+            surface_hover: Color32::from_rgb(0x3a, 0x3a, 0x3c),
+            surface_active: Color32::from_rgb(0x46, 0x46, 0x49),
+            outline: Color32::from_rgb(0x38, 0x38, 0x3a),
+            text: Color32::from_rgb(0xf5, 0xf5, 0xf7),
+            secondary: Color32::from_rgb(0xae, 0xae, 0xb2),
+            dim: Color32::from_rgb(0xa4, 0xa4, 0xa9),
+            accent: Color32::from_rgb(0x30, 0xd1, 0x58),
+            accent_hover: Color32::from_rgb(0x5c, 0xe0, 0x7d),
+            on_accent: Color32::from_rgb(0x0b, 0x14, 0x1a),
+            danger: Color32::from_rgb(0xff, 0x45, 0x3a),
+            warning: Color32::from_rgb(0xff, 0xd6, 0x0a),
+            overlay: Color32::from_rgb(0x2c, 0x2c, 0x2e),
+            shadow: Color32::from_black_alpha(150),
+            chat: Color32::from_rgb(0x1e, 0x1e, 0x1e),
+            bubble_in: Color32::from_rgb(0x3a, 0x3a, 0x3c),
+            bubble_out: Color32::from_rgb(0x13, 0x7a, 0x48),
+            link: Color32::from_rgb(0x64, 0xd2, 0xff),
+            read: Color32::from_rgb(0x64, 0xd2, 0xff),
+            bubbles: BubbleStyle::Messages,
+        }
+    }
+
+    /// The Messages theme in macOS's light greys. Your own bubbles keep
+    /// the dark theme's green, with white text on it, as Messages draws its
+    /// blue ones.
+    pub fn messages_light() -> Self {
+        Self {
+            dark: false,
+            window: Color32::WHITE,
+            panel: Color32::from_rgb(0xf2, 0xf2, 0xf4),
+            surface: Color32::from_rgb(0xe8, 0xe8, 0xea),
+            surface_hover: Color32::from_rgb(0xde, 0xde, 0xe0),
+            surface_active: Color32::from_rgb(0xd1, 0xd1, 0xd6),
+            outline: Color32::from_rgb(0xd8, 0xd8, 0xdc),
+            text: Color32::from_rgb(0x1d, 0x1d, 0x1f),
+            secondary: Color32::from_rgb(0x5e, 0x5e, 0x63),
+            dim: Color32::from_rgb(0x64, 0x64, 0x69),
+            accent: Color32::from_rgb(0x13, 0x7a, 0x48),
+            accent_hover: Color32::from_rgb(0x0f, 0x6a, 0x3d),
+            on_accent: Color32::WHITE,
+            danger: Color32::from_rgb(0xd7, 0x00, 0x15),
+            warning: Color32::from_rgb(0xa0, 0x5a, 0x00),
+            overlay: Color32::WHITE,
+            shadow: Color32::from_black_alpha(LIGHT_SHADOW_ALPHA),
+            chat: Color32::WHITE,
+            bubble_in: Color32::from_rgb(0xe9, 0xe9, 0xeb),
+            bubble_out: Color32::from_rgb(0x13, 0x7a, 0x48),
+            link: Color32::from_rgb(0x00, 0x66, 0xcc),
+            read: Color32::from_rgb(0x00, 0x66, 0xcc),
+            bubbles: BubbleStyle::Messages,
         }
     }
 
@@ -146,7 +226,73 @@ impl Palette {
             link: Color32::from_rgb(0x02, 0x7e, 0xb5),
             // The lighter blue vanished on the green outgoing bubble.
             read: Color32::from_rgb(0x02, 0x7e, 0xb5),
+            bubbles: BubbleStyle::WhatsApp,
         }
+    }
+
+    /// Whether this is the Messages theme's glass: a frosted header, glass
+    /// pills and tints, on every platform. Whether the desktop also shows
+    /// through the window is [`crate::backdrop::active`].
+    pub fn vibrant(&self) -> bool {
+        self.bubbles == BubbleStyle::Messages
+    }
+
+    /// The chat list's background. Over a window's material it only darkens
+    /// it a little; without one, it is the panel's own colour.
+    pub fn sidebar(&self) -> Color32 {
+        if self.vibrant() && crate::backdrop::active() {
+            self.panel.gamma_multiply(SIDEBAR_TINT)
+        } else {
+            self.panel
+        }
+    }
+
+    /// The conversation's background on a vibrant theme: mostly `color`,
+    /// with a little of the material behind the window showing through.
+    pub fn vibrant_chat(&self, color: Color32) -> Color32 {
+        color.gamma_multiply(CHAT_TINT)
+    }
+
+    /// The veil of a vibrant header over the frosted messages under it, a
+    /// light one: its name and buttons sit on pills of their own.
+    pub fn vibrant_header(&self, color: Color32) -> Color32 {
+        // A light veil over dark content reads as fog where a dark one
+        // reads as shade, so the light palette's is thinner.
+        color.gamma_multiply(if self.dark {
+            HEADER_TINT
+        } else {
+            LIGHT_HEADER_TINT
+        })
+    }
+
+    /// A glass pill under a vibrant header's name or buttons: much more of
+    /// `color` than the veil, so text on it reads over any picture.
+    pub fn vibrant_pill(&self, color: Color32) -> Color32 {
+        // White glass reads as an opaque box well before dark glass does.
+        color.gamma_multiply(if self.dark {
+            PILL_TINT
+        } else {
+            LIGHT_PILL_TINT
+        })
+    }
+
+    /// A see-through tint of the text colour, for surfaces over a vibrant
+    /// window's material: white in a dark palette and black in a light one,
+    /// `strength` of the way to opaque, so the blur shows through.
+    pub fn tint(&self, strength: f32) -> Color32 {
+        let [r, g, b, _] = self.text.to_srgba_unmultiplied();
+        Color32::from_rgba_unmultiplied(r, g, b, (strength * 255.0).round() as u8)
+    }
+
+    /// Glass: what floats over a vibrant conversation, such as the header's
+    /// pills, the composer and the day chips.
+    pub fn glass(&self) -> Color32 {
+        self.vibrant_pill(self.chat)
+    }
+
+    /// The faint edge around glass.
+    pub fn glass_edge(&self) -> Stroke {
+        Stroke::new(1.0, self.text.gamma_multiply(0.08))
     }
 
     /// The palette for a message bubble's contents. Secondary and dim text,
@@ -155,11 +301,52 @@ impl Palette {
     /// on the outgoing bubble. Works for custom themes as well.
     pub fn on_bubble(&self, own: bool) -> Self {
         let fill = if own { self.bubble_out } else { self.bubble_in };
+        // Buttons and icons inside a bubble tint it with the accent, which in
+        // Messages is the bubble's own green: draw them white on your own.
+        let own_messages = own && self.bubbles == BubbleStyle::Messages;
+        // Light Messages draws your own bubble saturated, with white on it.
+        if own_messages && !self.dark {
+            let soft = Color32::WHITE.lerp_to_gamma(fill, 0.2);
+            return Self {
+                text: Color32::WHITE,
+                secondary: readable_on(fill, soft, Color32::WHITE, 4.5),
+                dim: readable_on(fill, soft, Color32::WHITE, 4.5),
+                link: Color32::WHITE,
+                read: Color32::WHITE,
+                // Cards inside the bubble wash it with the window colour,
+                // and buttons tint it with the accent: darker green and white
+                // keep both visible under white text.
+                window: fill.lerp_to_gamma(Color32::BLACK, 0.55),
+                accent: Color32::WHITE,
+                accent_hover: Color32::WHITE,
+                on_accent: fill,
+                ..*self
+            };
+        }
+        let (accent, on_accent) = if own_messages {
+            (Color32::WHITE, fill)
+        } else {
+            (self.accent, self.on_accent)
+        };
         Self {
             secondary: readable_on(fill, self.secondary, self.text, 4.5),
             dim: readable_on(fill, self.dim, self.text, 4.5),
             // Icons need 3:1 (WCAG 1.4.11).
             read: readable_on(fill, self.read, self.text, 3.0),
+            accent,
+            accent_hover: if own_messages {
+                accent
+            } else {
+                self.accent_hover
+            },
+            on_accent,
+            // The palette's cyan reads at about 3:1 on the green; white, as
+            // in the light palette, does.
+            link: if own_messages {
+                Color32::WHITE
+            } else {
+                self.link
+            },
             ..*self
         }
     }
@@ -306,6 +493,23 @@ impl fastframe_theme::Palette for Palette {
     }
 }
 
+/// How strong the tint of a field over a vibrant window is, and of a row
+/// under the pointer and a selected one.
+pub const TINT_FIELD: f32 = 0.08;
+pub const TINT_HOVER: f32 = 0.06;
+pub const TINT_SELECTED: f32 = 0.12;
+/// How opaque a vibrant theme's header is over the messages under it.
+const HEADER_TINT: f32 = 0.3;
+/// The same in a light palette, where a veil over dark content reads as fog.
+const LIGHT_HEADER_TINT: f32 = 0.2;
+/// How opaque the glass pills under a vibrant header's name and buttons are.
+const PILL_TINT: f32 = 0.72;
+/// The same in a light palette.
+const LIGHT_PILL_TINT: f32 = 0.5;
+/// How opaque a vibrant theme's conversation background is.
+const CHAT_TINT: f32 = 0.82;
+/// How much of the panel colour tints a vibrant sidebar.
+const SIDEBAR_TINT: f32 = 0.35;
 /// How much denser than the palette's shadow colour a bubble's shadow is.
 const SHADOW_DENSITY: f32 = 1.04;
 /// How far a dark theme's raised edge moves from the surface toward the text.
@@ -353,27 +557,75 @@ pub const FOCUS_STROKE_WIDTH: f32 = 1.0;
 pub const ROW_HEIGHT: f32 = 68.0;
 pub const TOP_BAR_HEIGHT: f32 = 60.0;
 
+thread_local! {
+    static TEXT_SCALE: std::cell::Cell<f32> = const { std::cell::Cell::new(1.0) };
+}
+
+pub(crate) struct TextScaleGuard(f32);
+
+impl Drop for TextScaleGuard {
+    fn drop(&mut self) {
+        TEXT_SCALE.set(self.0);
+    }
+}
+
+/// Scope custom font helpers to one window draw, without accumulating scale.
+pub(crate) fn text_scale(ctx: &egui::Context, value: f32) -> TextScaleGuard {
+    let value = if value.is_finite() {
+        value.clamp(0.85, 1.5)
+    } else {
+        1.0
+    };
+    let previous = TEXT_SCALE.replace(value);
+    let changed = [egui::Theme::Dark, egui::Theme::Light]
+        .into_iter()
+        .any(|theme| {
+            (ctx.style_of(theme).text_styles[&egui::TextStyle::Body].size - 14.0 * value).abs()
+                > 0.01
+        });
+    if changed {
+        ctx.all_styles_mut(|style| {
+            for (kind, size) in [
+                (egui::TextStyle::Small, 11.5),
+                (egui::TextStyle::Body, 14.0),
+                (egui::TextStyle::Button, 14.0),
+                (egui::TextStyle::Heading, 22.0),
+                (egui::TextStyle::Monospace, 13.0),
+            ] {
+                if let Some(font) = style.text_styles.get_mut(&kind) {
+                    font.size = size * value;
+                }
+            }
+        });
+    }
+    TextScaleGuard(previous)
+}
+
+fn text_size(size: f32) -> f32 {
+    size * TEXT_SCALE.get()
+}
+
 pub fn regular(size: f32) -> egui::FontId {
-    fastframe_fonts::Weight::Regular.font_id(size)
+    fastframe_fonts::Weight::Regular.font_id(text_size(size))
 }
 
 pub fn medium(size: f32) -> egui::FontId {
-    fastframe_fonts::Weight::Medium.font_id(size)
+    fastframe_fonts::Weight::Medium.font_id(text_size(size))
 }
 
 pub fn semibold(size: f32) -> egui::FontId {
-    fastframe_fonts::Weight::SemiBold.font_id(size)
+    fastframe_fonts::Weight::SemiBold.font_id(text_size(size))
 }
 
 pub fn bold(size: f32) -> egui::FontId {
-    fastframe_fonts::Weight::Bold.font_id(size)
+    fastframe_fonts::Weight::Bold.font_id(text_size(size))
 }
 
 /// The face for counting timers (recording, playback positions): Inter at
 /// `weight`, whose figures are all one width, so a timer does not shift as
 /// it counts. San Francisco and Segoe UI draw proportional figures.
 pub fn tabular(weight: fastframe_fonts::Weight, size: f32) -> egui::FontId {
-    egui::FontId::new(size, tabular_family(weight))
+    egui::FontId::new(text_size(size), tabular_family(weight))
 }
 
 fn tabular_family(weight: fastframe_fonts::Weight) -> egui::FontFamily {
@@ -493,13 +745,33 @@ pub fn apply(ctx: &egui::Context, palette: &Palette) {
 /// platform's font (Settings, Appearance, Font).
 static INTER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// Chooses the interface's typeface and installs it. Call it before
-/// [`install`] with the saved choice, and again when the choice changes.
-pub fn set_font(ctx: &egui::Context, font: crate::settings::FontChoice) {
-    let inter = font == crate::settings::FontChoice::Inter;
-    if INTER.swap(inter, std::sync::atomic::Ordering::AcqRel) != inter {
-        install_fonts(ctx);
-    }
+/// The font file chosen in Settings, which leads the interface fonts.
+static CUSTOM_FONT: std::sync::Mutex<Option<std::sync::Arc<crate::custom_font::Face>>> =
+    std::sync::Mutex::new(None);
+
+/// Chooses the interface's typeface and installs it: `custom`, when given,
+/// leads `font`. Call it before [`install`] with the saved choice, and again
+/// when the choice changes. When the custom font cannot be read the fonts
+/// are installed without it and the error comes back.
+pub fn set_font(
+    ctx: &egui::Context,
+    font: crate::settings::FontChoice,
+    custom: Option<&std::path::Path>,
+) -> Result<(), String> {
+    INTER.store(
+        font == crate::settings::FontChoice::Inter,
+        std::sync::atomic::Ordering::Release,
+    );
+    let (face, result) = match custom.map(crate::custom_font::load) {
+        Some(Ok(face)) => (Some(std::sync::Arc::new(face)), Ok(())),
+        Some(Err(error)) => (None, Err(error)),
+        None => (None, Ok(())),
+    };
+    *CUSTOM_FONT
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = face;
+    install_fonts(ctx);
+    result
 }
 
 /// Whether Inter is the chosen typeface.
@@ -518,15 +790,22 @@ fn primary_font() -> fastframe_fonts::Primary {
     }
 }
 
-/// The chosen interface font at four weights (the platform's, or Inter
-/// where there is none), egui's own fonts behind it, and installed fonts
-/// for the scripts it lacks, hinted as the desktop asks. Inter also draws
-/// the [`tabular`] timers.
+/// The custom font, when one is chosen, then the chosen interface font at
+/// four weights (the platform's, or Inter where there is none), egui's own
+/// fonts behind it, and installed fonts for the scripts it lacks, hinted as
+/// the desktop asks. Inter also draws the [`tabular`] timers.
 fn install_fonts(ctx: &egui::Context) {
     let primary = primary_font();
     let mut fonts = fastframe_fonts::FontSetup::default()
         .primary(primary)
         .definitions();
+    if let Some(face) = CUSTOM_FONT
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .as_ref()
+    {
+        face.lead(&mut fonts);
+    }
     add_tabular(&mut fonts);
     text_rendering().apply_to(&mut fonts);
     ctx.set_fonts(fonts);
@@ -707,6 +986,10 @@ pub fn paint_icon(ui: &egui::Ui, icon: Icon, rect: egui::Rect, size: f32, color:
     icon.image(color, size).paint_at(ui, icon_rect);
 }
 
+/// Padding around an icon button and the width of a standard 18-point button.
+pub const ICON_BUTTON_PAD: f32 = 12.0;
+pub const ICON_BUTTON: f32 = 18.0 + ICON_BUTTON_PAD;
+
 /// Frameless icon button with hover color.
 pub fn icon_button(
     ui: &mut egui::Ui,
@@ -716,7 +999,7 @@ pub fn icon_button(
     hover: Color32,
     tooltip: &str,
 ) -> Response {
-    let edge = size + 12.0;
+    let edge = size + ICON_BUTTON_PAD;
     let (rect, response) = ui.allocate_exact_size(Vec2::splat(edge), Sense::click());
     reveal_focus(&response);
     response.widget_info(|| {
@@ -1168,6 +1451,31 @@ pub fn titlebar_inset(ctx: &egui::Context) -> f32 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn text_size_is_scoped_and_never_multiplies_window_zoom() {
+        let ctx = egui::Context::default();
+        ctx.set_zoom_factor(1.25);
+        let mut output = ctx.run_ui(egui::RawInput::default(), |_| {});
+        output.textures_delta.clear();
+        let original = regular(14.0);
+        {
+            let _guard = text_scale(&ctx, 1.5);
+            assert_eq!(regular(14.0).size, 21.0);
+            assert_eq!(tabular(fastframe_fonts::Weight::Medium, 14.0).size, 21.0);
+            assert_eq!(ctx.zoom_factor(), 1.25);
+            for theme in [egui::Theme::Light, egui::Theme::Dark] {
+                assert_eq!(
+                    ctx.style_of(theme).text_styles[&egui::TextStyle::Body].size,
+                    21.0
+                );
+            }
+            let _nested = text_scale(&ctx, 1.5);
+            assert_eq!(regular(14.0).size, 21.0);
+        }
+        assert_eq!(regular(14.0), original);
+        let _invalid = text_scale(&ctx, f32::NAN);
+        assert_eq!(regular(14.0).size, 14.0);
+    }
     use super::*;
 
     /// Timers count in Inter's tabular figures whatever face draws the
@@ -1297,7 +1605,12 @@ mod tests {
     /// hints. They must reach WCAG AA wherever the built-in themes put them.
     #[test]
     fn built_in_text_colours_reach_aa() {
-        for (name, p) in [("dark", Palette::dark()), ("light", Palette::light())] {
+        for (name, p) in [
+            ("dark", Palette::dark()),
+            ("light", Palette::light()),
+            ("messages", Palette::messages()),
+            ("messages light", Palette::messages_light()),
+        ] {
             let mut pairs = Vec::new();
             for (surface, background) in [
                 ("window", p.window),
@@ -1331,13 +1644,50 @@ mod tests {
         );
     }
 
+    /// Links in the Messages palettes' bubbles reach WCAG AA, your own
+    /// green ones included.
+    #[test]
+    fn links_read_on_messages_bubbles() {
+        for palette in [Palette::messages(), Palette::messages_light()] {
+            for own in [false, true] {
+                let fill = if own {
+                    palette.bubble_out
+                } else {
+                    palette.bubble_in
+                };
+                let link = palette.on_bubble(own).link;
+                let ratio = contrast(link, fill);
+                assert!(
+                    ratio >= 4.5,
+                    "dark {}, own {own}: {ratio:.2}:1",
+                    palette.dark
+                );
+            }
+        }
+    }
+
+    /// The bubble style never comes from a stored palette, so a cached or
+    /// edited one cannot turn a custom theme into the Messages style.
+    #[test]
+    fn stored_palettes_keep_whatsapp_bubbles() {
+        let mut stored = serde_json::to_value(Palette::messages()).unwrap();
+        stored["bubbles"] = "messages".into();
+        let palette: Palette = serde_json::from_value(stored).unwrap();
+        assert_eq!(palette.bubbles, BubbleStyle::WhatsApp);
+    }
+
     /// Bubble contents stay readable for every palette, custom ones included.
     #[test]
     fn bubble_text_is_readable_in_every_palette() {
-        let palettes = [("dark", Palette::dark()), ("light", Palette::light())]
-            .into_iter()
-            .map(|(name, palette)| (name.to_owned(), palette))
-            .chain(presets().map(|theme| (theme.filename.clone(), theme.palette)));
+        let palettes = [
+            ("dark", Palette::dark()),
+            ("light", Palette::light()),
+            ("messages", Palette::messages()),
+            ("messages light", Palette::messages_light()),
+        ]
+        .into_iter()
+        .map(|(name, palette)| (name.to_owned(), palette))
+        .chain(presets().map(|theme| (theme.filename.clone(), theme.palette)));
         for (name, palette) in palettes {
             for own in [false, true] {
                 let fill = if own {
@@ -1350,6 +1700,7 @@ mod tests {
                 assert_readable(
                     &name,
                     &[
+                        ("text", bubble.text, fill),
                         ("secondary", bubble.secondary, fill),
                         ("dim", bubble.dim, fill),
                     ],
