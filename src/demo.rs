@@ -3716,16 +3716,18 @@ mod tests {
     /// reader's window messages in time.
     #[test]
     fn a_contact_typing_steps_the_window_only_with_a_screen_reader() {
-        let run = |reader: bool| {
+        let run = |reader: bool, theme: egui::Theme| {
             let mut app = app();
             apply_flags(&mut app, Some("typers"));
             let ctx = egui::Context::default();
             app.attach(&ctx);
-            // The focused composer's independent blink can request a frame
-            // just before a blink boundary. Asset-loading speed determines
-            // which boundary this fixture samples, especially on macOS.
-            // Keep its cursor visible while measuring only the typing dots.
-            ctx.global_style_mut(|style| style.visuals.text_cursor.blink = false);
+            // An editor's independent cursor blink can request a frame at a
+            // blink boundary. Theme application rebuilds its visual settings,
+            // so disabling blink before the first frame does not persist.
+            // Keep the composer unfocused while measuring the typing dots,
+            // without the first-frame focus gain asking it to take focus.
+            app.window_focused = true;
+            app.focus_composer = false;
             if reader {
                 ctx.enable_accesskit();
             }
@@ -3746,6 +3748,7 @@ mod tests {
                 }
                 let input = egui::RawInput {
                     time: Some(10.0 + f64::from(frame) * 0.1),
+                    system_theme: Some(theme),
                     screen_rect: Some(egui::Rect::from_min_size(
                         egui::Pos2::ZERO,
                         egui::vec2(1180.0, 780.0),
@@ -3758,6 +3761,10 @@ mod tests {
                     app.frame_ui(ui);
                 });
                 output.textures_delta.clear();
+                assert!(
+                    !ctx.memory(|memory| memory.has_focus(egui::Id::new("composer-text"))),
+                    "typing fixture must keep the {theme:?} composer unfocused"
+                );
                 delay = output.viewport_output[&egui::ViewportId::ROOT].repaint_delay;
             }
             (delay, ctx.repaint_causes())
@@ -3767,15 +3774,17 @@ mod tests {
                 .iter()
                 .any(|cause| cause.file.ends_with("conversation.rs"))
         };
-        let (plain, causes) = run(false);
-        assert_eq!(plain, std::time::Duration::ZERO, "{causes:?}");
-        assert!(from_the_dots(&causes), "{causes:?}");
-        let (stepped, causes) = run(true);
-        assert!(
-            stepped > std::time::Duration::from_millis(75) && stepped <= crate::motion::STEP,
-            "{stepped:?}: {causes:?}"
-        );
-        assert!(from_the_dots(&causes), "{causes:?}");
+        for theme in [egui::Theme::Light, egui::Theme::Dark] {
+            let (plain, causes) = run(false, theme);
+            assert_eq!(plain, std::time::Duration::ZERO, "{causes:?}");
+            assert!(from_the_dots(&causes), "{causes:?}");
+            let (stepped, causes) = run(true, theme);
+            assert!(
+                stepped > std::time::Duration::from_millis(75) && stepped <= crate::motion::STEP,
+                "{stepped:?}: {causes:?}"
+            );
+            assert!(from_the_dots(&causes), "{causes:?}");
+        }
     }
 
     /// A sent message moves its chat up, and the scrolled chat list follows
