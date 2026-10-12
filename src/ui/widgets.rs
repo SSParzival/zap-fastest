@@ -910,28 +910,55 @@ pub fn setting_row(
     description: &str,
     control: impl FnOnce(&mut Ui),
 ) {
+    if ui.available_width() < 120.0 + 260.0 + ui.spacing().item_spacing.x {
+        setting_row_stacked(ui, palette, label, description, |ui| {
+            ui.horizontal_wrapped(control);
+        });
+        return;
+    }
     ui.horizontal(|ui| {
         ui.vertical(|ui| {
             ui.set_width((ui.available_width() - 260.0).max(120.0));
-            rich_text(ui, label, theme::medium(14.0), palette.text);
-            if !description.is_empty() {
-                let description = line(
-                    ui,
-                    description,
-                    theme::regular(12.5),
-                    palette.secondary,
-                    ui.available_width(),
-                    usize::MAX,
-                );
-                let (rect, _) = ui.allocate_exact_size(description.size(), Sense::hover());
-                if ui.is_rect_visible(rect) {
-                    description.paint(ui, rect.min, palette.secondary);
-                }
-            }
+            setting_row_text(ui, palette, label, description);
         });
         ui.with_layout(Layout::right_to_left(Align::Center), control);
     });
     ui.add_space(10.0);
+}
+
+/// Full-width settings information or controls that need multiple lines.
+pub fn setting_row_stacked(
+    ui: &mut Ui,
+    palette: &Palette,
+    label: &str,
+    description: &str,
+    control: impl FnOnce(&mut Ui),
+) {
+    ui.vertical(|ui| {
+        ui.set_width(ui.available_width());
+        setting_row_text(ui, palette, label, description);
+        ui.add_space(6.0);
+        control(ui);
+    });
+    ui.add_space(10.0);
+}
+
+fn setting_row_text(ui: &mut Ui, palette: &Palette, label: &str, description: &str) {
+    rich_text(ui, label, theme::medium(14.0), palette.text);
+    if !description.is_empty() {
+        let description = line(
+            ui,
+            description,
+            theme::regular(12.5),
+            palette.secondary,
+            ui.available_width(),
+            usize::MAX,
+        );
+        let (rect, _) = ui.allocate_exact_size(description.size(), Sense::hover());
+        if ui.is_rect_visible(rect) {
+            description.paint(ui, rect.min, palette.secondary);
+        }
+    }
 }
 
 pub fn paint_vertical_gradient(ui: &Ui, rect: Rect, top: Color32, bottom: Color32) {

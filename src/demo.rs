@@ -17042,6 +17042,81 @@ mod bubble_detail_tests {
         }
     }
 
+    #[test]
+    fn file_settings_status_and_controls_stay_inside_the_column() {
+        for width in [600.0, 1080.0, 1400.0] {
+            for text_scale in [1.0, 1.5] {
+                let mut app = app();
+                apply_flags(&mut app, Some("settings"));
+                app.settings.sidebar_width = 395.0;
+                app.settings.text_scale = text_scale;
+                app.settings_search = "Files".into();
+                app.archive_progress = Some(crate::model::ArchiveRecoveryProgress {
+                    pending: 999_999,
+                    downloaded: 999_999,
+                    unavailable: 999_999,
+                    bytes: Some(123_456 * 1024 * 1024),
+                    budget_reached: true,
+                    phone_history: crate::model::HistoryResponseState::Answered,
+                    connected: true,
+                    ..Default::default()
+                });
+                app.backup_status =
+                    Some("Archive backup saved (123456 files, 123456 MiB). ".repeat(4));
+                app.backup_merge_preview = Some(Default::default());
+                let ctx = egui::Context::default();
+                app.attach(&ctx);
+                ctx.enable_accesskit();
+                let mut controls = std::collections::BTreeMap::new();
+                for _ in 0..3 {
+                    let mut output = ctx.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(width, 1600.0),
+                            )),
+                            ..Default::default()
+                        },
+                        |ui| {
+                            app.background_frame(ui.ctx());
+                            app.frame_ui(ui);
+                        },
+                    );
+                    output.textures_delta.clear();
+                    if let Some(tree) = output.platform_output.accesskit_update {
+                        for (_, node) in tree.nodes {
+                            if let Some(label) = node.label().or_else(|| node.value())
+                                && (label.starts_with("Phone history:")
+                                    || label.starts_with("Archive backup saved (")
+                                    || matches!(label, "Back up…" | "Restore…" | "Review merge…"))
+                                && let Some(bounds) = node.bounds()
+                            {
+                                controls.insert(label.to_owned(), bounds);
+                            }
+                        }
+                    }
+                }
+                let column = ctx
+                    .data(|data| data.get_temp::<egui::Rangef>(crate::ui::settings::column_id()))
+                    .unwrap();
+                assert!(controls.contains_key("Phone history: response received"));
+                assert!(
+                    controls
+                        .keys()
+                        .any(|label| label.starts_with("Archive backup saved ("))
+                );
+                let pixels = f64::from(ctx.pixels_per_point());
+                for (label, bounds) in controls {
+                    assert!(
+                        bounds.x0 / pixels >= f64::from(column.min) - 1.0
+                            && bounds.x1 / pixels <= f64::from(column.max) + 1.0,
+                        "{label} escaped Settings at width {width}, scale {text_scale}: {bounds:?}, {column:?}"
+                    );
+                }
+            }
+        }
+    }
+
     /// In a wide window the settings keep their width and sit in the
     /// middle of the page instead of against its left edge (#242).
     #[test]

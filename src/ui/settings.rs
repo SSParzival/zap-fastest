@@ -98,6 +98,8 @@ type Draw = Box<dyn FnOnce(&mut egui::Ui, &mut App)>;
 enum Control {
     /// The control beside a titled row.
     Row(Draw),
+    /// Full-width controls/status below their label and description.
+    StackedRow(Draw),
     /// A switch bound to a setting.
     Toggle(fn(&mut Settings) -> &mut bool),
     /// A switch bound to the active WhatsApp account.
@@ -132,6 +134,21 @@ impl Section {
             keywords: Vec::new(),
         };
         self.entries.push((row, Control::Row(Box::new(control))));
+    }
+
+    fn stacked_row(
+        &mut self,
+        title: impl Into<Text>,
+        description: impl Into<Text>,
+        control: impl FnOnce(&mut egui::Ui, &mut App) + 'static,
+    ) {
+        let row = Row {
+            title: title.into(),
+            description: description.into(),
+            keywords: Vec::new(),
+        };
+        self.entries
+            .push((row, Control::StackedRow(Box::new(control))));
     }
 
     fn toggle(
@@ -197,6 +214,13 @@ impl Section {
                         &row.description.shown,
                         |ui| control(ui, app),
                     ),
+                    Control::StackedRow(control) => widgets::setting_row_stacked(
+                        ui,
+                        &palette,
+                        &row.title.shown,
+                        &row.description.shown,
+                        |ui| control(ui, app),
+                    ),
                     Control::Toggle(field) => {
                         toggle(ui, app, &row.title.shown, &row.description.shown, field);
                     }
@@ -217,13 +241,15 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     }
     let palette = app.palette;
     let locale = app.locale;
+    let pane_width = ui.available_width();
     egui::ScrollArea::vertical()
         .id_salt("settings")
+        .horizontal_scroll_offset(0.0)
         .auto_shrink([false, false])
         .show(ui, |ui| {
             // The column keeps a readable width and sits in the middle of a
             // wide window instead of leaving the space on its right empty.
-            let full = ui.available_width();
+            let full = ui.available_width().min(pane_width);
             let width = (full - 2.0 * SIDE_MARGIN).clamp(0.0, COLUMN_WIDTH);
             let column = Rect::from_min_size(
                 ui.cursor().min + vec2((full - width) / 2.0, TOP_MARGIN),
@@ -959,7 +985,7 @@ fn sections(app: &App) -> Vec<Section> {
             phone_history,
             connected,
         } = progress;
-        files.row(translated(locale,"Archive progress"), translated(locale,"Counts describe saved files and queued work. Unavailable includes oversized files and clips missing recovery keys; it does not prove that WhatsApp has no copy. History responses do not prove the archive is complete."), move |ui, _app| {
+        files.stacked_row(translated(locale,"Archive progress"), translated(locale,"Counts describe saved files and queued work. Unavailable includes oversized files and clips missing recovery keys; it does not prove that WhatsApp has no copy. History responses do not prove the archive is complete."), move |ui, _app| {
             ui.label([
                 crate::i18n::ngettext(locale,"{count} file downloaded","{count} files downloaded",downloaded.min(u64::from(u32::MAX)) as u32).replace("{count}",&downloaded.to_string()),
                 crate::i18n::ngettext(locale,"{count} file waiting","{count} files waiting",pending.min(u64::from(u32::MAX)) as u32).replace("{count}",&pending.to_string()),
@@ -1017,11 +1043,12 @@ fn sections(app: &App) -> Vec<Section> {
             }
         },
     );
-    files.row(
+    files.stacked_row(
         translated(locale, "Encrypted account backups"),
         translated(locale, "Save the account and downloaded files with a passphrase. Restore into a separate account, initially offline."),
         |ui, app| {
             let palette = app.palette;
+            ui.horizontal_wrapped(|ui| {
             if ui.add_enabled_ui(!app.backup_busy, |ui| theme::soft_button(ui, &palette, None, &crate::i18n::gettext(app.locale,"Back up…"), false)).inner.clicked() {
                 app.backup_draft = super::archive_backup::BackupDraft::default();
                 app.actions.push(Action::ShowDialog(Dialog::ArchiveBackup { restore: false }));
@@ -1030,10 +1057,11 @@ fn sections(app: &App) -> Vec<Section> {
                 app.backup_draft = super::archive_backup::BackupDraft::default();
                 app.actions.push(Action::ShowDialog(Dialog::ArchiveBackup { restore: true }));
             }
-            if let Some(status) = &app.backup_status { ui.label(status); }
             if app.backup_merge_preview.is_some() && theme::soft_button(ui, &palette, None, &crate::i18n::gettext(app.locale, "Review merge…"), false).clicked() {
                 app.actions.push(Action::ShowDialog(Dialog::ConfirmBackupMerge));
             }
+            });
+            if let Some(status) = &app.backup_status { ui.label(status); }
         },
     );
     if app.account().settings.archive_only && app.account().dirs.session_db().is_file() {
