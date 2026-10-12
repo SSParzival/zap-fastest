@@ -28,6 +28,8 @@ pub(super) struct CallRuntime {
     created_at: i64,
     /// The snapshot the UI was last handed, so the periodic check publishes only real changes.
     last: CallUpdate,
+    ringback: Option<crate::call_audio::Ringback>,
+    video_used: bool,
 }
 
 /// What a call's background tasks report back to the worker loop.
@@ -49,12 +51,15 @@ impl CallRuntime {
     pub(super) fn new(call: Call) -> Self {
         let (_tx, events) = async_channel::bounded(64);
         let last = call.update();
+        let video_used = last.video_requested || last.video_active;
         Self {
             call,
             events,
             watching: false,
             created_at: crate::util::now(),
             last,
+            ringback: None,
+            video_used,
         }
     }
 
@@ -240,6 +245,18 @@ impl Worker {
             log::warn!("could not store synced call outcome");
             return;
         }
+        if local
+            && self
+                .archive
+                .message(
+                    &chat,
+                    &format!("local-call:{}", call_id.unwrap_or_default()),
+                )
+                .is_ok_and(|row| row.is_some())
+        {
+            // Keep the locally measured duration; a later app-state replay is not another call.
+            return;
+        }
         let row = Message {
             id,
             chat: chat.clone(),
@@ -398,12 +415,31 @@ impl Worker {
         if let Some(runtime) = self.call.as_mut()
             && runtime.call.generation() == update.generation
         {
+            if update.direction == crate::model::CallDirection::Outgoing
+                && matches!(
+                    update.phase,
+                    calls::CallPhase::Dialing | calls::CallPhase::Ringing
+                )
+            {
+                if let Some(ringback) = &runtime.ringback {
+                    if runtime.last.speaker != update.speaker {
+                        ringback.bind(update.speaker.clone());
+                    }
+                } else {
+                    runtime.ringback =
+                        Some(crate::call_audio::Ringback::start(update.speaker.clone()));
+                }
+            } else {
+                // Stop at the peer's answer, not only after relay allocation or hangup.
+                runtime.ringback = None;
+            }
+            runtime.video_used |= update.video_requested || update.video_active;
             runtime.last = update.clone();
         }
         if finished && let Some(runtime) = self.call.as_ref() {
             let record = crate::archive::CallRecord {
                 id: runtime.call.call_id().to_owned(),
-                chat: update.chat.clone(),
+                chat: self.canonical_str(&update.chat),
                 direction: update.direction,
                 outcome: update.outcome.unwrap_or(calls::CallOutcome::Failed),
                 at: runtime.created_at,
@@ -411,11 +447,78 @@ impl Worker {
             };
             if self.archive.save_call_record(&record).is_err() {
                 self.emit(Event::Error("Could not preserve the call outcome".into()));
+            } else {
+                self.file_local_call(&record, runtime.video_used);
             }
         }
         self.emit(Event::Call(Box::new(update)));
         if finished {
             self.call = None;
+        }
+    }
+
+    fn file_local_call(&mut self, record: &crate::archive::CallRecord, video: bool) {
+        let from_me = record.direction == crate::model::CallDirection::Outgoing;
+        let row = Message {
+            id: format!("local-call:{}", record.id),
+            chat: record.chat.clone(),
+            sender: if from_me {
+                self.me()
+            } else {
+                record.chat.clone()
+            },
+            sender_name: None,
+            from_me,
+            timestamp: record.at,
+            history_order: None,
+            content: Content::Call {
+                video,
+                outcome: outcome_text(record.outcome).into(),
+                seconds: record.duration,
+            },
+            status: Delivery::None,
+            delivered_at: None,
+            read_at: None,
+            quoted: None,
+            reactions: Vec::new(),
+            edited: false,
+            mentions: Vec::new(),
+            forwarded: false,
+            thumbnail: None,
+        };
+        if self.predates_removal(&record.chat, record.at)
+            || self.message_was_removed(&record.chat, &row.id)
+        {
+            return;
+        }
+        if self
+            .archive
+            .ensure_chat(
+                &record.chat,
+                &self.name_for(&record.chat).unwrap_or_else(|| "Chat".into()),
+            )
+            .is_err()
+            || self.archive.insert_message(&row, None).is_err()
+        {
+            self.emit(Event::Error(
+                "Could not preserve the conversation call entry".into(),
+            ));
+            return;
+        }
+        if self.privacy_ready
+            && !self.call_privacy_paused
+            && self
+                .archive
+                .chat(&record.chat)
+                .is_ok_and(|chat| chat.is_some_and(|chat| !chat.locked))
+            && let Ok(Some(row)) = self.archive.message(&record.chat, &row.id)
+        {
+            self.emit(Event::Messages {
+                chat: record.chat.clone(),
+                messages: vec![row],
+                older: false,
+                complete: false,
+            });
         }
     }
 
@@ -640,7 +743,10 @@ impl Worker {
         self.cancel_video_preparation();
         let client = self.client.clone();
         let update = match self.call.as_mut() {
-            Some(runtime) => Some(runtime.call.hangup(client.as_ref()).await),
+            Some(runtime) => {
+                runtime.ringback = None;
+                Some(runtime.call.hangup(client.as_ref()).await)
+            }
             None => None,
         };
         if let Some(update) = update {
@@ -929,6 +1035,7 @@ impl Worker {
         self.cancel_video_preparation();
         self.emit(Event::CallPreparing(false));
         if let Some(runtime) = self.call.as_mut() {
+            runtime.ringback = None;
             let update = runtime.call.hangup(self.client.as_ref()).await;
             self.emit_call(update);
         }
@@ -1413,5 +1520,95 @@ mod tests {
         worker.call_prepared(1, Ok(Box::new(prepared))).await;
         assert!(worker.call.is_none());
         assert_eq!(worker.archive.call_records().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn completed_local_call_has_one_conversation_entry_and_synced_replay_keeps_duration() {
+        let (mut worker, events, _commands, _runtime) =
+            super::super::offline_worker("15550000000@s.whatsapp.net");
+        worker.privacy_ready = true;
+        let chat = "15550000001@s.whatsapp.net";
+        worker.learn_lid("9000001", "15550000001");
+        let call = Call::test_snapshot("9000001@lid");
+        let mut update = call.update();
+        update.direction = crate::model::CallDirection::Outgoing;
+        update.phase = calls::CallPhase::Ended;
+        update.outcome = Some(calls::CallOutcome::Answered);
+        update.started = Some(std::time::Instant::now() - Duration::from_secs(42));
+        let mut runtime = CallRuntime::new(call);
+        runtime.video_used = true;
+        worker.call = Some(runtime);
+        while events.try_recv().is_ok() {}
+        worker.emit_call(update);
+        let row = worker
+            .archive
+            .message(chat, "local-call:test-call")
+            .unwrap()
+            .unwrap();
+        assert!(row.from_me);
+        assert!(matches!(
+            row.content,
+            Content::Call {
+                video: true,
+                seconds: Some(42),
+                ..
+            }
+        ));
+        assert!(!row.allows_reaction());
+        assert!(!crate::app::can_select(&row.content));
+        assert!(
+            worker.archive.oldest(chat).unwrap().is_none(),
+            "local call identifiers cannot anchor phone-history requests"
+        );
+        let mut phone_message = row.clone();
+        phone_message.id = "fixture-phone-message".into();
+        phone_message.timestamp += 1;
+        phone_message.from_me = false;
+        phone_message.sender = chat.into();
+        worker.archive.insert_message(&phone_message, None).unwrap();
+        assert_eq!(
+            worker.archive.oldest(chat).unwrap().unwrap().id,
+            phone_message.id
+        );
+        let mut incoming_call = phone_message.clone();
+        incoming_call.id = "local-call:fixture-missed".into();
+        incoming_call.timestamp += 1;
+        worker.archive.insert_message(&incoming_call, None).unwrap();
+        worker.archive.set_unread(chat, 1).unwrap();
+        assert_eq!(
+            worker.archive.unread_incoming(chat, 1).unwrap(),
+            vec![(phone_message.id.clone(), chat.into())]
+        );
+        worker
+            .archive
+            .mark_read_to(chat, &phone_message.id)
+            .unwrap();
+        assert_eq!(worker.archive.chat(chat).unwrap().unwrap().unread, 0);
+        assert_eq!(worker.archive.history_unread(chat, 1).unwrap(), 0);
+        let creator: Jid = worker.me().parse().unwrap();
+        let synced = wa::CallLogRecord {
+            call_result: Some(wa::call_log_record::CallResult::CONNECTED),
+            start_time: Some(row.timestamp),
+            participants: vec![wa::call_log_record::ParticipantInfo {
+                user_jid: Some(chat.into()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        worker.file_synced_call(&synced, Some(&creator), Some(true), Some("test-call"));
+        assert_eq!(worker.archive.call_records().unwrap().len(), 1);
+        assert_eq!(worker.archive.call_records().unwrap()[0].duration, Some(42));
+        let mut message_events = 0;
+        while let Ok(event) = events.try_recv() {
+            assert!(!matches!(event, Event::Incoming { .. }));
+            if let Event::Messages { older, .. } = event {
+                assert!(
+                    !older,
+                    "a local call must not look like a phone-history response"
+                );
+                message_events += 1;
+            }
+        }
+        assert_eq!(message_events, 1);
     }
 }

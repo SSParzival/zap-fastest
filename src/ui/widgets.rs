@@ -263,6 +263,16 @@ pub fn rich_text(ui: &mut Ui, text: &str, font: egui::FontId, color: Color32) ->
 
 /// A phone label wraps rather than hiding its final recipient digits.
 pub fn phone_label(ui: &mut Ui, text: &str, font: egui::FontId, color: Color32) -> egui::Response {
+    wrapped_rich_text(ui, text, font, color)
+}
+
+/// Allocates wrapped text with color emoji and its full accessible label.
+pub fn wrapped_rich_text(
+    ui: &mut Ui,
+    text: &str,
+    font: egui::FontId,
+    color: Color32,
+) -> egui::Response {
     let label = line(
         ui,
         text,
@@ -910,7 +920,8 @@ pub fn setting_row(
     description: &str,
     control: impl FnOnce(&mut Ui),
 ) {
-    if ui.available_width() < 120.0 + 260.0 + ui.spacing().item_spacing.x {
+    let control_width = 48.0;
+    if ui.available_width() < 120.0 + control_width + ui.spacing().item_spacing.x {
         setting_row_stacked(ui, palette, label, description, |ui| {
             ui.horizontal_wrapped(control);
         });
@@ -918,7 +929,9 @@ pub fn setting_row(
     }
     ui.horizontal(|ui| {
         ui.vertical(|ui| {
-            ui.set_width((ui.available_width() - 260.0).max(120.0));
+            ui.set_width(
+                (ui.available_width() - control_width - ui.spacing().item_spacing.x).max(120.0),
+            );
             setting_row_text(ui, palette, label, description);
         });
         ui.with_layout(Layout::right_to_left(Align::Center), control);
@@ -944,7 +957,7 @@ pub fn setting_row_stacked(
 }
 
 fn setting_row_text(ui: &mut Ui, palette: &Palette, label: &str, description: &str) {
-    rich_text(ui, label, theme::medium(14.0), palette.text);
+    wrapped_rich_text(ui, label, theme::medium(14.0), palette.text);
     if !description.is_empty() {
         let description = line(
             ui,

@@ -120,7 +120,19 @@ passes at three widths and two text scales. All six required Windows gates passe
 for the combined merge/Settings candidate: 1,798 library tests, 13 existing ignored,
 10 default / 12 all-feature executable tests and two updater tests. The frozen
 input receipt is `verification/development-settings-fix-20261012.json`.
-The newer executable and its installed native rechecks remain pending.
+The release build passed in 13m 19s and the corrected executable was installed
+after a second graceful shutdown and full verified rollback backup:
+`C:/Users/Victor/AppData/Local/ZapFasterRollback/20261012-182629`, 5,833 files,
+5,908,006,154 bytes. Installed SHA256 is
+`6df2a96d4db95c6e0c12e5a6562e68183b9e7bf2493e3c6c0e3234e3e23ac088`.
+The previous executable and both accounts' profile/cache files were preserved;
+keyring entries were unchanged. Version remains 0.30.0; no release was tagged.
+Public source head is `03a5b287a2fbc32becc9c64ee4d092a2813e0dc4`.
+Source CI `38309276530` passed all nine jobs and Flatpak `38310864553` passed.
+The user was asked to reopen the existing shortcut, leave Settings foreground,
+and report reconnect/layout. Installed native layout and corrected offline-merge
+rechecks remain pending that coordination. The broader UI/calling follow-up is
+tracked in `development-ui-calling-20261012.md` and still needs its own CI and install.
 
 Connected Settings read-back observed `Phone history: response received`.
 This establishes a response, not complete recovery or a specific repair anchor.

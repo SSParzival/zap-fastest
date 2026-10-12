@@ -207,12 +207,14 @@ impl Section {
         section(ui, &palette, &title.shown, |ui| {
             for (row, control) in entries {
                 match control {
-                    Control::Row(control) => widgets::setting_row(
+                    Control::Row(control) => widgets::setting_row_stacked(
                         ui,
                         &palette,
                         &row.title.shown,
                         &row.description.shown,
-                        |ui| control(ui, app),
+                        |ui| {
+                            ui.horizontal_wrapped(|ui| control(ui, app));
+                        },
                     ),
                     Control::StackedRow(control) => widgets::setting_row_stacked(
                         ui,
@@ -241,70 +243,72 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     }
     let palette = app.palette;
     let locale = app.locale;
-    let pane_width = ui.available_width();
-    egui::ScrollArea::vertical()
-        .id_salt("settings")
-        .horizontal_scroll_offset(0.0)
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            // The column keeps a readable width and sits in the middle of a
-            // wide window instead of leaving the space on its right empty.
-            let full = ui.available_width().min(pane_width);
-            let width = (full - 2.0 * SIDE_MARGIN).clamp(0.0, COLUMN_WIDTH);
-            let column = Rect::from_min_size(
-                ui.cursor().min + vec2((full - width) / 2.0, TOP_MARGIN),
-                vec2(width, ui.available_height()),
-            );
-            ui.ctx()
-                .data_mut(|data| data.insert_temp(column_id(), column.x_range()));
-            ui.scope_builder(
-                egui::UiBuilder::new()
-                    .max_rect(column)
-                    .layout(Layout::top_down(Align::Min)),
-                |ui| {
-                    ui.set_width(width);
-                    ui.horizontal(|ui| {
-                        if theme::icon_button(
-                            ui,
-                            Icon::ArrowLeft,
-                            20.0,
-                            palette.secondary,
-                            palette.text,
-                            "Back (Esc)",
-                        )
-                        .clicked()
-                        {
-                            app.actions.push(Action::Open(Page::Chats));
+    {
+        // The column keeps a readable width and sits in the middle of a
+        // wide window instead of leaving the space on its right empty.
+        let full = ui.available_width();
+        let width = (full - 2.0 * SIDE_MARGIN).clamp(0.0, COLUMN_WIDTH);
+        let column = Rect::from_min_size(
+            ui.cursor().min + vec2((full - width) / 2.0, TOP_MARGIN),
+            vec2(width, (ui.available_height() - TOP_MARGIN).max(0.0)),
+        );
+        ui.ctx()
+            .data_mut(|data| data.insert_temp(column_id(), column.x_range()));
+        ui.scope_builder(
+            egui::UiBuilder::new()
+                .max_rect(column)
+                .layout(Layout::top_down(Align::Min)),
+            |ui| {
+                ui.set_width(width);
+                ui.horizontal(|ui| {
+                    if theme::icon_button(
+                        ui,
+                        Icon::ArrowLeft,
+                        20.0,
+                        palette.secondary,
+                        palette.text,
+                        "Back (Esc)",
+                    )
+                    .clicked()
+                    {
+                        app.actions.push(Action::Open(Page::Chats));
+                    }
+                    theme::text(
+                        ui,
+                        crate::i18n::gettext(locale, "Settings"),
+                        theme::bold(24.0),
+                        palette.text,
+                    );
+                });
+                ui.add_space(14.0);
+                search(app, ui);
+                ui.add_space(6.0);
+                egui::ScrollArea::vertical()
+                    .id_salt("settings")
+                    .horizontal_scroll_offset(0.0)
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        ui.set_width(width);
+                        let filter = Filter::new(&app.settings_search);
+                        let mut found = false;
+                        for section in sections(app) {
+                            found |= section.show(ui, app, &filter);
                         }
-                        theme::text(
-                            ui,
-                            crate::i18n::gettext(locale, "Settings"),
-                            theme::bold(24.0),
-                            palette.text,
-                        );
+                        if !found {
+                            ui.add_space(24.0);
+                            theme::paragraph(
+                                ui,
+                                crate::i18n::gettext(locale, "No settings match “{query}”.")
+                                    .replace("{query}", app.settings_search.trim()),
+                                theme::regular(14.0),
+                                palette.secondary,
+                            );
+                        }
+                        ui.add_space(TOP_MARGIN);
                     });
-                    ui.add_space(14.0);
-                    search(app, ui);
-                    ui.add_space(6.0);
-                    let filter = Filter::new(&app.settings_search);
-                    let mut found = false;
-                    for section in sections(app) {
-                        found |= section.show(ui, app, &filter);
-                    }
-                    if !found {
-                        ui.add_space(24.0);
-                        theme::paragraph(
-                            ui,
-                            crate::i18n::gettext(locale, "No settings match “{query}”.")
-                                .replace("{query}", app.settings_search.trim()),
-                            theme::regular(14.0),
-                            palette.secondary,
-                        );
-                    }
-                },
-            );
-            ui.add_space(TOP_MARGIN);
-        });
+            },
+        );
+    }
 }
 
 /// Widest the settings column grows.
@@ -593,24 +597,11 @@ fn sections(app: &App) -> Vec<Section> {
     );
 
     let mut audio_devices = Section::new(translated(locale, "Audio devices"));
-    audio_devices.row(translated(locale,"Microphone and sound output"), translated(locale,"Used for voice recording, voice and video playback, and calls. Missing sound outputs fall back to the system default with a warning; recording never switches microphones silently."), |ui,app| {
-        if ui.button(crate::i18n::gettext(app.locale,"Refresh audio devices")).clicked() { app.actions.push(Action::RefreshAudioDevices); }
-        for microphone in [true,false] {
-            let label=if microphone { crate::i18n::gettext(app.locale,"Microphone") } else { crate::i18n::gettext(app.locale,"Sound output") };
-            let selected=if microphone { app.account().settings.call_microphone.clone() } else { app.account().settings.call_speaker.clone() };
-            let devices=if microphone { app.call_devices.microphones.clone() } else { app.call_devices.speakers.clone() };
-            ui.label(label);
-            egui::ComboBox::from_id_salt(("settings-audio-device",microphone)).selected_text(selected.clone().unwrap_or_else(|| crate::i18n::gettext(app.locale,"System default").into_owned())).show_ui(ui,|ui| {
-                let mut choices=vec![(None,crate::i18n::gettext(app.locale,"System default").into_owned())];
-                choices.extend(devices.into_iter().map(|device| (Some(device.id),device.label)));
-                for (device,label) in choices {
-                    if ui.selectable_label(device==selected,label).clicked() {
-                        app.actions.push(if microphone { Action::SetCallMicrophone(device) } else { Action::SetCallSpeaker(device) });
-                    }
-                }
-            });
-        }
-    });
+    audio_devices.stacked_row(
+        translated(locale, "Microphone, sound output and camera"),
+        translated(locale, "Choose devices for recordings, playback and calls. A saved camera is used the next time you turn it on."),
+        |ui, app| super::call::devices(app, ui),
+    );
     let mut notifications = Section::new(translated(locale, "Notifications"));
     notifications.account_toggle(
         translated(locale, "Desktop notifications"),
@@ -1415,7 +1406,7 @@ fn keyed(text: Text) -> Text {
 /// The theme menu and the button that opens the themes folder.
 fn theme_picker(ui: &mut egui::Ui, app: &mut App) {
     let palette = app.palette;
-    ui.with_layout(egui::Layout::top_down(egui::Align::Max), |ui| {
+    ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
         let selected = app
             .settings
             .custom_theme
@@ -1473,28 +1464,30 @@ fn theme_picker(ui: &mut egui::Ui, app: &mut App) {
             info.current_text_value = Some(selected.to_owned());
             info
         });
-        if theme::soft_button(
-            ui,
-            &palette,
-            Some(Icon::ExternalLink),
-            "Open themes folder",
-            false,
-        )
-        .clicked()
-        {
-            app.actions.push(Action::OpenThemesFolder);
-        }
-        if theme::soft_button(
-            ui,
-            &palette,
-            Some(Icon::ExternalLink),
-            &crate::i18n::gettext(app.locale, "How to make a theme"),
-            false,
-        )
-        .clicked()
-        {
-            app.actions.push(Action::OpenUrl(THEMES_GUIDE.to_owned()));
-        }
+        ui.horizontal_wrapped(|ui| {
+            if theme::soft_button(
+                ui,
+                &palette,
+                Some(Icon::ExternalLink),
+                "Open themes folder",
+                false,
+            )
+            .clicked()
+            {
+                app.actions.push(Action::OpenThemesFolder);
+            }
+            if theme::soft_button(
+                ui,
+                &palette,
+                Some(Icon::ExternalLink),
+                &crate::i18n::gettext(app.locale, "How to make a theme"),
+                false,
+            )
+            .clicked()
+            {
+                app.actions.push(Action::OpenUrl(THEMES_GUIDE.to_owned()));
+            }
+        });
     });
 }
 
@@ -2015,72 +2008,75 @@ fn account(app: &mut App, ui: &mut egui::Ui) {
     let draft_id = ui.id().with("profile_draft");
     let mut draft: Option<(String, String)> = ui.data_mut(|data| data.get_temp(draft_id));
     let mut submitted = false;
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 14.0;
-        let picture = app.avatar_full(&me).or_else(|| app.avatar(&me));
-        let change_picture = crate::i18n::gettext(app.locale, "Change profile picture");
-        if widgets::clickable_avatar(
-            ui,
-            &palette,
-            &name,
-            &me,
-            56.0,
-            picture.as_deref(),
-            &change_picture,
-        )
-        .on_hover_cursor(egui::CursorIcon::PointingHand)
-        .on_hover_text(change_picture.as_ref())
-        .clicked()
-        {
-            app.actions.push(Action::PickProfilePicture);
-        }
-        ui.vertical(|ui| {
-            ui.set_width((ui.available_width() - 380.0).max(160.0));
-            if let Some((draft_name, draft_about)) = &mut draft {
-                submitted |= profile_field(
-                    ui,
-                    &palette,
-                    draft_name,
-                    &crate::i18n::gettext(app.locale, "Your name"),
-                    25,
-                );
-                ui.add_space(6.0);
-                submitted |= profile_field(
-                    ui,
-                    &palette,
-                    draft_about,
-                    &crate::i18n::pgettext(app.locale, "profile", "About"),
-                    139,
-                );
-                return;
+    ui.vertical(|ui| {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 14.0;
+            let picture = app.avatar_full(&me).or_else(|| app.avatar(&me));
+            let change_picture = crate::i18n::gettext(app.locale, "Change profile picture");
+            if widgets::clickable_avatar(
+                ui,
+                &palette,
+                &name,
+                &me,
+                56.0,
+                picture.as_deref(),
+                &change_picture,
+            )
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .on_hover_text(change_picture.as_ref())
+            .clicked()
+            {
+                app.actions.push(Action::PickProfilePicture);
             }
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 6.0;
-                let shown = if name.is_empty() {
-                    crate::i18n::gettext(app.locale, "Linked device")
-                } else {
-                    name.clone().into()
-                };
-                theme::text(ui, shown, theme::semibold(16.0), palette.text);
-                if theme::icon_button(
-                    ui,
-                    Icon::Pencil,
-                    15.0,
-                    palette.secondary,
-                    palette.text,
-                    &crate::i18n::gettext(app.locale, "Edit your name and About"),
-                )
-                .clicked()
-                {
-                    draft = Some((name.clone(), app.me_about.clone().unwrap_or_default()));
+            ui.vertical(|ui| {
+                ui.set_width(ui.available_width());
+                if let Some((draft_name, draft_about)) = &mut draft {
+                    submitted |= profile_field(
+                        ui,
+                        &palette,
+                        draft_name,
+                        &crate::i18n::gettext(app.locale, "Your name"),
+                        25,
+                    );
+                    ui.add_space(6.0);
+                    submitted |= profile_field(
+                        ui,
+                        &palette,
+                        draft_about,
+                        &crate::i18n::pgettext(app.locale, "profile", "About"),
+                        139,
+                    );
+                    return;
+                }
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 6.0;
+                    let shown = if name.is_empty() {
+                        crate::i18n::gettext(app.locale, "Linked device")
+                    } else {
+                        name.clone().into()
+                    };
+                    theme::text(ui, shown, theme::semibold(16.0), palette.text);
+                    if theme::icon_button(
+                        ui,
+                        Icon::Pencil,
+                        15.0,
+                        palette.secondary,
+                        palette.text,
+                        &crate::i18n::gettext(app.locale, "Edit your name and About"),
+                    )
+                    .clicked()
+                    {
+                        draft = Some((name.clone(), app.me_about.clone().unwrap_or_default()));
+                    }
+                });
+                theme::text(ui, &phone, theme::regular(13.0), palette.secondary);
+                if let Some(about) = &app.me_about {
+                    theme::paragraph(ui, about, theme::regular(13.0), palette.secondary);
                 }
             });
-            theme::text(ui, &phone, theme::regular(13.0), palette.secondary);
-            if let Some(about) = &app.me_about {
-                theme::paragraph(ui, about, theme::regular(13.0), palette.secondary);
-            }
         });
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+        ui.add_space(8.0);
+        ui.horizontal_wrapped(|ui| {
             // With other numbers here, unlinking this one also takes it off
             // the switcher; the last one stays, waiting to be linked again.
             if app.has_several_accounts() {

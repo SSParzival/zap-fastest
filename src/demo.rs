@@ -1982,6 +1982,36 @@ fn call_sample(app: &mut App, scenario: &str) {
                 duration: None,
             },
         ];
+        let rows = app
+            .call_records
+            .iter()
+            .map(|record| {
+                let mut row = message(
+                    &record.chat,
+                    &format!("local-call:{}", record.id),
+                    record.direction == CallDirection::Outgoing,
+                    record.at + 1,
+                    Content::Call {
+                        video: false,
+                        outcome: if record.outcome == CallOutcome::Answered {
+                            "Connected"
+                        } else {
+                            "Missed"
+                        }
+                        .into(),
+                        seconds: record.duration,
+                    },
+                );
+                row.status = Delivery::None;
+                row
+            })
+            .collect::<Vec<_>>();
+        if let Some(conversation) = app.conversations.get_mut(SAMPLES[0].id) {
+            conversation.messages.extend(rows);
+            conversation
+                .messages
+                .sort_by_key(|row| (row.timestamp, row.id.clone()));
+        }
         return;
     }
     let incoming = matches!(scenario, "call-incoming" | "call-incoming-video");
@@ -2553,6 +2583,23 @@ pub fn apply_flags(app: &mut App, page: Option<&str>) {
                 app.page = Page::Settings;
                 app.settings_search = "Recover older history".into();
                 app.account_mut().settings.background_history = true;
+            }
+            "call-entry" => {
+                call_sample(app, "call-history");
+                app.call_log_open = false;
+            }
+            "settings-files-progress" => {
+                app.page = Page::Settings;
+                app.settings_search = "Files".into();
+                app.archive_progress = Some(crate::model::ArchiveRecoveryProgress {
+                    downloaded: 8,
+                    pending: 2,
+                    bytes: Some(13 * 1024 * 1024),
+                    connected: true,
+                    phone_history: crate::model::HistoryResponseState::Answered,
+                    ..Default::default()
+                });
+                app.backup_status = Some("Archive backup saved (3 files, 13 MiB).".into());
             }
             choice if choice.starts_with("settings-search=") => {
                 app.page = Page::Settings;
@@ -5777,7 +5824,12 @@ mod tests {
             ("call-video", vec!["Your camera", "Turn camera off"]),
             (
                 "call-history",
-                vec!["Calls and audio devices", "Answered", "Missed"],
+                vec![
+                    "Recent calls",
+                    "Audio and camera devices",
+                    "Answered",
+                    "Missed",
+                ],
             ),
             (
                 "archive-backup",
@@ -16738,6 +16790,119 @@ mod picture_edge_tests {
 mod bubble_detail_tests {
     use super::tests::app;
     use super::*;
+    use crate::model::Action;
+
+    #[test]
+    fn calls_history_dismisses_outside_and_escape_but_keeps_nested_picker_interactions() {
+        for popup in [false, true] {
+            for escape in [false, true] {
+                let mut app = app();
+                call_sample(&mut app, "call-history");
+                let ctx = egui::Context::default();
+                app.attach(&ctx);
+                let size = egui::vec2(1080.0, 780.0);
+                frames(&mut app, &ctx, size);
+                app.actions.clear();
+                let event = if escape {
+                    egui::Event::Key {
+                        key: egui::Key::Escape,
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers: egui::Modifiers::NONE,
+                    }
+                } else {
+                    egui::Event::PointerButton {
+                        pos: egui::pos2(0.0, 0.0),
+                        button: egui::PointerButton::Primary,
+                        pressed: true,
+                        modifiers: egui::Modifiers::NONE,
+                    }
+                };
+                let mut output = ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                        events: vec![event],
+                        ..Default::default()
+                    },
+                    |ui| {
+                        if popup {
+                            egui::Popup::open_id(
+                                ui.ctx(),
+                                egui::Id::new("synthetic-device-picker"),
+                            );
+                        }
+                        crate::ui::show(&mut app, ui);
+                    },
+                );
+                output.textures_delta.clear();
+                assert_eq!(
+                    app.actions
+                        .iter()
+                        .any(|action| matches!(action, Action::ToggleCallLog)),
+                    !popup,
+                    "escape={escape}, nested picker={popup}"
+                );
+                assert!(
+                    !app.actions
+                        .iter()
+                        .any(|action| matches!(action, Action::HangupCall | Action::DeclineCall))
+                );
+                if escape {
+                    assert!(
+                        !app.actions
+                            .iter()
+                            .any(|action| matches!(action, Action::CloseChat | Action::Open(_))),
+                        "closing Calls must not also navigate the underlying chat"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn settings_device_controls_fit_and_labels_precede_their_selectors() {
+        for width in [600.0, 1080.0, 1400.0] {
+            for text_scale in [1.0, 1.5] {
+                let mut app = app();
+                apply_flags(&mut app, Some("settings"));
+                app.settings.sidebar_width = 395.0;
+                app.settings.text_scale = text_scale;
+                app.settings_search = "Audio devices".into();
+                call_sample(&mut app, "call-history");
+                app.call_log_open = false;
+                app.call_devices.microphones[0].label =
+                    "Synthetic microphone with a very long device description".repeat(3);
+                app.account_mut().settings.call_microphone = Some("fixture-microphone".into());
+                let ctx = egui::Context::default();
+                app.attach(&ctx);
+                frames(&mut app, &ctx, egui::vec2(width, 1600.0));
+                let column = ctx
+                    .data(|data| data.get_temp::<egui::Rangef>(crate::ui::settings::column_id()))
+                    .unwrap();
+                for id in [
+                    crate::ui::call::device_bounds_id(
+                        app.account().id.as_str(),
+                        crate::calls::DeviceKind::Microphone,
+                    ),
+                    crate::ui::call::device_bounds_id(
+                        app.account().id.as_str(),
+                        crate::calls::DeviceKind::Speaker,
+                    ),
+                    crate::ui::call::camera_bounds_id(app.account().id.as_str()),
+                ] {
+                    let (rect, clip) = ctx
+                        .data(|data| data.get_temp::<(egui::Rect, egui::Rect)>(id))
+                        .expect("device selector rendered");
+                    assert!(
+                        rect.left() >= column.min - 1.0 && rect.right() <= column.max + 1.0,
+                        "selector escaped at {width}, text scale {text_scale}: {rect:?}, {column:?}"
+                    );
+                    assert!(clip.contains_rect(rect));
+                }
+            }
+        }
+    }
 
     /// Runs frames at `size` and returns the last frame's shapes.
     fn frames(

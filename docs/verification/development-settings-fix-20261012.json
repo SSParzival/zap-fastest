@@ -1,5 +1,5 @@
 {
-  "state": "All required Windows gates passed; updated installation/native recheck and source-push CI pending",
+  "state": "All required Windows gates, release build, source CI and Flatpak passed; installed with verified rollback; native audio layout defect requires the broader follow-up",
   "starting_head": "5115683fd72b032941fd7777fe78f7b68671f0c9",
   "canonical_lf_sha256": {
     ".coderabbit.yaml": "fb9b7400019481f0927aec12cbfe2c3af1598acb46b5a80d16e596a90ed19943",
@@ -444,5 +444,34 @@
     "default_executable": 10,
     "all_feature_executable": 12,
     "updater": 2
-  }
+  },
+  "public_source_head": "03a5b287a2fbc32becc9c64ee4d092a2813e0dc4",
+  "release_build": {
+    "exit_code": 0,
+    "duration": "13m 19s",
+    "version": "0.30.0",
+    "sha256": "6df2a96d4db95c6e0c12e5a6562e68183b9e7bf2493e3c6c0e3234e3e23ac088"
+  },
+  "installation": {
+    "backup_root": "C:\\Users\\Victor\\AppData\\Local\\ZapFasterRollback\\20261012-182629",
+    "installed_executable": "C:\\Users\\Victor\\AppData\\Local\\Programs\\ZapFast\\zap-faster.exe",
+    "old_sha256": "38491FE6CB33374C9660575F65910793B8DC8BDD4826A4900374AD6871E5BA49",
+    "new_sha256": "6DF2A96D4DB95C6E0C12E5A6562E68183B9E7BF2493E3C6C0E3234E3E23AC088",
+    "verified_files": 5833,
+    "verified_bytes": 5908006154,
+    "keyring": "Retained under the same Windows user; machine-local rollback",
+    "copied_at": "2026-10-12T18:27:50.9403429-03:00",
+    "publication": "not authorized"
+  },
+  "fresh_ci": {
+    "run_id": 38309276530,
+    "state": "completed",
+    "flatpak": {
+      "run_id": 38310864553,
+      "conclusion": "success"
+    },
+    "publication": "not authorized",
+    "conclusion": "success"
+  },
+  "native_layout": "User reported audio-device row still overlaps; broader Settings/calling follow-up underway"
 }

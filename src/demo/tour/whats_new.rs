@@ -265,11 +265,13 @@ pub(super) fn script() -> Vec<Cue> {
 
     // Settings on cards: languages, search, and the light theme.
     add(73.2, Key(K::Comma, command(), "Ctrl + , · Settings"));
+    add(73.4, Key(K::F, command(), "Ctrl + F · Find language"));
     add(74.2, Move(Label("English")));
     add(74.6, Click(left));
     add(75.3, Move(Label("Deutsch")));
     add(75.7, Wheel(-160.0));
     add(76.8, esc("Esc · Close the list"));
+    add(77.0, esc("Esc · Clear the language search"));
     add(77.2, Key(K::F, command(), "Ctrl + F · Search settings"));
     add(80.4, esc("Esc · Clear the search"));
     add(81.0, Move(Label("Dark")));
@@ -282,6 +284,7 @@ pub(super) fn script() -> Vec<Cue> {
         (6.1, "engine"),
         (36.9, "🐸"),
         (38.6, "bom dia"),
+        (73.55, "language"),
         (77.6, "privacy"),
     ] {
         for (index, character) in text.chars().enumerate() {

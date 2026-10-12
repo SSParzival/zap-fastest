@@ -357,6 +357,7 @@ pub(crate) fn can_select(content: &Content) -> bool {
     !matches!(
         content,
         Content::Revoked
+            | Content::Call { .. }
             | Content::PhoneOnly { .. }
             | Content::Unsupported { .. }
             | Content::Poll { .. }

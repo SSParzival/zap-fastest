@@ -3865,7 +3865,7 @@ fn reaction_affordance(
     let can_reply = view.chat.can_send()
         && !matches!(
             message.content,
-            Content::Revoked | Content::PhoneOnly { .. }
+            Content::Revoked | Content::PhoneOnly { .. } | Content::Call { .. }
         );
     let step = REACTION_AFFORDANCE_SIZE + 4.0;
     let outward = if rect.center().x < bubble.rect.center().x {
@@ -4446,7 +4446,7 @@ pub fn edge_scroll(pointer: f32, top: f32, bottom: f32) -> f32 {
 /// Starts a reply when the response was double-clicked, as the menu's "Reply".
 fn reply_on_double_click(response: &egui::Response, message: &Message, actions: &mut Vec<Action>) {
     if response.double_clicked()
-        && !matches!(message.content, Content::Revoked)
+        && !matches!(message.content, Content::Revoked | Content::Call { .. })
         && !(message.from_me && message.status.is_local())
     {
         actions.push(Action::Reply(message.id.clone()));
@@ -5014,6 +5014,9 @@ fn bubble_frame(
 
 /// Minimum shared width for cards inside message bubbles.
 fn message_shortcut(message: &Message, key: Key, mentions: &[markup::Mention]) -> Option<Action> {
+    if matches!(message.content, Content::Call { .. }) {
+        return None;
+    }
     let local = message.from_me && message.status.is_local();
     let revoked = matches!(message.content, Content::Revoked);
     let id = || message.id.clone();
@@ -6220,6 +6223,10 @@ fn context_menu(
 ) {
     let palette = view.palette;
     let chat = &view.chat.id;
+    if matches!(message.content, Content::Call { .. }) {
+        ui.label(message.content.summary());
+        return;
+    }
     let local = message.from_me && message.status.is_local();
     if local {
         outgoing_controls(ui, view, message, actions);

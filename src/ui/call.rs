@@ -44,7 +44,13 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
         .resizable(false)
         .constrain_to(ctx.content_rect().shrink(16.0))
         .max_size(ctx.content_rect().shrink(16.0).size())
-        .default_height(ctx.content_rect().shrink(16.0).height())
+        .default_width(400.0)
+        .default_height(if call.video_requested || call.video_active {
+            ctx.content_rect().shrink(16.0).height()
+        } else {
+            ctx.content_rect().shrink(16.0).height().min(520.0)
+        })
+        .default_pos(ctx.content_rect().center() - egui::vec2(200.0, 200.0))
         .vscroll(true)
         .show(ctx, |ui| {
             let name = app
@@ -52,9 +58,6 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 .map(|chat| app.chat_title(chat))
                 .unwrap_or_else(|| gettext(locale, "WhatsApp contact").into_owned());
             ui.heading(name);
-            if let Some(view) = &call.video_view {
-                video(app, ui, ctx, call.generation, view);
-            }
             ui.label(match call.phase {
                 CallPhase::Dialing => gettext(locale, "Calling…"),
                 CallPhase::Ringing => gettext(locale, "Ringing…"),
@@ -151,18 +154,28 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                     }
                 }
             }
+            if let Some(view) = &call.video_view {
+                video(app, ui, ctx, call.generation, view);
+            }
+            ui.add_space(8.0);
             devices(app, ui);
         });
     }
     if app.call_log_open {
-        egui::Window::new(gettext(locale, "Calls and audio devices"))
+        let mut open = true;
+        let popup_was_open = egui::Popup::is_any_open(ctx);
+        let window = egui::Window::new(gettext(locale, "Calls"))
             .id(egui::Id::new(("call-log", app.account().id.as_str())))
+            .open(&mut open)
+            .collapsible(false)
+            .default_width(400.0)
+            .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-16.0, 72.0))
+            .vscroll(true)
+            .constrain_to(ctx.content_rect().shrink(16.0))
+            .max_size(ctx.content_rect().shrink(16.0).size())
             .show(ctx, |ui| {
-                if ui.button(gettext(locale, "Close")).clicked() {
-                    app.actions.push(Action::ToggleCallLog);
-                }
-                devices(app, ui);
-                ui.separator();
+                ui.heading(gettext(locale, "Recent calls"));
+                ui.add_space(8.0);
                 egui::ScrollArea::vertical()
                     .max_height(350.0)
                     .show(ui, |ui| {
@@ -176,25 +189,48 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                                 .unwrap_or_else(|| {
                                     gettext(locale, "WhatsApp contact").into_owned()
                                 });
-                            ui.horizontal(|ui| {
+                            ui.vertical(|ui| {
                                 if ui.link(name).clicked() {
                                     app.actions.push(Action::OpenChat(record.chat.clone()));
+                                    app.actions.push(Action::ToggleCallLog);
                                 }
-                                ui.label(format!(
-                                    "{} · {}",
-                                    direction_label(locale, record.direction),
-                                    outcome_label(locale, record.outcome)
-                                ));
-                                if let Some(duration) = record.duration {
-                                    ui.label(format!("{}:{:02}", duration / 60, duration % 60));
-                                }
+                                ui.horizontal_wrapped(|ui| {
+                                    ui.label(crate::util::moment_stamp(locale, record.at));
+                                    ui.label(format!(
+                                        "{} · {}",
+                                        direction_label(locale, record.direction),
+                                        outcome_label(locale, record.outcome)
+                                    ));
+                                    if let Some(duration) = record.duration {
+                                        ui.label(format!("{}:{:02}", duration / 60, duration % 60));
+                                    }
+                                });
                             });
+                            ui.add_space(8.0);
                         }
                         if app.call_records.is_empty() {
                             ui.label(gettext(locale, "No calls recorded on this computer yet."));
                         }
                     });
+                ui.separator();
+                egui::CollapsingHeader::new(gettext(locale, "Audio and camera devices"))
+                    .show(ui, |ui| devices(app, ui));
             });
+        let popup_open = popup_was_open || egui::Popup::is_any_open(ctx);
+        let clicked_outside = window.as_ref().is_some_and(|window| {
+            ctx.input(|input| {
+                input.pointer.any_pressed()
+                    && input
+                        .pointer
+                        .interact_pos()
+                        .is_some_and(|position| !window.response.rect.contains(position))
+            })
+        });
+        let escape = !popup_open
+            && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+        if !open || (!popup_open && clicked_outside) || escape {
+            app.actions.push(Action::ToggleCallLog);
+        }
     }
 }
 
@@ -254,7 +290,7 @@ fn video(
     ctx.data_mut(|data| data.insert_temp(id, textures));
 }
 
-fn devices(app: &mut App, ui: &mut egui::Ui) {
+pub(super) fn devices(app: &mut App, ui: &mut egui::Ui) {
     let locale = app.locale;
     for kind in [DeviceKind::Microphone, DeviceKind::Speaker] {
         let mut chosen = match kind {
@@ -281,6 +317,7 @@ fn devices(app: &mut App, ui: &mut egui::Ui) {
             kind == DeviceKind::Microphone,
         ))
         .selected_text(label)
+        .width(ui.available_width().min(320.0))
         .truncate()
         .show_ui(ui, |ui| {
             ui.selectable_value(&mut chosen, None, gettext(locale, "System default"));
@@ -326,6 +363,7 @@ fn devices(app: &mut App, ui: &mut egui::Ui) {
     let camera_selector =
         egui::ComboBox::from_id_salt(("call-camera-device", app.account().id.as_str()))
             .selected_text(label)
+            .width(ui.available_width().min(320.0))
             .truncate()
             .show_ui(ui, |ui| {
                 ui.selectable_value(&mut camera, None, gettext(locale, "System default"));

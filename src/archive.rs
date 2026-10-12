@@ -984,6 +984,7 @@ impl Archive {
             "UPDATE chats SET read_through = MAX(COALESCE(read_through, 0), ?2),
              unread = MIN(unread, (SELECT COUNT(*) FROM messages
                  WHERE chat = ?1 AND from_me = 0
+                 AND id NOT GLOB 'local-call:*' AND id NOT GLOB 'call-log:*'
                  AND timestamp > MAX(COALESCE(read_through, 0), ?2))) WHERE id = ?1",
             params![id, timestamp],
         )?;
@@ -1000,6 +1001,7 @@ impl Archive {
              unread = MIN(unread, (SELECT COUNT(*) FROM messages m
                  JOIN messages boundary ON boundary.chat = m.chat AND boundary.id = ?2
                  WHERE m.chat = ?1 AND m.from_me = 0
+                 AND m.id NOT GLOB 'local-call:*' AND m.id NOT GLOB 'call-log:*'
                  AND (m.timestamp > boundary.timestamp
                       OR (m.timestamp = boundary.timestamp AND
                           (COALESCE(m.history_order, 9223372036854775807), m.rowid) >
@@ -1050,7 +1052,7 @@ impl Archive {
             return Ok(unread);
         };
         let remaining: u32 = self.connection.query_row(
-            "SELECT COUNT(*) FROM messages WHERE chat = ?1 AND from_me = 0 AND timestamp > ?2",
+            "SELECT COUNT(*) FROM messages WHERE chat = ?1 AND from_me = 0 AND id NOT GLOB 'local-call:*' AND id NOT GLOB 'call-log:*' AND timestamp > ?2",
             params![id, through],
             |row| row.get(0),
         )?;
@@ -1155,6 +1157,7 @@ impl Archive {
     pub fn unread_incoming(&self, chat: &str, limit: u32) -> Result<Vec<(String, String)>> {
         let mut statement = self.connection.prepare(
             "SELECT id, sender FROM messages WHERE chat = ?1 AND from_me = 0
+             AND id NOT GLOB 'local-call:*' AND id NOT GLOB 'call-log:*'
              AND timestamp >= COALESCE((SELECT read_through FROM chats WHERE id = ?1), -1)
              ORDER BY timestamp DESC, COALESCE(history_order, 9223372036854775807) DESC, rowid DESC LIMIT ?2",
         )?;
@@ -2466,7 +2469,7 @@ impl Archive {
         let id: Option<String> = self
             .connection
             .query_row(
-                "SELECT id FROM messages WHERE chat = ?1 ORDER BY timestamp ASC, COALESCE(history_order, 9223372036854775807) ASC, rowid ASC LIMIT 1",
+                "SELECT id FROM messages WHERE chat = ?1 AND id NOT GLOB 'local-call:*' AND id NOT GLOB 'call-log:*' ORDER BY timestamp ASC, COALESCE(history_order, 9223372036854775807) ASC, rowid ASC LIMIT 1",
                 params![chat],
                 |row| row.get(0),
             )

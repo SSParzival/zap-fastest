@@ -35,12 +35,12 @@ see [the current checkpoint](development-resume-20261012.md).
 | Settings keyboard navigation | User confirmed Tab/Shift+Tab reach controls with visible focus, without traps or unexpected actions. | Passed for the observed Settings navigation. |
 | Phone history response | Connected Settings read-back observed `Phone history: response received`. | Response observed; full recovery and the exact explicit repair anchor are unproven. |
 | Settings layout | User supplied a screenshot showing overlap and clipping. Correction `d73ded1` has synthetic bounds checks at three widths and two text scales, with all required Windows gates passing. | Installed correction and attended visual recheck pending. |
-| Voice/video recipient and peer-dependent notifications | User reconfirmed Victor Correa is Message yourself and no separate recipient is available. | Pending recipient prerequisite; no self call or contact send is substituted. |
+| Attended voice call | User independently called their mother and confirmed voice calling worked with satisfactory audio quality. Agent did not place the call or inspect its contents. | Basic Windows voice call/audio quality passed by user report; dialing tone and call-history/menu defects were reported. Video/camera and incoming peer notifications remain unverified. |
 
 Organized downloads, retention/storage protection, reconnect/phone recovery,
 notifications/privacy, offline backup/restore/merge and keyboard acceptance
 still require their own observations. No private archive contents or screenshots
-were captured. No calls were placed.
+were captured by the agent. The successful voice call was user initiated.
 
 Backup automation limitations: password ValuePattern actions did not enable saving;
 foreground-checked keyboard input worked. The native save dialog rejected the

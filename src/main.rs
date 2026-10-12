@@ -882,9 +882,20 @@ fn run() -> eframe::Result<()> {
                         }),
                 )
             });
+            let options = native_options(demo_persistence.clone(), geometry, transparent);
+            #[cfg(feature = "demo")]
+            let options = if shot.is_some() {
+                // Automated synthetic captures must not steal focus from the user's window.
+                eframe::NativeOptions {
+                    viewport: options.viewport.with_active(false),
+                    ..options
+                }
+            } else {
+                options
+            };
             eframe::run_native(
                 "Zap Faster",
-                native_options(demo_persistence.clone(), geometry, transparent),
+                options,
                 Box::new(move |cc| {
                     let mut app = lease.take(&cc.egui_ctx);
                     app.attach(&cc.egui_ctx);

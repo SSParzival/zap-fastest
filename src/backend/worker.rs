@@ -5866,6 +5866,13 @@ impl Worker {
             ));
             return;
         };
+        if anchor.id.starts_with("local-call:") || anchor.id.starts_with("call-log:") {
+            self.emit(Event::OlderFetched { chat, more: true });
+            self.emit(Event::Error(
+                "Call entries cannot be used to request phone history".into(),
+            ));
+            return;
+        }
         // This repairs gaps inside existing history, even when the phone has
         // already told us there is nothing before the start of the chat.
         self.older_warned.remove(&chat);

@@ -86,6 +86,9 @@ attach the archive, keys, or full logs from older releases.
 Changes on the Settings page are saved to `settings.json` immediately. The
 search field at the top (`Ctrl+F`, Command+F on macOS) finds a setting by its
 name or description, in the interface language or in English.
+Search and the Back button stay visible while settings scroll. Device controls
+and multi-button settings sit below their descriptions; simple switches remain
+beside their labels.
 
 **Appearance**
 
@@ -139,6 +142,21 @@ name or description, in the interface language or in English.
   notification (and its sound), then stays quiet for 10 minutes. Opening the
   chat starts over. In groups, a mention of you or a reply to you always
   notifies. Settings for this account.
+
+**Audio devices and calls**
+
+Choose a microphone, sound output and camera under **Audio devices**, or expand
+**Audio and camera devices** in **Calls**. Refresh the list after connecting a
+device. The selected output plays the local outgoing-call tone; it stops when
+the peer answers or the call ends. The tone is not mixed into outgoing call audio.
+
+**Calls** shows recent account-local outcomes, dates and known durations first.
+Click outside it, press Escape, or use its close button to dismiss it. A device
+picker closes before the surrounding Calls window when Escape is pressed.
+New calls completed on this client also appear in the conversation. These local
+entries are informational and cannot be replied to, reacted to or forwarded as
+WhatsApp messages. Calls made on another device appear only when WhatsApp supplies
+supported history metadata; complete cross-device call history is not guaranteed.
 
 **Privacy**
 

@@ -39,6 +39,61 @@ const BLOCK_MS: usize = 20;
 /// comment claimed. Five frames is the 300 ms the design wants, and it still sits above the
 /// engine's own jitter cushion rather than under it.
 pub const SPEAKER_QUEUE: usize = 5;
+
+/// Local outgoing-call feedback, never sent to the peer or the microphone path.
+/// Uses the same selected-output/recovery path as call playback.
+pub(crate) struct Ringback {
+    output: AudioOutput,
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl Ringback {
+    pub(crate) fn start(device: Option<String>) -> Self {
+        let (output, frames) = AudioOutput::spawn(device);
+        let task = tokio::spawn(async move {
+            let mut tick = tokio::time::interval(Duration::from_millis(60));
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            let mut sample = 0;
+            loop {
+                tick.tick().await;
+                if frames.is_closed() {
+                    break;
+                }
+                let _ = frames.try_send(ringback_frame(sample));
+                sample = (sample + FRAME_SAMPLES) % (RATE as usize * 4);
+            }
+        });
+        Self { output, task }
+    }
+
+    pub(crate) fn bind(&self, device: Option<String>) {
+        self.output.bind(device);
+    }
+}
+
+impl Drop for Ringback {
+    fn drop(&mut self) {
+        self.task.abort();
+        self.output.stop();
+    }
+}
+
+fn ringback_frame(first: usize) -> Vec<i16> {
+    let rate = RATE as usize;
+    (first..first + FRAME_SAMPLES)
+        .map(|sample| {
+            let position = sample % (rate * 4);
+            if position >= rate {
+                return 0;
+            }
+            let fade = (position.min(rate - position) as f32 / (RATE as f32 * 0.01)).min(1.0);
+            let time = position as f32 / RATE as f32;
+            let wave = (time * 440.0 * std::f32::consts::TAU).sin()
+                + (time * 480.0 * std::f32::consts::TAU).sin();
+            (wave * fade * 0.06 * i16::MAX as f32) as i16
+        })
+        .collect()
+}
 /// How long the sink may hold audio without playing any of it before the stream is restarted.
 ///
 /// A device that stops draining is not a slow consumer to catch up with: the queue only grows and
@@ -1283,6 +1338,66 @@ pub(crate) mod fake {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn ringback_uses_selected_output_rebinds_and_stops_when_dropped() {
+        let (_fixture, speaker) = super::fake::install(vec![0.0], 1, super::RATE, (super::RATE, 1));
+        let ringback = super::Ringback::start(Some("synthetic-headset".into()));
+        for _ in 0..100 {
+            if speaker.written_count() > 1 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert!(
+            speaker
+                .written()
+                .iter()
+                .flatten()
+                .any(|sample| *sample != 0.0)
+        );
+        assert_eq!(
+            speaker.opened().first().cloned(),
+            Some(Some("synthetic-headset".into()))
+        );
+        ringback.bind(Some("synthetic-speakers".into()));
+        for _ in 0..100 {
+            if speaker
+                .opened()
+                .iter()
+                .any(|device| device.as_deref() == Some("synthetic-speakers"))
+            {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert!(
+            speaker
+                .opened()
+                .iter()
+                .any(|device| device.as_deref() == Some("synthetic-speakers"))
+        );
+        drop(ringback);
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let stopped = speaker.written_count();
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        assert_eq!(speaker.written_count(), stopped);
+    }
+    #[test]
+    fn outgoing_ringback_has_quiet_cadence_and_bounded_level() {
+        let audible = super::ringback_frame(0);
+        assert_eq!(audible.len(), super::FRAME_SAMPLES);
+        assert_eq!(audible[0], 0);
+        assert!(audible.iter().any(|sample| *sample != 0));
+        assert!(audible.iter().all(|sample| sample.abs() <= 4000));
+        for second in 1..4 {
+            assert!(
+                super::ringback_frame(super::RATE as usize * second)
+                    .iter()
+                    .all(|sample| *sample == 0)
+            );
+        }
+        assert_eq!(audible, super::ringback_frame(super::RATE as usize * 4));
+    }
     use super::*;
 
     #[test]
