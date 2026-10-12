@@ -5,13 +5,23 @@ it pins the shared CLI and nFPM versions and declares Linux amd64/arm64 inputs,
 DEB/RPM/AppImage contents, dependencies, recipe templates and downstream repositories.
 Application assets and native recipes stay in `packaging/`.
 
+Windows releases carry both the existing Inno Setup installer and per-user MSI
+packages for x86_64 and ARM64. The MSI uses the fork's own upgrade identity and
+only takes over an Inno installation registered under the fork's AppId. It
+preserves the profile/keyring and refuses changes while Zap Faster is running.
+The updater verifies the selected release package before installation. Building
+MSI packages needs WiX 5.0.2 and `WixToolset.Util.wixext`; the disposable Windows
+CI runner exercises installation, takeover, update and removal. Never run
+`packaging/windows/test-installer.ps1` against a personal Windows installation;
+it refuses non-GitHub-runner invocation and changes the runner's installation.
+
 Version 0.20.0 introduces the Zap Faster fork and `zap-faster` binary. The GitHub
 repository is `eternalwaitt/zap-faster`, so source archives extract into
 `zap-faster-VERSION`. Recipes belong to this fork and do not replace upstream
 packages automatically. AUR and Homebrew publication destinations are not configured.
 
 ```sh
-gem install native-packages --version 0.8.1
+gem install native-packages --version 0.9.0
 native-packages validate
 native-packages doctor --target linux-amd64 --target linux-arm64
 native-packages build --release v1.2.3 --target linux-amd64 --target linux-arm64
@@ -62,7 +72,7 @@ Homebrew automation needs `PUBLISH_HOMEBREW=true` and
 The native macOS configuration, Windows and Flatpak build steps remain responsible
 for their native artifacts. Additional nFPM formats require suitable platform
 inputs and dependencies; adding a format does not port the application.
-See the [shared CLI documentation](https://github.com/crmne/native-packages/tree/v0.8.1)
+See the [shared CLI documentation](https://github.com/crmne/native-packages/tree/v0.9.0)
 for commands and supported formats.
 
 To upgrade the tool, change `tool.version` in `native-packages.yaml`, the matching immutable workflow reference, and any release-job gem installation
@@ -90,7 +100,7 @@ secrets, which the job exposes as environment variables:
 A complete set enables notarization automatically. An incomplete set fails;
 no values retain local builds without Developer ID signing. Application inputs
 and the user's normal keychains remain unchanged. See the shared
-[Apple setup and phase contract](https://github.com/crmne/native-packages/blob/v0.8.1/docs/apple-notarization.md).
+[Apple setup and phase contract](https://github.com/crmne/native-packages/blob/v0.9.0/docs/apple-notarization.md).
 
 After preparing `dist/macos-input` on a Mac, test packaging without publishing:
 
