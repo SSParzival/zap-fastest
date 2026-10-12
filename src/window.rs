@@ -270,7 +270,10 @@ mod tests {
 
     #[test]
     fn the_window_geometry_defaults_to_unset_and_round_trips() {
-        assert_eq!(Settings::default().window_geometry(), Geometry::default());
+        assert_eq!(
+            Settings::default().window_geometry(),
+            fastframe_shell::window::Geometry::default()
+        );
         assert_eq!(Geometry::default().size(), None);
         assert_eq!(Geometry::default().position(), None);
 
@@ -288,8 +291,8 @@ mod tests {
         remembered.save(&path).unwrap();
         assert_eq!(Settings::load(&path), remembered);
         let geometry = remembered.window_geometry();
-        assert_eq!(geometry.size(), Some([1280.0, 800.0]));
-        assert_eq!(geometry.position(), Some([100.0, 50.0]));
+        assert_eq!(geometry.size, Some([1280.0, 800.0]));
+        assert_eq!(geometry.position, Some([100.0, 50.0]));
         assert!(geometry.maximized);
     }
 
@@ -336,7 +339,10 @@ mod tests {
         // Files written before the window was remembered open with the
         // default size.
         let older: Settings = serde_json::from_str(r#"{"zoom":1.25}"#).unwrap();
-        assert_eq!(older.window_geometry(), Geometry::default());
+        assert_eq!(
+            older.window_geometry(),
+            fastframe_shell::window::Geometry::default()
+        );
     }
 
     /// The window's size and position land in the settings, so the next

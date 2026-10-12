@@ -862,7 +862,7 @@ fn run() -> eframe::Result<()> {
                     app.settings.theme == zapfast::settings::ThemeChoice::Messages
                 }));
             let geometry = if demo_persistence.is_some() {
-                zapfast::window::Geometry::default()
+                fastframe_shell::window::Geometry::default()
             } else {
                 lease.peek(|app: &app::App| app.settings.window_geometry())
             };
@@ -1002,7 +1002,7 @@ fn tour_script(name: &str) -> zapfast::demo::tour::Script {
 
 fn native_options(
     demo_persistence: Option<std::path::PathBuf>,
-    geometry: zapfast::window::Geometry,
+    geometry: fastframe_shell::window::Geometry,
     transparent: bool,
 ) -> eframe::NativeOptions {
     let default_size = demo_size_arg().unwrap_or([1180.0, 780.0]);
@@ -1016,15 +1016,15 @@ fn native_options(
         .with_app_id(if demo {
             "zap-faster-demo".to_owned()
         } else {
-            std::env::var("FLATPAK_ID").unwrap_or_else(|_| "zap-faster".to_owned())
+            fastframe_desktop::desktop_entry("zap-faster")
         });
-    // The remembered size and position, from the settings. eframe's own
-    // stored window (when present from an earlier version) still wins over
-    // this, and is then remembered here on the first frame.
+    // The remembered size and position, from the settings, over the default
+    // size. Demo runs keep their fixed screenshot size.
+    let viewport = viewport.with_inner_size(default_size);
     let viewport = if demo {
-        viewport.with_inner_size(default_size)
+        viewport
     } else {
-        zapfast::window::viewport(viewport, geometry, default_size)
+        geometry.apply(viewport)
     };
     let viewport = viewport
         // Keep the floor small enough that Windows can still snap the window
@@ -1042,8 +1042,11 @@ fn native_options(
     eframe::NativeOptions {
         viewport,
         persistence_path: demo_persistence.or_else(|| eframe::storage_dir("zapfast")),
-        // Do not restore window size during fixed-size screenshot runs.
-        persist_window: !demo,
+        // The settings remember the window (fastframe_shell::window::Geometry),
+        // in logical pixels. eframe's own copy is in points at the zoom of the
+        // time, and opened smaller at every launch with the interface zoomed,
+        // since its zoom comes back only once the window exists.
+        persist_window: false,
         ..Default::default()
     }
 }
@@ -1143,8 +1146,9 @@ impl eframe::App for Shell {
         }
     }
 
-    /// Does not persist egui interaction state across windows. Window size and
-    /// position are still persisted.
+    /// Does not persist egui interaction state across windows. The zoom and
+    /// the window's geometry live in the settings: egui's memory would bring
+    /// back a zoom that scales the remembered geometry a second time.
     fn persist_egui_memory(&self) -> bool {
         false
     }
@@ -1159,6 +1163,7 @@ impl eframe::App for Shell {
             tour.drive(app, ctx);
         }
         app.background_frame(ctx);
+        app.window_logic(ctx);
         #[cfg(target_os = "windows")]
         if let (Some(window), Some(count)) = (frame.winit_window(), app.taskbar_badge_count())
             && let Some(at) = self.taskbar.show(window, count, app.locale)

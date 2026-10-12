@@ -691,6 +691,9 @@ pub struct App {
     /// Cross-thread window repaint handle.
     waker: Waker,
     tray: Option<fastframe_tray::Tray>,
+    /// Sleep and wake as the system reports them. Tests and demo runs get a
+    /// fixed one that reads nothing from the machine.
+    power: fastframe_power::Power,
     /// Stands in for whether a panel shows the tray item, which tests cannot
     /// spawn.
     #[cfg(test)]
@@ -1038,13 +1041,15 @@ impl App {
             .name("text-rendering".into())
             .spawn(move || crate::theme::follow_text_rendering(move || text_waker.wake()))
             .ok();
+        let power_waker = waker.clone();
+        app.power = fastframe_power::Power::spawn(move || power_waker.wake());
         if options.tray {
             let waker = waker.clone();
             app.tray =
                 fastframe_tray::Tray::spawn(tray_config(app.tray_lockable), move || waker.wake());
         }
-        // The clock preference may run a helper on Linux; keep it off the
-        // first frame.
+        // The clock preference may wait on the desktop portal on Linux; keep
+        // it off the first frame.
         std::thread::Builder::new()
             .name("clock-format".into())
             .spawn(|| {
@@ -1320,6 +1325,7 @@ impl App {
             start_with_system: None,
             waker,
             tray: None,
+            power: fastframe_power::Power::fixed(Default::default()),
             #[cfg(test)]
             test_tray_shown: None,
             tray_lockable,
@@ -6277,10 +6283,29 @@ impl App {
     }
 
     /// Remembers the window's size, position and maximized state in the
-    /// settings; see [`crate::window::Snapshot`].
+    /// settings, in logical pixels, so a window saved while zoomed opens at
+    /// the same size; see [`fastframe_shell::window::Geometry`].
     fn sync_window_state(&mut self, ctx: &egui::Context) {
-        if crate::window::Snapshot::read(ctx).remember(&mut self.settings) {
+        let mut geometry = self.settings.window_geometry();
+        if geometry.remember(ctx) {
+            self.settings.set_window_geometry(geometry);
             self.mark_settings_dirty();
+        }
+    }
+
+    /// What must happen in every pass of an open window, including the
+    /// passes eframe runs without `ui` for a minimized or covered one. Call it
+    /// from `eframe::App::logic`, after [`Self::background_frame`].
+    pub fn window_logic(&mut self, ctx: &egui::Context) {
+        self.sync_window_state(ctx);
+        // Close the window and continue headless when background mode is
+        // enabled. Decided here rather than in `frame_ui`, which eframe skips
+        // for a minimized window: closing one from the taskbar quit instead.
+        if ctx.input(|input| input.viewport().close_requested())
+            && !self.quit_requested
+            && self.hides_to_tray()
+        {
+            self.hide_intent = true;
         }
     }
 
@@ -9587,6 +9612,7 @@ impl App {
         }
         self.report_presence();
         self.report_background_history();
+        self.handle_power();
         self.handle_tray();
         #[cfg(target_os = "macos")]
         {
@@ -9643,6 +9669,28 @@ impl App {
         self.apply_actions(ctx);
     }
 
+    /// Answers the system's sleep and wake. Every account reconnects its link
+    /// after a wake (Linux and Windows report it; macOS does not yet, so
+    /// there the worker's link watch notices the sleep on its own). Settings
+    /// waiting for their debounced save are saved before the machine sleeps
+    /// or the session ends.
+    fn handle_power(&mut self) {
+        for event in self.power.events() {
+            match event {
+                fastframe_power::Event::Suspending(ack)
+                | fastframe_power::Event::EndingSession(ack) => {
+                    self.save_state();
+                    ack.done();
+                }
+                fastframe_power::Event::Resumed => {
+                    for account in &self.accounts {
+                        account.backend.send(Command::Resumed);
+                    }
+                }
+            }
+        }
+    }
+
     /// Highlights the taskbar entry for a message that notified while the
     /// window is open behind others, as KDE Plasma's task manager shows for
     /// chat apps. The desktop clears it once the window is focused. Linux
@@ -9650,9 +9698,15 @@ impl App {
     /// viewport too, since `window_focused` stays false behind the app lock
     /// even while the lock screen has the focus.
     fn request_attention(&mut self, ctx: &egui::Context) {
+        self.request_attention_on(ctx, fastframe_desktop::is_gnome());
+    }
+
+    /// [`Self::request_attention`] on a desktop that is GNOME or not, which
+    /// shows its own "is ready" notice instead of marking the taskbar (#466).
+    fn request_attention_on(&mut self, ctx: &egui::Context, gnome: bool) {
         if std::mem::take(&mut self.wants_attention)
             && cfg!(target_os = "linux")
-            && !gnome_desktop()
+            && !gnome
             && !self.window_hidden
             && !self.window_focused
             && ctx.input(|input| input.viewport().focused) != Some(true)
@@ -10184,7 +10238,6 @@ impl App {
             .lock()
             .unwrap_or_else(|p| p.into_inner()) = None;
         self.apply_theme(ctx);
-        self.sync_window_state(ctx);
         if ctx.input(|input| input.events.iter().any(is_user_input)) {
             self.app_lock.note_input();
         }
@@ -10207,13 +10260,6 @@ impl App {
         self.window_focused = focused;
         self.report_presence();
         self.report_background_history();
-        // Close the window and continue headless when background mode is enabled.
-        if ctx.input(|input| input.viewport().close_requested())
-            && !self.quit_requested
-            && self.hides_to_tray()
-        {
-            self.hide_intent = true;
-        }
         if locked {
             // Files dropped or pasted on the lock screen go nowhere.
             self.dropping = false;
@@ -10774,22 +10820,6 @@ impl Delivery {
     pub fn in_flight(self) -> bool {
         matches!(self, Delivery::Pending)
     }
-}
-
-/// Whether `desktop`, an `XDG_CURRENT_DESKTOP` value, names GNOME. GNOME
-/// turns a window's request for attention into a "“ZapFast” is ready" notice
-/// of its own on every message, on top of the message's notification,
-/// instead of marking the taskbar (#466).
-fn is_gnome(desktop: Option<&str>) -> bool {
-    desktop.is_some_and(|desktop| {
-        desktop
-            .split(':')
-            .any(|name| name.eq_ignore_ascii_case("GNOME"))
-    })
-}
-
-fn gnome_desktop() -> bool {
-    is_gnome(std::env::var("XDG_CURRENT_DESKTOP").ok().as_deref())
 }
 
 /// Whether an incoming message in this chat warrants a desktop notification.
@@ -13510,15 +13540,68 @@ mod tests {
         assert!(app.taskbar_badge_count().is_none());
     }
 
-    /// Window geometry syncing lives in `window::tests`: this frame only
-    /// forwards the snapshot and marks the settings dirty.
+    /// Every account reconnects when the system reports a wake, and a sleep
+    /// is answered at once, with the settings saved.
     #[test]
-    fn sync_window_state_marks_the_settings_dirty_on_change() {
+    fn a_wake_reconnects_every_account_and_a_sleep_saves_first() {
+        let mut app = app();
+        let (backend, mut commands) = Backend::recording();
+        app.backend = backend;
+        let (mut second, _) = Account::detached(
+            &app.dirs,
+            AccountId::parse("2").unwrap(),
+            crate::settings::AccountSettings::default(),
+        )
+        .unwrap();
+        let (second_backend, mut second_commands) = Backend::recording();
+        second.backend = second_backend;
+        app.accounts.push(second);
+        app.power.send(fastframe_power::Event::Resumed);
+        app.handle_power();
+        assert!(matches!(commands.try_recv(), Ok(Command::Resumed)));
+        assert!(matches!(second_commands.try_recv(), Ok(Command::Resumed)));
+        assert!(commands.try_recv().is_err(), "once per wake");
+        assert!(
+            second_commands.try_recv().is_err(),
+            "once for the hidden account too"
+        );
+
+        app.settings_dirty = true;
+        let ack = fastframe_power::Ack::default();
+        app.power.send(fastframe_power::Event::Suspending(ack));
+        app.handle_power();
+        assert!(!app.settings_dirty, "saved before sleeping");
+        assert!(commands.try_recv().is_err());
+        assert!(second_commands.try_recv().is_err());
+    }
+
+    /// The window's geometry is remembered in the logic pass, which eframe
+    /// runs for a minimized window too, and only a change marks the settings
+    /// for saving.
+    #[test]
+    fn the_logic_pass_remembers_the_window_geometry() {
         let mut app = app();
         let ctx = egui::Context::default();
-        // A headless context carries no viewport, so nothing is remembered.
-        app.sync_window_state(&ctx);
-        assert!(!app.settings_dirty);
+        let run = |app: &mut App, rect: egui::Rect| {
+            let mut input = egui::RawInput::default();
+            let info = input.viewports.entry(egui::ViewportId::ROOT).or_default();
+            info.inner_rect = Some(rect);
+            info.outer_rect = Some(rect.expand(4.0));
+            info.maximized = Some(false);
+            let mut output = ctx.run_ui(input, |ui| app.window_logic(ui.ctx()));
+            output.textures_delta.clear();
+        };
+        let rect = egui::Rect::from_min_size(egui::pos2(100.0, 50.0), egui::vec2(1280.0, 800.0));
+        run(&mut app, rect);
+        assert!(app.settings_dirty);
+        assert_eq!(
+            (app.settings.window_width, app.settings.window_height),
+            (Some(1280.0), Some(800.0))
+        );
+
+        app.settings_dirty = false;
+        run(&mut app, rect);
+        assert!(!app.settings_dirty, "nothing changed, nothing to save");
     }
 
     /// A short chat asks the phone by itself; only the reader scrolling to
@@ -14794,6 +14877,40 @@ mod tests {
 
         app.settings.keep_running_in_background = false;
         assert!(!app.hides_to_tray(), "the setting still decides");
+    }
+
+    /// eframe runs only the logic pass for a minimized window, so closing one
+    /// (from the taskbar, say) must still hide it to the tray rather than
+    /// quit, and quit when nothing could bring it back.
+    #[test]
+    fn closing_a_minimized_window_hides_it_to_the_tray() {
+        use fastframe_shell::{Closed, Resident};
+        let ctx = egui::Context::default();
+        let close_minimized = |app: &mut App| {
+            let mut input = egui::RawInput::default();
+            let info = input.viewports.entry(egui::ViewportId::ROOT).or_default();
+            info.minimized = Some(true);
+            info.events.push(egui::ViewportEvent::Close);
+            let mut output = ctx.run_ui(input, |ui| app.window_logic(ui.ctx()));
+            output.textures_delta.clear();
+        };
+
+        let mut app = app();
+        app.test_tray_shown = Some(true);
+        close_minimized(&mut app);
+        assert!(app.hide_intent);
+        assert_eq!(app.closed(), Closed::Hide);
+
+        let mut app = self::app();
+        app.test_tray_shown = Some(false);
+        close_minimized(&mut app);
+        assert_eq!(app.closed(), Closed::Quit, "no tray, no way back");
+
+        let mut app = self::app();
+        app.test_tray_shown = Some(true);
+        app.quit_requested = true;
+        close_minimized(&mut app);
+        assert_eq!(app.closed(), Closed::Quit);
     }
 
     /// A Wayland compositor ignores an app's focus and unminimize requests, so
@@ -20782,17 +20899,6 @@ mod app_lock_tests {
         assert_eq!(app.open_chat.as_deref(), Some(CHAT), "opened once unlocked");
     }
 
-    #[test]
-    fn gnome_is_recognised_in_any_entry_of_the_desktop_list() {
-        for desktop in ["GNOME", "zorin:GNOME", "ubuntu:GNOME", "gnome"] {
-            assert!(is_gnome(Some(desktop)), "{desktop}");
-        }
-        for desktop in ["KDE", "XFCE", "Hyprland", "GNOME-Flashback", ""] {
-            assert!(!is_gnome(Some(desktop)), "{desktop}");
-        }
-        assert!(!is_gnome(None));
-    }
-
     fn attention_requested(ctx: &egui::Context) -> bool {
         ctx.viewport(|viewport| {
             viewport
@@ -20813,17 +20919,35 @@ mod app_lock_tests {
         app.window_hidden = false;
         app.window_focused = false;
         app.maybe_notify(CHAT, &message);
-        app.request_attention(&ctx);
+        app.request_attention_on(&ctx, false);
         assert!(attention_requested(&ctx));
 
         let ctx = egui::Context::default();
-        app.request_attention(&ctx);
+        app.request_attention_on(&ctx, false);
         assert!(!attention_requested(&ctx), "only once per notification");
 
         app.window_hidden = true;
         app.maybe_notify(CHAT, &message);
-        app.request_attention(&ctx);
+        app.request_attention_on(&ctx, false);
         assert!(!attention_requested(&ctx));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn gnome_gets_no_duplicate_window_attention_notification() {
+        let ctx = egui::Context::default();
+        let mut app = unlocked_app();
+        let message = incoming(&mut app);
+        app.window_hidden = false;
+        app.window_focused = false;
+        app.maybe_notify(CHAT, &message);
+        app.request_attention_on(&ctx, true);
+        assert!(!attention_requested(&ctx));
+        app.request_attention_on(&ctx, false);
+        assert!(
+            !attention_requested(&ctx),
+            "the suppressed request is spent"
+        );
     }
 
     /// Behind the app lock `window_focused` stays false, but a lock screen
