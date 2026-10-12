@@ -14,6 +14,46 @@ profile and must not connect a duplicate restored session. Destructive tests and
 release publication remain unauthorized. Historical case descriptions follow;
 none establishes attended acceptance by itself.
 
+## Observed Windows acceptance, 2026-10-12
+
+Source: `ac8c93f3d0c2b244de55f14ce8e15379f0574a4d`, Windows x86_64.
+Installed executable SHA256:
+`38491fe6cb33374c9660575f65910793b8dc8bdd4826a4900374ad6871e5ba49`.
+Cold backup and executable rollback were prepared and verified before installation;
+see [the current checkpoint](development-resume-20261012.md).
+
+| Case | Observation | Result |
+| --- | --- | --- |
+| Existing-session startup | User opened the existing shortcut and confirmed connection without QR/relink and existing history present. | Passed for startup/history presence; recovery completeness is not established. |
+| Invented document/image/video in Message yourself | User explicitly requested the three fixture attachments. Agent used Windows UI Automation to verify the agreed header, empty draft/caption and exactly three staged files, then invoked Send once. User confirmed all three arrived and opened correctly, including audible video playback. | Passed for this fixture send/open/playback. |
+| Explicit saved document | User saved the invented document through Zap Faster and confirmed the saved copy opens correctly. | Passed for explicit document saving; automatic organization/exports remain separate. |
+| Close-to-tray and reopen | User closed the window and reopened it from the tray, confirming the same connected account and history. | Passed for this close/reopen cycle. |
+| Encrypted account backup | Agent entered a generated passphrase into the verified password fields using keyboard input, without clipboard/log disclosure. The secret is stored with current-user DPAPI under the protected rollback folder. Settings reported a saved backup. The closed file was copied into the permanent recovery folder and both SHA256 hashes matched: `aa72e596fa50f84fa7e2194b9a42b587667d45d8ccb7beefdc753c520cbeb9d0`, 2,312,919,910 bytes. | Export passed. |
+| Reconnect after encrypted export | Source-aware UI Automation read-back observed the Settings progress label that is drawn only while connected, with no disconnected/connecting banner. | Passed for this post-backup reconnection. |
+| Separate offline restore | App reported restore success. New account `2` has session/archive files, `archive_only=true` and `cli_access=false`; original account `1` remains present and connected. Restored session was never resumed. | Decrypt/install/offline gating passed; complete media/history equivalence is not established. |
+| Offline merge preview/cancel | On offline account `2`, re-importing the same backup unexpectedly proposed three additions and no edits/deletions/conflicts/pending imports. Cancel was invoked; encrypted database and WAL hashes stayed identical. Original account `1` was selected again afterward. A synthetic privacy-ID fixture reproduces a duplicate-addition defect. | Cancellation passed; merge confirmation held pending correction and runtime recheck. |
+| Settings keyboard navigation | User confirmed Tab/Shift+Tab reach controls with visible focus, without traps or unexpected actions. | Passed for the observed Settings navigation. |
+| Phone history response | Connected Settings read-back observed `Phone history: response received`. | Response observed; full recovery and the exact explicit repair anchor are unproven. |
+| Settings layout | User supplied a screenshot showing overlap and clipping. Correction `d73ded1` has synthetic bounds checks at three widths and two text scales, with all required Windows gates passing. | Installed correction and attended visual recheck pending. |
+| Voice/video recipient and peer-dependent notifications | User reconfirmed Victor Correa is Message yourself and no separate recipient is available. | Pending recipient prerequisite; no self call or contact send is substituted. |
+
+Organized downloads, retention/storage protection, reconnect/phone recovery,
+notifications/privacy, offline backup/restore/merge and keyboard acceptance
+still require their own observations. No private archive contents or screenshots
+were captured. No calls were placed.
+
+Backup automation limitations: password ValuePattern actions did not enable saving;
+foreground-checked keyboard input worked. The native save dialog rejected the
+existing `C:` recovery-folder path with "Path does not exist"; saving to a new,
+owner/SYSTEM-protected `H:` staging directory succeeded. The completed encrypted
+file was copied and hash-verified in the permanent `C:` folder, retaining staging.
+The open dialog likewise rejected the permanent `C:` copy; the hash-identical
+protected `H:` copy restored successfully. This picker path mismatch remains unexplained and is not attributed to a
+product defect without further evidence. Automation stopped when the client lost
+foreground; it did not send keyboard input into another application.
+
+## Historical 2026-10-11 preview
+
 All cases below are **not run**. Local fixtures, software X11 captures and builds
 remain recorded separately. A test account means a WhatsApp number used only for
 invented conversations, with no personal chats, contacts or attachments.

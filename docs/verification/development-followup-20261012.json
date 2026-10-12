@@ -1,5 +1,5 @@
 {
-  "state": "All six Windows source gates passed; fresh CI and attended acceptance pending",
+  "state": "All six Windows source gates and all CI passed for ac8c93f3; newer merge correction is under validation and is not covered by this frozen input manifest",
   "starting_fork": "eb09b23ae29a7576251a8c91790736cc612ee0fd",
   "compared_upstream": "e00e377ee6c617206245455a04146a5dd5c24265",
   "focus_fix": "25e65674",
@@ -454,7 +454,63 @@
     "lockfile changes limited to fastframe and application dependency lists"
   ],
   "logs": "H:\\Scratch\\Codex\\zap-batch-20261012",
-  "personal_profile": "Unchanged before installation; only metadata sizes and executable version/help inspected",
-  "attended": "Installation authorized; tests need user observation and agreed recipients; no live sends/calls performed",
-  "publication": "Not authorized; no tag, release or version bump performed"
+  "personal_profile": "Preserved in place; complete cold copy hash-verified before executable replacement. No archive contents inspected.",
+  "attended": "User confirmed existing-session startup/history presence, arrival/opening of all three invented Message yourself fixtures including audible video, explicit saved document opening, and close-to-tray/reopen with the connected account/history. User explicitly requested the fixture send; agent invoked Send once through Windows UI Automation after verifying recipient, empty draft/caption and three staged fixtures. Separate call recipient pending; no calls performed.",
+  "publication": "Not authorized; no tag, release or version bump performed",
+  "native_backup_export": {
+    "result": "passed, saved-backup UI status and closed output file verified",
+    "bytes": 2312919910,
+    "sha256": "aa72e596fa50f84fa7e2194b9a42b587667d45d8ccb7beefdc753c520cbeb9d0",
+    "permanent_file": "C:/Users/Victor/AppData/Local/ZapFasterRollback/20261012-162008/attended-account.zfbackup",
+    "retained_staging_file": "H:/Scratch/Codex/zap-batch-20261012/private-backup/attended-account.zfbackup",
+    "passphrase_recovery": "current-user DPAPI file in protected rollback folder; no plaintext retained in reports or clipboard",
+    "permanent_copy": "SHA256 matches staging; owner/SYSTEM protected parent",
+    "native_save_path": "C: destination refused as nonexistent despite directory presence; H: protected staging succeeded; cause unresolved",
+    "reconnect": "passed, connected-only Settings progress label observed after export",
+    "restore_merge": "offline restore passed; same-backup preview unexpectedly proposed three additions, cancellation left database/WAL unchanged; merge correction under validation",
+    "restored_account": "2, archive_only=true, cli_access=false, session/archive present; never resumed; original account 1 selected afterward"
+  },
+  "pushed_head": "ac8c93f3d0c2b244de55f14ce8e15379f0574a4d",
+  "fresh_ci": {
+    "source_run": 38293266976,
+    "source_status": "completed",
+    "source_conclusion": "success",
+    "linux_nix_x86_64": "success",
+    "linux_nix_aarch64": "success",
+    "flatpak_run": 38293267183,
+    "flatpak_status": "completed",
+    "packaging_run": 38293268332,
+    "packaging_conclusion": "success",
+    "windows_installer_lifecycle": "passed",
+    "windows_native_package_generation": "passed",
+    "user_installer": "passed",
+    "published_linux_package_matrix": "skipped, no release version supplied",
+    "flatpak_conclusion": "success"
+  },
+  "windows_release_build": {
+    "command": [
+      "cargo",
+      "build",
+      "--locked",
+      "--release",
+      "--bin",
+      "zap-faster"
+    ],
+    "exit_code": 0,
+    "duration": "28m54s",
+    "sha256": "38491fe6cb33374c9660575f65910793b8dc8bdd4826a4900374ad6871e5ba49"
+  },
+  "installation": {
+    "state": "replaced in place after graceful quit and complete cold backup",
+    "installed_executable": "C:/Users/Victor/AppData/Local/Programs/ZapFast/zap-faster.exe",
+    "backup_root": "C:/Users/Victor/AppData/Local/ZapFasterRollback/20261012-162008",
+    "verified_files": 2844,
+    "verified_bytes": 3590731648,
+    "old_sha256": "90a9b8181783213c7b42e92fc9aae83127cfcb37764311afb6c42d1bb68fbb70",
+    "new_sha256": "38491fe6cb33374c9660575f65910793b8dc8bdd4826a4900374ad6871e5ba49",
+    "keyring": "unchanged, same Windows user",
+    "rollback": "rollback-executable.ps1; preserves newer profile; data rollback requires separate review",
+    "acl": "owner and SYSTEM, inheritance protected",
+    "startup_acceptance": "passed: user opened existing shortcut and confirmed connection without QR/relink and existing history present"
+  }
 }

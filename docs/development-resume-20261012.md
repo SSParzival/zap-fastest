@@ -12,7 +12,7 @@ unlink/reset/relink, release tag or publication is authorized.
 
 - Local and public fork main: `eb09b23ae29a7576251a8c91790736cc612ee0fd`.
 - CI [38180933357](https://github.com/eternalwaitt/zap-faster/actions/runs/38180933357)
-  completed with eight successful jobs and two failed Linux Nix jobs. Both fail
+  completed with seven successful jobs and two failed Linux Nix jobs. Both fail
   `demo::tests::phone_number_link_opens_its_actions_from_the_keyboard` at the
   focus assertion. Flatpak [38180933389](https://github.com/eternalwaitt/zap-faster/actions/runs/38180933389)
   passed for the same commit. These receipts do not validate later edits.
@@ -32,8 +32,11 @@ a focused regression verifies first/last and intermediate navigation for two
 regions independently of fonts/platform wrapping.
 
 Commit `25e6567` contains this fix. Six focus tests and all 278 demo tests pass
-on Windows. Formatting and all-feature all-target strict Clippy pass. Fresh
-Linux Nix evidence remains required for the correction.
+on Windows. Formatting and all-feature all-target strict Clippy pass.
+Both Linux Nix builds passed in source CI `38293266976`, including the unchanged
+demo regression. All nine source jobs subsequently passed for `ac8c93f3`;
+Flatpak and Packaging CI also passed. These receipts do not validate the newer
+historical merge correction described below.
 
 ## Landed upstream comparison
 
@@ -68,19 +71,64 @@ All six Windows gates pass, including the all-feature suite with the same 1,795 
 Fresh CI and native acceptance must still be recorded before claiming completion.
 Exact inputs and gate receipts are in [the follow-up receipt](verification/development-followup-20261012.json).
 Workflow lint, PowerShell syntax, MSI XML parsing and Git whitespace checks pass.
-Actual MSI install/update/uninstall must run only on disposable CI runners, not
-on the personal Windows profile. Its script refuses ordinary local invocation.
+Actual MSI install/takeover/update/uninstall and native-packages generation passed
+in [Packaging CI 38293268332](https://github.com/eternalwaitt/zap-faster/actions/runs/38293268332).
+The lifecycle test runs only on disposable CI runners; its script refuses ordinary
+local invocation. The separate user-installer job also passed.
 
-Installation has not happened in this checkpoint. The running personal client
-and all account files remain unchanged. Prepare a cold, hash-verified copy after
-graceful quit, retain the current executable and same-user keyring, then replace
-only the executable. Keep a separate executable rollback and preserve any newer
-state before a later data rollback. File backups tied to the existing OS keyring
-are machine-local recovery, not portable encrypted exports.
+The Windows release build passed and the executable was replaced after graceful
+quit and a complete cold backup: 2,844 files, 3,590,731,648 bytes, individually
+hash-verified. The protected machine-local recovery folder is
+`C:/Users/Victor/AppData/Local/ZapFasterRollback/20261012-162008`.
+It retains the previous executable, profile/cache copies and a hash-checking
+executable rollback script. The same-user OS keyring and existing shortcut are
+unchanged. Data rollback requires separate review and preservation of newer
+state. This backup is not a portable encrypted export.
 
-Attended startup/reconnect, phone history/media recovery, storage/cache policy,
-voice/video/camera/audio, notifications/tray/privacy, offline backup/restore/
-merge and keyboard changes remain unverified until observed with the user.
+Victor opened the existing shortcut and confirmed the personal account connected
+without QR/relink and existing history was present. This verifies attended
+existing-session startup and history presence, not older-history recovery.
+Message yourself is the agreed fixture chat. After Victor explicitly asked the
+agent to send the three invented fixtures, Windows UI Automation verified the
+agreed conversation header and empty composer, selected the exact three files,
+verified three attachment tiles and an empty caption, and invoked Send once.
+Victor confirmed all three arrived and opened correctly, including audible
+three-second video playback. No private message contents or archive rows were
+captured. There is no agreed separate call recipient yet; no calls occurred.
+
+Native encrypted backup export subsequently passed: Settings reported success
+and the closed 2,312,919,910-byte output was copied and hash-verified in the
+protected permanent recovery folder as `attended-account.zfbackup`. Its generated
+passphrase is recoverable through current-user DPAPI in the same folder, without
+plaintext in reports or clipboard. The native save picker rejected the existing
+`C:` folder as nonexistent; protected `H:` staging worked and remains retained.
+That mismatch needs further evidence. Reconnect read-back, offline restore and
+merge remained pending at export time. Subsequent native read-back confirmed
+reconnection. Restore decrypted and installed account `2` with session/archive
+present, `archive_only=true` and `cli_access=false`; it was never resumed.
+Original account `1` remained connected and was selected again after testing.
+Re-importing the same backup into the offline copy proposed three additions;
+cancel preserved database/WAL hashes. Synthetic fixtures reproduce incorrect
+duplicate additions when only the imported privacy IDs are normalized. A new
+correction is committed as `5115683f`, separate from the `ac8c93f3` receipts.
+Keyboard automation stops if the client loses foreground.
+
+The user supplied a screenshot showing overlapping/clipped Settings content.
+`d73ded1` stacks progress details and backup controls, wraps narrow setting rows,
+and confines the scrolling column to its pane. A synthetic layout regression
+passes at three widths and two text scales. All six required Windows gates passed
+for the combined merge/Settings candidate: 1,798 library tests, 13 existing ignored,
+10 default / 12 all-feature executable tests and two updater tests. The frozen
+input receipt is `verification/development-settings-fix-20261012.json`.
+The newer executable and its installed native rechecks remain pending.
+
+Connected Settings read-back observed `Phone history: response received`.
+This establishes a response, not complete recovery or a specific repair anchor.
+Startup, fixture playback/saving, tray reopening, encrypted export/offline restore
+and Settings keyboard navigation have the observations recorded above.
+Organized downloads/storage/cache protection, complete history/media recovery,
+voice/video/camera/audio, notifications/privacy and corrected offline merge
+still need their own acceptance evidence.
 Second-account/device, fresh-pairing and other-platform hardware cases remain
 pending where their prerequisites are absent. No release is ready on source
 tests alone. Prepare versioning, notes/media and artifacts only after acceptance
