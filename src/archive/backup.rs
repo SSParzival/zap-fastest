@@ -217,6 +217,41 @@ impl Archive {
         connection.busy_timeout(std::time::Duration::from_secs(30))?;
         Ok(Self { connection })
     }
+
+    /// Copies a consistent encrypted database without rewriting attachment paths.
+    /// Merge previews use this to reconcile identities without touching current rows.
+    pub(super) fn encrypted_snapshot(
+        &self,
+        database: &Path,
+        database_key: &[u8; 32],
+    ) -> Result<()> {
+        private_create(database)?;
+        self.connection.execute(
+            "ATTACH DATABASE ?1 AS portable_backup KEY ?2",
+            rusqlite::params![
+                database
+                    .to_str()
+                    .context("Backup staging path is not UTF-8")?,
+                &*encryption::key_literal(database_key)
+            ],
+        )?;
+        let exported = (|| -> Result<()> {
+            let transaction = self.connection.unchecked_transaction()?;
+            transaction.query_row("SELECT sqlcipher_export('portable_backup')", [], |_| Ok(()))?;
+            for pragma in ["user_version", "application_id"] {
+                let value: i64 = transaction.pragma_query_value(None, pragma, |row| row.get(0))?;
+                transaction.pragma_update(Some("portable_backup"), pragma, value)?;
+            }
+            transaction.commit()?;
+            Ok(())
+        })();
+        let detached = self
+            .connection
+            .execute_batch("DETACH DATABASE portable_backup");
+        exported?;
+        detached?;
+        Ok(())
+    }
     /// Writes a portable password-protected snapshot and referenced attachments.
     /// Call on the account worker so archive updates cannot race the snapshot.
     /// Destination must not exist. Missing referenced attachments fail explicitly.
@@ -263,31 +298,7 @@ impl Archive {
         let database = staging.path().join("archive.db");
         let mut database_key = Zeroizing::new([0u8; 32]);
         getrandom::fill(database_key.as_mut())?;
-        private_create(&database)?;
-        self.connection.execute(
-            "ATTACH DATABASE ?1 AS portable_backup KEY ?2",
-            rusqlite::params![
-                database
-                    .to_str()
-                    .context("Backup staging path is not UTF-8")?,
-                &*encryption::key_literal(&database_key)
-            ],
-        )?;
-        let exported = (|| -> Result<()> {
-            let transaction = self.connection.unchecked_transaction()?;
-            transaction.query_row("SELECT sqlcipher_export('portable_backup')", [], |_| Ok(()))?;
-            for pragma in ["user_version", "application_id"] {
-                let value: i64 = transaction.pragma_query_value(None, pragma, |row| row.get(0))?;
-                transaction.pragma_update(Some("portable_backup"), pragma, value)?;
-            }
-            transaction.commit()?;
-            Ok(())
-        })();
-        let detached = self
-            .connection
-            .execute_batch("DETACH DATABASE portable_backup");
-        exported?;
-        detached?;
+        self.encrypted_snapshot(&database, &database_key)?;
         let snapshot = encryption::keyed(&database, &database_key)?;
         let mut attachments = BTreeMap::<String, (String, u64)>::new();
         rewrite(&snapshot, |source| {

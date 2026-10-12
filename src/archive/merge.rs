@@ -22,6 +22,7 @@ pub struct PreparedMerge {
     restore: PreparedRestore,
     pub preview: MergePreview,
     revision: (u64, i64),
+    mappings: std::collections::BTreeMap<String, String>,
 }
 
 impl std::fmt::Debug for PreparedMerge {
@@ -148,6 +149,7 @@ impl PreparedRestore {
     }
 
     pub fn preview_merge(self, target: &Archive) -> Result<PreparedMerge> {
+        let starting_version = revision(target)?.1;
         let source = self.merge_source()?;
         ensure!(
             identity(target)? == identity(&source)?,
@@ -186,8 +188,14 @@ impl PreparedRestore {
             );
             mappings.insert(lid, pn);
         }
-        for (lid, pn) in mappings {
-            source.put_lid(&lid, &pn)?;
+        let comparison_path = self.staging.path().join("merge-current.db");
+        target.encrypted_snapshot(&comparison_path, &self.database_key)?;
+        let comparison = Archive {
+            connection: encryption::keyed(&comparison_path, &self.database_key)?,
+        };
+        for (lid, pn) in &mappings {
+            source.put_lid(lid, pn)?;
+            comparison.put_lid(lid, pn)?;
         }
         let mut preview = MergePreview::default();
         let mut statement = source
@@ -201,7 +209,7 @@ impl PreparedRestore {
             let Some(message) = source.message(&chat, &id)? else {
                 continue;
             };
-            match decision(target, &source, &message)? {
+            match decision(&comparison, &source, &message)? {
                 Decision::Add => preview.added += 1,
                 Decision::Edit => preview.edited += 1,
                 Decision::Conflict => preview.conflicts += 1,
@@ -219,13 +227,15 @@ impl PreparedRestore {
             }
         }
         drop(statement);
-        let mut statement = target.connection.prepare("SELECT chat,id FROM messages")?;
+        let mut statement = comparison
+            .connection
+            .prepare("SELECT chat,id FROM messages")?;
         let rows = statement.query_map([], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })?;
         for row in rows {
             let (chat, id) = row?;
-            if let Some(message) = target.message(&chat, &id)?
+            if let Some(message) = comparison.message(&chat, &id)?
                 && (removed(&source, &chat, &id)?
                     || source
                         .removal_point(&chat)?
@@ -235,10 +245,16 @@ impl PreparedRestore {
             }
         }
         drop(statement);
+        let revision = revision(target)?;
+        ensure!(
+            starting_version == revision.1,
+            "The archive changed while preparing this preview. Prepare the merge again."
+        );
         Ok(PreparedMerge {
-            revision: revision(target)?,
+            revision,
             restore: self,
             preview,
+            mappings,
         })
     }
 }
@@ -324,6 +340,12 @@ impl PreparedMerge {
             "The archive changed after this preview. Prepare the merge again."
         );
         let source = self.restore.merge_source()?;
+        let comparison = Archive {
+            connection: encryption::keyed(
+                &self.restore.staging.path().join("merge-current.db"),
+                &self.restore.database_key,
+            )?,
+        };
         ensure!(
             identity(target)? == identity(&source)?,
             "Account identity changed after the preview."
@@ -338,7 +360,7 @@ impl PreparedMerge {
             for row in rows {
                 let (chat, id) = row?;
                 if let Some(message) = source.message(&chat, &id)?
-                    && protected(target, &source, &message)?
+                    && protected(&comparison, &source, &message)?
                 {
                     blocked.push((chat, id));
                 }
@@ -394,6 +416,9 @@ impl PreparedMerge {
             ],
         )?;
         let merged = (|| -> Result<()> {
+            for (lid, pn) in &self.mappings {
+                target.reconcile_lid(&transaction, lid, pn)?;
+            }
             let own = identity(target)?;
             target.connection.execute(
                 "UPDATE message_removals SET account=?1 WHERE account=''",
@@ -558,6 +583,103 @@ mod tests {
             .unwrap()
             .preview_merge(target)
             .unwrap()
+    }
+
+    #[test]
+    fn remerging_restored_backup_does_not_duplicate_mapped_privacy_chat() {
+        let root = tempfile::tempdir().unwrap();
+        let target = fixture();
+        let source = fixture();
+        for archive in [&target, &source] {
+            archive.put_lid("789", "123456").unwrap();
+            archive.ensure_chat("789@lid", "Synthetic alias").unwrap();
+            archive
+                .insert_message(&message("789@lid", "same", 30, false), None)
+                .unwrap();
+        }
+        let prepared = prepare(&source, &target, root.path());
+        assert_eq!(prepared.preview.added, 0);
+        assert!(target.message("789@lid", "same").unwrap().is_some());
+        assert!(
+            target
+                .message("123456@s.whatsapp.net", "same")
+                .unwrap()
+                .is_none()
+        );
+        let staged = fs::read(prepared.restore.staging.path().join("merge-current.db")).unwrap();
+        assert!(!staged.starts_with(b"SQLite format 3"));
+        prepared.apply(&target, &root.path().join("cache")).unwrap();
+        assert!(target.message("789@lid", "same").unwrap().is_none());
+        assert!(
+            target
+                .message("123456@s.whatsapp.net", "same")
+                .unwrap()
+                .is_some()
+        );
+        assert_eq!(
+            target
+                .connection
+                .query_row("SELECT COUNT(*) FROM messages", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+    }
+
+    #[test]
+    fn failed_merge_rolls_back_privacy_reconciliation_and_current_pending_reads() {
+        let root = tempfile::tempdir().unwrap();
+        let target = fixture();
+        let source = fixture();
+        for archive in [&target, &source] {
+            archive.put_lid("789", "123456").unwrap();
+            archive.ensure_chat("789@lid", "Synthetic alias").unwrap();
+            archive
+                .insert_message(&message("789@lid", "same", 30, false), None)
+                .unwrap();
+        }
+        target
+            .connection
+            .execute("UPDATE chats SET pending_read=42 WHERE id='789@lid'", [])
+            .unwrap();
+        source
+            .ensure_chat("123456@s.whatsapp.net", "Synthetic canonical")
+            .unwrap();
+        source
+            .insert_message(
+                &message("123456@s.whatsapp.net", "imported", 40, false),
+                None,
+            )
+            .unwrap();
+        target.connection.execute_batch("CREATE TRIGGER refuse_import BEFORE INSERT ON messages WHEN NEW.id='imported' BEGIN SELECT RAISE(ABORT,'synthetic merge failure'); END;").unwrap();
+        let prepared = prepare(&source, &target, root.path());
+        assert_eq!(prepared.preview.added, 1);
+        assert!(prepared.apply(&target, &root.path().join("cache")).is_err());
+        assert!(target.message("789@lid", "same").unwrap().is_some());
+        assert!(
+            target
+                .message("123456@s.whatsapp.net", "same")
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            target
+                .message("123456@s.whatsapp.net", "imported")
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            target
+                .connection
+                .query_row(
+                    "SELECT pending_read FROM chats WHERE id='789@lid'",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            42
+        );
+        assert_eq!(fs::read_dir(root.path().join("cache")).unwrap().count(), 0);
     }
 
     #[test]

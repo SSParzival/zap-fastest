@@ -1329,10 +1329,22 @@ impl Archive {
     /// the privacy id with the canonical phone-number chat.
     pub fn put_lid(&self, lid: &str, pn: &str) -> Result<bool> {
         let transaction = self.connection.unchecked_transaction()?;
+        let changed = self.reconcile_lid(&transaction, lid, pn)?;
+        transaction.commit()?;
+        Ok(changed)
+    }
+
+    /// Reuses the same reconciliation inside an already-owned atomic merge.
+    fn reconcile_lid(
+        &self,
+        transaction: &rusqlite::Transaction<'_>,
+        lid: &str,
+        pn: &str,
+    ) -> Result<bool> {
         let lid_chat = format!("{lid}@lid");
         let phone_chat = format!("{pn}@s.whatsapp.net");
-        Self::merge_group_recipient(&transaction, &lid_chat, &phone_chat)?;
-        let favorite = Self::move_favorite(&transaction, &lid_chat, &phone_chat)?;
+        Self::merge_group_recipient(transaction, &lid_chat, &phone_chat)?;
+        let favorite = Self::move_favorite(transaction, &lid_chat, &phone_chat)?;
         self.connection.execute(
             "INSERT INTO lids (lid, pn) VALUES (?1, ?2) ON CONFLICT(lid) DO UPDATE SET pn = excluded.pn",
             params![lid, pn],
@@ -1545,7 +1557,6 @@ impl Archive {
         )?;
         self.purge_chat_rows(&lid_chat)?;
         transaction.execute("DELETE FROM chats WHERE id = ?1", params![lid_chat])?;
-        transaction.commit()?;
         Ok(changed > 0 || favorite || removed > 0 || had_lid_chat)
     }
 
