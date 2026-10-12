@@ -1,5 +1,19 @@
 # Attended acceptance preview
 
+## Current authorization, 2026-10-12
+
+The user now explicitly authorizes installation and attended testing on the
+existing personal account. This supersedes the synthetic-account-only restrictions
+below. Preserve the linked session and archive, prepare a recoverable backup and
+executable rollback first, and coordinate each live test with the user. Use agreed
+chats/recipients and invented content. Do not inspect archive contents, log private
+data, autonomously send or call contacts, unlink, reset or relink. Cases requiring
+a second account/device or fresh pairing remain pending until their prerequisite
+exists. Safe-copy/offline backup, restore and merge tests must preserve the active
+profile and must not connect a duplicate restored session. Destructive tests and
+release publication remain unauthorized. Historical case descriptions follow;
+none establishes attended acceptance by itself.
+
 All cases below are **not run**. Local fixtures, software X11 captures and builds
 remain recorded separately. A test account means a WhatsApp number used only for
 invented conversations, with no personal chats, contacts or attachments.
