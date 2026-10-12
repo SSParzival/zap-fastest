@@ -402,7 +402,12 @@ fn tab_controls(controls: &[(Stop, Id)], from: Option<Stop>) -> Vec<(Stop, Id)> 
     let mut result = Vec::new();
     let mut seen = std::collections::HashSet::new();
     for &(stop, id) in controls {
-        if let Some(group) = toolbar_group(stop) {
+        // Phone hit regions keep their own Tab stops, including the last
+        // wrapped segment reached backwards from ChatSearch. Arrow keys can
+        // still move among them as a group.
+        if let Some(group) = toolbar_group(stop)
+            && !matches!(stop, Stop::PhoneLink(_))
+        {
             if !seen.insert(group) {
                 continue;
             }
@@ -432,6 +437,34 @@ pub fn stops(ctx: &Context) -> Vec<(Stop, Id)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wrapped_phone_links_keep_each_tab_stop_in_both_directions() {
+        let controls = [
+            Stop::Emoji,
+            Stop::PhoneLink(0),
+            Stop::PhoneLink(1),
+            Stop::ChatSearch,
+        ]
+        .map(|stop| (stop, Id::new(format!("wrapped-phone-{stop:?}"))));
+        for (from, steps, expected) in [
+            (Stop::Emoji, 1, controls[1].1),
+            (Stop::ChatSearch, -1, controls[2].1),
+            (Stop::PhoneLink(0), 1, controls[2].1),
+            (Stop::PhoneLink(1), -1, controls[1].1),
+        ] {
+            assert_eq!(
+                next(
+                    &tab_controls(&controls, Some(from)),
+                    Move {
+                        from: Some(from),
+                        steps
+                    }
+                ),
+                Some(expected)
+            );
+        }
+    }
 
     #[test]
     fn toolbars_have_one_tab_stop_and_keep_the_roved_control() {
