@@ -37,6 +37,16 @@ see [the current checkpoint](development-resume-20261012.md).
 | Settings layout | User supplied a screenshot showing overlap and clipping. Correction `d73ded1` has synthetic bounds checks at three widths and two text scales, with all required Windows gates passing. | Installed correction and attended visual recheck pending. |
 | Attended voice call | User independently called their mother and confirmed voice calling worked with satisfactory audio quality. Agent did not place the call or inspect its contents. | Basic Windows voice call/audio quality passed by user report; dialing tone and call-history/menu defects were reported. Video/camera and incoming peer notifications remain unverified. |
 
+### Updated startup feedback, 2026-10-13
+
+On installed source `2a41af748ec173ee45fc76ae99be83f3cf4f848f`, executable
+SHA256 `721f18779952918603cd13a26c296042e2da78950cb951f7b2993b4a6b057f0a`,
+the user observed the pre-connection message asking them to wait for WhatsApp
+to connect and approved its behavior. Startup feedback passes by attended user
+report. This does not establish connected-call latency, dialing-tone behavior,
+completed-call entries, or the absence of a deferred call through runtime evidence;
+the latter also has passing synthetic coverage. Those native cases remain pending.
+
 Organized downloads, retention/storage protection, reconnect/phone recovery,
 notifications/privacy, offline backup/restore/merge and keyboard acceptance
 still require their own observations. No private archive contents or screenshots

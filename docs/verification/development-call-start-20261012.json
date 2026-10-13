@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-10-13T02:45:32.535466+00:00",
+  "generated_at_utc": "2026-10-12T23:45:32.535466-03:00",
   "base_head": "3b3b0a53f16006668f50b50d47d61bd195d3c503",
   "canonical_lf_sha256": {
     ".coderabbit.yaml": "fb9b7400019481f0927aec12cbfe2c3af1598acb46b5a80d16e596a90ed19943",
@@ -358,8 +358,8 @@
         "--check"
       ],
       "exit_code": 0,
-      "started": "2026-10-13T02:31:38.117780+00:00",
-      "finished": "2026-10-13T02:31:40.111539+00:00"
+      "started": "2026-10-12T23:31:38.11778-03:00",
+      "finished": "2026-10-12T23:31:40.111539-03:00"
     },
     {
       "name": "clippy",
@@ -373,8 +373,8 @@
         "warnings"
       ],
       "exit_code": 0,
-      "started": "2026-10-13T02:31:40.111960+00:00",
-      "finished": "2026-10-13T02:32:02.145788+00:00"
+      "started": "2026-10-12T23:31:40.11196-03:00",
+      "finished": "2026-10-12T23:32:02.145788-03:00"
     },
     {
       "name": "clippy-all",
@@ -389,8 +389,8 @@
         "warnings"
       ],
       "exit_code": 0,
-      "started": "2026-10-13T02:32:02.146172+00:00",
-      "finished": "2026-10-13T02:32:15.496693+00:00"
+      "started": "2026-10-12T23:32:02.146172-03:00",
+      "finished": "2026-10-12T23:32:15.496693-03:00"
     },
     {
       "name": "test",
@@ -403,8 +403,8 @@
         "--test-threads=2"
       ],
       "exit_code": 0,
-      "started": "2026-10-13T02:32:15.497084+00:00",
-      "finished": "2026-10-13T02:38:06.061167+00:00"
+      "started": "2026-10-12T23:32:15.497084-03:00",
+      "finished": "2026-10-12T23:38:06.061167-03:00"
     },
     {
       "name": "test-all",
@@ -418,8 +418,8 @@
         "--test-threads=2"
       ],
       "exit_code": 0,
-      "started": "2026-10-13T02:38:06.061634+00:00",
-      "finished": "2026-10-13T02:44:21.140669+00:00"
+      "started": "2026-10-12T23:38:06.061634-03:00",
+      "finished": "2026-10-12T23:44:21.140669-03:00"
     },
     {
       "name": "doc",
@@ -431,8 +431,8 @@
         "--no-deps"
       ],
       "exit_code": 0,
-      "started": "2026-10-13T02:44:21.141187+00:00",
-      "finished": "2026-10-13T02:44:42.486888+00:00"
+      "started": "2026-10-12T23:44:21.141187-03:00",
+      "finished": "2026-10-12T23:44:42.486888-03:00"
     }
   ],
   "tests": {
@@ -444,6 +444,29 @@
   },
   "behavior": "Pre-connection voice/video clicks are rejected with explanation and never deferred until reconnect. Connected clicks show preparation immediately and refuse duplicates. Worker rejections clear preparation.",
   "diagnostics": "Static call phase markers and elapsed milliseconds only; no recipients, identifiers, device names or message content.",
-  "native": "Installed prior 3b3b0a53 passed source CI and Flatpak. User reports eventual call start after long startup delay. Exact queue/device/setup time remains unmeasured; corrected build and attended recheck pending.",
-  "publication": "No tag or release publication authorized or performed."
+  "native": "2026-10-13: user observed and approved the pre-connection wait message. Startup feedback passed by user report. Connected call timing, tone, completed-call entries and Calls dismissal remain pending.",
+  "publication": "No tag or release publication authorized or performed.",
+  "implementation_head": "2a41af748ec173ee45fc76ae99be83f3cf4f848f",
+  "installation": {
+    "backup_root": "C:\\Users\\Victor\\AppData\\Local\\ZapFasterRollback\\20261012-235534",
+    "installed_executable": "C:\\Users\\Victor\\AppData\\Local\\Programs\\ZapFast\\zap-faster.exe",
+    "old_sha256": "DA335552FDE13027517D928E5DC6598D78DC485E2AE4EA8A23B5FB52DEE40EED",
+    "new_sha256": "721F18779952918603CD13A26C296042E2DA78950CB951F7B2993B4A6B057F0A",
+    "verified_files": 5837,
+    "verified_bytes": 5908278350,
+    "keyring": "Retained under the same Windows user; machine-local rollback",
+    "copied_at": "2026-10-12T23:56:35.0324853-03:00",
+    "publication": "not authorized"
+  },
+  "release_build": {
+    "exit_code": 0,
+    "duration": "7m 58s",
+    "version": "0.30.0",
+    "installed_hash_verified": true
+  },
+  "fresh_ci": {
+    "source_run": 38338443966,
+    "flatpak_run": 38338474925,
+    "state": "Eight source jobs passed, including macOS tests and both Linux Nix; macOS ARM64 Nix running. Flatpak passed."
+  }
 }

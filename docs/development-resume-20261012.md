@@ -1,5 +1,12 @@
 # Selected development batch, 2026-10-12
 
+Current selected worklist and concise status:
+[development-status-20261013.md](development-status-20261013.md).
+The dated sections below retain the implementation and installation history.
+Broader uncommitted UI work is now in progress under
+[development-ux-20261013.md](development-ux-20261013.md). Baseline source/CI and
+installed-client receipts do not validate those newer edits.
+
 This checkpoint continues the selected batch, not every upstream proposal.
 The user's 2026-10-12 instructions supersede historical installation and
 synthetic-account-only restrictions in earlier checkpoints. Installation and
@@ -144,16 +151,39 @@ version remains 0.30.0. Source CI `38323347352` passed all nine jobs and
 Flatpak `38323371017` passed. User reopen/reconnect, Settings fit, Calls dismissal, local tone
 and completed-call entries remain pending. Do not scan a QR or relink.
 
-New native report: a call initiated just after opening eventually started after
-a long delay. Startup admission and immediate preparation feedback are being
-corrected in `src/app.rs` and `src/backend/worker/calls.rs`; the installed build
-is still `3b3b0a53`. The exact queue/device/protocol delay is unmeasured.
+New native report on installed `3b3b0a53`: a call initiated just after opening
+eventually started after a long delay. Startup admission and immediate preparation
+feedback were corrected in `src/app.rs` and `src/backend/worker/calls.rs`.
+The exact queue/device/protocol delay is unmeasured.
 Focused tests passed (two admission/feedback cases and thirteen call-worker
 cases), followed by all six required Windows gates passing: 1,806 library tests,
 13 existing ignored, 10 default / 12 all-feature executable tests and two updater
 tests. Frozen inputs and commands are in
-`verification/development-call-start-20261012.json`. Corrected build/install
-and measured attended acceptance remain pending.
+`verification/development-call-start-20261012.json`. Measured attended acceptance
+remains pending; the build and install result follow below.
+The correction is pushed as `2a41af748ec173ee45fc76ae99be83f3cf4f848f`.
+Source CI `38338443966` and Flatpak `38338474925` are running; the default
+Windows release build passed in 7m 58s, with its log under
+`H:/Scratch/Codex/zap-batch-20261012/call-start-validation/windows-release-build.log`.
+The user clarified that the delay followed opening the client, with duration
+unknown. No agent call was placed. A label-only native audio-layout probe was
+incomplete; the conversation view was restored and no geometry pass is claimed.
+The correction is now installed, SHA256
+`721f18779952918603cd13a26c296042e2da78950cb951f7b2993b4a6b057f0a`,
+version 0.30.0 read back. Verified cold rollback is
+`C:/Users/Victor/AppData/Local/ZapFasterRollback/20261012-235534`, with 5,837
+profile files and 5,908,278,350 bytes; previous executable and same-user keyring
+preserved. No live-call/recording controls were visible before graceful shutdown.
+User reopen and timed voice-call acceptance were requested. No QR/relink,
+agent-initiated contact call, tag or publication occurred. Install receipts remain
+local while fresh source CI/Flatpak run, avoiding an evidence-only push that would
+cancel the active source run.
+
+Attended update, 2026-10-13: the user observed and approved the pre-connection
+wait message on installed `2a41af74`. Startup feedback is now accepted. Connected
+call timing, tone, completed-call entries and Calls dismissal remain pending.
+Fresh CI `38338443966` has eight passing jobs, including macOS tests and both
+Linux Nix builds; macOS ARM64 Nix remains running. Flatpak `38338474925` passed.
 
 Connected Settings read-back observed `Phone history: response received`.
 This establishes a response, not complete recovery or a specific repair anchor.

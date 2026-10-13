@@ -1,16 +1,23 @@
 # Development checklist, 2026-10-10
 
-Full authorized scope: 66 open upstream PRs, 87 open issues, and the archive/download work below. Covered means capability exists in audited source, not attended device proof. Every unchecked item remains requested scope, including investigations and external dependencies. Competing proposals are consolidated in implementation while preserving individual tracking. Never inspect real message contents or user archives for diagnosis.
+Historical inventory: 66 upstream PRs, 87 issues and archive/download tracks were
+reviewed. The user's later instructions restrict active work to the selected
+high-value batch and compatible changes landed on upstream main. This inventory
+does not authorize implementing every open proposal. Covered means capability
+exists in audited source, not attended device proof; unchecked implementation
+items often mean native acceptance remains. Preserve individual tracking without
+treating its unchecked count as the current implementation backlog. Never inspect
+real message contents or personal archives for diagnosis.
 
-**Current continuation:** the full corrected batch now passes all six required
-source gates on Windows x86_64, macOS ARM64 and Linux x86_64/ARM64, plus Windows
-ARM64 all-target/all-feature cross-compilation. Nine refreshed synthetic images
-were reviewed, and the cache controls and Status explanation layout defects were
-corrected. Exact current hashes, receipts and restored resource limits are in
-[the active batch checkpoint](development-batch-20261011.md). Attended acceptance
-and documented upstream prerequisites remain open. No commit, push, installation
-or release of this batch has occurred. Older package, Nix and visual receipts
-below describe their earlier source snapshots.
+**Current status, 2026-10-13:** the selected implementation and compatible landed
+upstream changes are committed and pushed, and the Windows client is installed
+with verified backup/rollback. Implementation head is `2a41af74`. All six required
+Windows gates pass; eight source CI jobs and Flatpak pass, with macOS ARM64 Nix
+still running. Basic attended startup/media/save/tray/backup/offline-restore and
+voice evidence exists; current call startup feedback is accepted. Remaining
+acceptance, localization follow-up and release preparation are explicitly listed
+in [the current selected backlog](development-status-20261013.md). That worklist
+supersedes historical scope, installation and testing restrictions below.
 The earlier integration snapshot passed all six required gates on Windows x86_64, Linux x86_64/ARM64 and macOS ARM64, plus macOS Settings-menu integration and Windows ARM64 all-target/all-feature cross-compilation. Final AMD64 and ARM64 native packages pass twelve clean distro installation/removal cases. Independent synthetic X11 acceptance passes 27 captures. Actual Nix release build, full tests, installation and output checks also pass. Original WSL settings and owned-container limits are restored, with unrelated running services verified again. [The verification checkpoint](development-verification-20261011.md), the final verification sections and development-resume-20261010.md supersede earlier per-item statements that local Rust gates are pending. Unchecked items retain their explicit platform, attended or upstream acceptance requirements.
 
 ## Archive and download checklist
@@ -28,7 +35,13 @@ The earlier integration snapshot passed all six required gates on Windows x86_64
 
 ## Product boundaries and dependencies
 
-Calling remains requested, but adopting the submitted protocol fork conflicts with AGENTS.md. Required protocol work must land in oxidezap/whatsapp-rust first. PR #315 introduces seven messaging networks and is excluded by the user's explicit WhatsApp-only instruction. Calling and optional appearance work remain included. CLI sending requires explicit opt-in and private account/lock-aware IPC. View-once and disappearing media must retain WhatsApp privacy behavior. No missing capability is excluded merely for being absent.
+Native 1:1 voice/video calling is implemented using the tested official protocol
+pin; a user-initiated Windows voice call passed. Group-call interoperability and
+other missing supported APIs remain dependency tracks. Adopting submitted protocol
+forks conflicts with AGENTS.md. PR #315's non-WhatsApp networks remain excluded.
+CLI sending requires explicit opt-in and private account/lock-aware IPC. View-once
+and disappearing media retain WhatsApp privacy behavior. Current personal-account
+testing authorization is in the attended checkpoint; do not unlink or relink to test.
 
 ## PR inventory
 
@@ -128,7 +141,7 @@ Calling remains requested, but adopting the submitted protocol fork conflicts wi
 - [ ] **P1, upstream dependency: [PR #395](https://github.com/crmne/zapfast/pull/395), Add group calling.** Upstream dependency verified against official 94c53e833805c58c9f5966b08d08c990650a651e: wacore/src/stanza/group_call.rs requires transaction-id and connected-limit in parse_group_info even for the initial ACK (lines 375-384); InitialGroupOfferParams carries one audio_rate (line 42). Submitted #395 depends on alitura1/whatsapp-rust d70d2d05 to alter both. The exact official high-level group facade exists but does not remove these interoperability defects. Our guide forbids adopting protocol forks: land required protocol fixes upstream first. Author reports working live 1:1 voice/video, but group-call creation still receives server error 427. Meaning of that error is unproven; do not advertise working group calls.
   - Acceptance: Focused synthetic regression, relevant project gates, affected platform/device verification where needed.
 
-- [ ] **P2, implemented, validation pending: [PR #394](https://github.com/crmne/zapfast/pull/394), Localized recovered UI and synchronized catalogs.** Linking/history recovery, settings, archive progress, backup/restore consent and status, calls/devices, app lock and privacy/focus controls now use fresh gettext entries and plural summaries. Added previously omitted login/backup/call source modules to extraction. All ten catalogs contain 688 active translated entries with zero empty/fuzzy entries; GNU msgfmt format checks pass. Existing valid translations are preserved, and malformed legacy placeholders/plural declarations repaired. Windows Git Bash extraction resolves GNU gettext and Rust paths without changing the host. The final GNU source-reference extraction check passes. Local build/catalog gates pass; attended language/layout acceptance remains.
+- [ ] **P2, implemented, validation pending: [PR #394](https://github.com/crmne/zapfast/pull/394), Localized recovered UI and synchronized catalogs.** Linking/history recovery, settings, archive progress, backup/restore consent and status, calls/devices, app lock and privacy/focus controls now use fresh gettext entries and plural summaries. Added previously omitted login/backup/call source modules to extraction. The earlier verified snapshot had 688 active translated entries per catalog and passed GNU msgfmt checks. New Settings/Calls/startup copy needs extraction and translations, as tracked in the current selected backlog. Existing valid translations are preserved, and malformed legacy placeholders/plural declarations repaired. Windows Git Bash extraction resolves GNU gettext and Rust paths without changing the host. The final GNU source-reference extraction check passes. Local build/catalog gates pass; attended language/layout acceptance remains.
   - Acceptance: Focused synthetic regression, relevant project gates, affected platform/device verification where needed.
 
 - [x] **P3, covered: [PR #391](https://github.com/crmne/zapfast/pull/391), Show group descriptions in group info.** Covered/adapted. 6c458c2, group descriptions
@@ -203,7 +216,7 @@ Calling remains requested, but adopting the submitted protocol fork conflicts wi
 - [ ] **P2, partial, validation pending: [PR #256](https://github.com/crmne/zapfast/pull/256), Add call history and chat call entries.** Encrypted local call history and live call outcomes are implemented in archive/call_log.rs with account-scoped UI routing. Official CallLogSync/CallLogHistory ingestion, chronological entries, missed-call stubs and a narrow placeholder backfill are now implemented and covered by synthetic fixtures. Attended missed-call interoperability remains required; video/group dependencies are still tracked separately.
   - Acceptance: Focused synthetic regression, relevant project gates, affected platform/device verification where needed.
 
-- [ ] **P2, implemented, validation pending: [PR #255](https://github.com/crmne/zapfast/pull/255), Add 1:1 video calling.** Native nokhwa capture uses Media Foundation on Windows, AVFoundation on macOS and V4L on Linux. User-initiated start/answer/upgrade uses the official video facade and request tokens, OpenH264 encodes locally at 15fps with a 640-pixel maximum side, retaining portrait/landscape aspect ratio, and the view keeps only latest local/peer pictures. An isolated own-executable helper is killed on stop/lock/cancel even if native capture blocks. Hardware-free encoder/pipe/preview fixtures are included. Attended camera permissions, camera removal, two-device interoperability and packaged platform behavior remain unverified. The current continuation adds persisted per-account camera selection with isolated discovery and refusal when the selected device disappears. New identity, portrait encoding and layout fixtures await whole-batch validation; earlier passing gates do not cover these changes.
+- [ ] **P2, implemented, validation pending: [PR #255](https://github.com/crmne/zapfast/pull/255), Add 1:1 video calling.** Native nokhwa capture uses Media Foundation on Windows, AVFoundation on macOS and V4L on Linux. User-initiated start/answer/upgrade uses the official video facade and request tokens, OpenH264 encodes locally at 15fps with a 640-pixel maximum side, retaining portrait/landscape aspect ratio, and the view keeps only latest local/peer pictures. An isolated own-executable helper is killed on stop/lock/cancel even if native capture blocks. Hardware-free encoder/pipe/preview fixtures are included. Attended camera permissions, camera removal, two-device interoperability and packaged platform behavior remain unverified. The current continuation adds persisted per-account camera selection with isolated discovery and refusal when the selected device disappears. Identity, portrait encoding and layout fixtures are covered by subsequent batch/source checks; native camera acceptance remains separate.
   - Acceptance: Focused synthetic regression, relevant project gates, affected platform/device verification where needed.
 
 - [x] **P3, covered: [PR #236](https://github.com/crmne/zapfast/pull/236), feat: star a message and list the starred ones in the left panel.** Covered by d9f0bb5: durable account-local stars and paged starred-message list.
@@ -457,7 +470,7 @@ Calling remains requested, but adopting the submitted protocol fork conflicts wi
 - [ ] **P1, implemented, validation pending: [Issue #252](https://github.com/crmne/zapfast/issues/252), Data Backup and Restore.** Encrypted full account backup/restore is in archive/backup.rs: independent archive/key snapshot, linked-device identity and SQLite side files, account settings and media, password authentication and integrity checks. Export pauses the account and fences device-store release. Restore creates a separate account offline, verifies a new keyring key and rolls back ordinary failures; existing destinations are refused rather than overwritten. Explicit resume confirmation protects against duplicate linked-device connections. Durable transaction ownership, key fingerprints, non-replacing publication, roster commit and startup reconciliation now cover interrupted publication, with synthetic crash-boundary/conflict fixtures. Local backup/restore and crash-boundary fixtures pass all native gates; cross-platform power-loss behavior and attended restore acceptance remain.
   - Acceptance: Focused synthetic regression, relevant project gates, affected platform/device verification where needed.
 
-- [ ] **P1, implemented, validation pending: [Issue #248](https://github.com/crmne/zapfast/issues/248), Bidirectional text support.** Mixed-direction paragraphs now align independently; wrapped rows inherit their full paragraph direction. Added logical link/selection, emoji, decoration and repeated-layout fixtures await whole-batch validation. Native Arabic/Hebrew font and ink acceptance remain open.
+- [ ] **P1, implemented, validation pending: [Issue #248](https://github.com/crmne/zapfast/issues/248), Bidirectional text support.** Mixed-direction paragraphs now align independently; wrapped rows inherit their full paragraph direction. Logical link/selection, emoji, decoration and repeated-layout fixtures now pass batch/source checks. Native Arabic/Hebrew font and ink acceptance remain open.
   - Acceptance: Focused synthetic regression, relevant project gates, affected platform/device verification where needed.
 
 - [x] **P3, covered: [Issue #247](https://github.com/crmne/zapfast/issues/247), Image grouping.** Covered core, bulk actions optional. Media albums (#286) and viewer/gallery implemented. Save-all/album bulk actions are additional requests.
@@ -469,7 +482,7 @@ Calling remains requested, but adopting the submitted protocol fork conflicts wi
 - [ ] **P1, needs evidence: [Issue #223](https://github.com/crmne/zapfast/issues/223), Screen flickers black.** Investigate with #433. Windows black flicker persists in older reports; need current build reproduction, GPU/driver/multi-monitor evidence and shared egui fix where appropriate.
   - Acceptance: Focused synthetic regression, relevant project gates, affected platform/device verification where needed.
 
-- [ ] **P2, partial, validation pending: [Issue #219](https://github.com/crmne/zapfast/issues/219), Add 1:1 voice and video calling.** Native 1:1 voice/video and local call history are implemented with the official protocol facade, including camera helpers and supported call-entry ingestion; no live calls were placed. Windows/Linux/macOS device and two-phone acceptance remain required. Group interoperability depends on upstream protocol fixes.
+- [ ] **P2, partial, validation pending: [Issue #219](https://github.com/crmne/zapfast/issues/219), Add 1:1 voice and video calling.** Native 1:1 voice/video and local call history are implemented with the official protocol facade, including camera helpers and supported call-entry ingestion. The user reported successful Windows voice/audio; no agent-initiated call was placed. Windows/Linux/macOS device and two-phone acceptance remain required. Group interoperability depends on upstream protocol fixes.
   - Acceptance: Focused synthetic regression, relevant project gates, affected platform/device verification where needed.
 
 - [ ] **P2, implemented, attended validation pending: [Issue #211](https://github.com/crmne/zapfast/issues/211), In MacOS, the app doesn't respect Do Not Disturb. Notification sounds keep playing..** Notification sounds use native macOS delivery. Actual Focus/Do Not Disturb suppression and signed bundled notification behavior remain unverified.
@@ -478,7 +491,7 @@ Calling remains requested, but adopting the submitted protocol fork conflicts wi
 - [ ] **P2, measured, older hardware reproduction pending: [Issue #209](https://github.com/crmne/zapfast/issues/209), performance drop.** Repeatable synthetic encrypted archive benchmark added:100chats/10,000messages. Windows debug ingestion22.65s before and9.53s after atomic per-message writes; same9,662,464-byte database. Paging/search/reopen under100 ms. Repeat after measured9.11s with18.4MB peakworking set. Actual old Intel/Linux startup report still needs matching hardware evidence.
   - Acceptance: Focused synthetic regression, relevant project gates, affected platform/device verification where needed.
 
-- [ ] **P1, partial, validation pending: [Issue #204](https://github.com/crmne/zapfast/issues/204), Media cache grows unbounded.** Background media recovery now has per-account managed-storage accounting and a configurable budget that pauses new background downloads without deleting archived files. Explicit/manual downloads remain independent. Synthetic accounting/budget fixtures pass local gates. The current continuation adds optional startup/daily age cleanup of unused cache files only, preserving every archived attachment, durable recovery job and export under the user-selected policy. New safety fixtures await whole-batch validation; attended storage-policy acceptance remains. Referenced-attachment expiry is outside the chosen scope.
+- [ ] **P1, partial, validation pending: [Issue #204](https://github.com/crmne/zapfast/issues/204), Media cache grows unbounded.** Background media recovery now has per-account managed-storage accounting and a configurable budget that pauses new background downloads without deleting archived files. Explicit/manual downloads remain independent. Synthetic accounting/budget fixtures pass local gates. The current continuation adds optional startup/daily age cleanup of unused cache files only, preserving every archived attachment, durable recovery job and export under the user-selected policy. Safety fixtures now pass batch/source checks; attended storage-policy acceptance remains. Referenced-attachment expiry is outside the chosen scope.
   - Acceptance: Focused synthetic regression, relevant project gates, affected platform/device verification where needed.
 
 - [ ] **P2, locally verified, release publication pending: [Issue #202](https://github.com/crmne/zapfast/issues/202), Debian 12: .deb requires glibc 2.39 and libasound2t64.** Linux release builds use actual Ubuntu 22.04 containers with glibc 2.35, matching declared Debian 12-compatible libc/ALSA names. Finalization rejects binaries requiring newer GLIBC, so dependencies cannot be loosened on old incompatible assets. Both final binaries have maximum GLIBC 2.35. All twelve clean AMD64/ARM64 installation/removal cases pass, including Ubuntu 22.04 and Debian 12, with exact runtime dependencies. Updated public release assets remain unpublished.
@@ -493,7 +506,7 @@ Calling remains requested, but adopting the submitted protocol fork conflicts wi
 - [ ] **P2, implemented, validation pending: [Issue #163](https://github.com/crmne/zapfast/issues/163), Option for custom in-app notifications (like Telegram Desktop)?.** Optional account-local notification cards share the native notification privacy, mute and throttle checks, then recheck privacy when drawn. Cards retain the originating account, expire with a scheduled wake and expose keyboard controls. Defaults remain off; local privacy/keyboard fixtures and gates pass. Attended card delivery remains.
   - Acceptance: Focused synthetic regression, relevant project gates, affected platform/device verification where needed.
 
-## Delivery gates
+## Historical delivery gates (October 10–11 snapshots)
 
 - [x] Frozen-source Windows formatting, both strict Clippy modes, both locked all-target test modes and strict all-feature rustdoc pass. Library tests: 1,722 passed, 13 manual/hardware ignored in each mode; executable/update suites pass too.
 - [x] Windows, Linux and macOS compilation plus attended limitations are recorded.
@@ -503,14 +516,14 @@ Calling remains requested, but adopting the submitted protocol fork conflicts wi
 - [x] Delivery inventory read-back confirms all 66 PRs and 87 issues, without duplicates: 75 marked covered and 78 unchecked, plus the ten unchecked archive/download acceptance items.
 - [x] Official dependency reassessment against current refs and exact source is recorded in [upstream capabilities](upstream-capabilities-20261011.md); no newly supported capability was found for the listed blockers.
 - [x] Tested product integration and packaging committed directly to local main, with exact input/receipt read-back and durable evidence. See [delivery review](development-delivery-20261011.md).
-- [ ] Execute [attended acceptance](development-attended-acceptance-20261011.md) on approved synthetic accounts and native devices; no case has run in this continuation.
+- [ ] Finish [attended acceptance](development-attended-acceptance-20261011.md) on the authorized personal account and safe copies. Several cases passed; the current selected backlog lists the remaining cases and unavailable-device prerequisites.
 - [x] Source push explicitly approved and public-main read-back confirms the three reviewed commits at `595b31f5a0a82fe30c0c73594e0f611c8e8b74fe`. Release publication and installed-client replacement remain separate approvals.
 
 ## Calling implementation evidence
 
 1:1 voice uses the official oxidezap/whatsapp-rust revision with voip, native rodio input/output, bounded audio channels and real signaling/media state. Start and answer prepare on background tasks with timeouts, cancellation and per-account generation guards. Hidden accounts keep their own snapshots, notification targets carry AccountId, screen lock ends capture, and call log outcomes reside in the encrypted archive. No live calls were placed or answered during development.
 
-Native 1:1 video is also implemented through nokhwa camera backends and the official video facade, including initial offers, explicit answers and token-bound upgrades. The own-executable camera helper uses private bounded H.264 pipes and is killed on cancellation or screen lock; no archive or account data enters it. Source and sink queues hold two frames, local/peer views retain only their newest picture, and OpenH264 encoding stays local at 15fps with a 640-pixel maximum side and preserved aspect ratio. Per-account camera selection and portrait encoding are new source changes awaiting batch validation. No camera device was opened during development.
+Native 1:1 video is also implemented through nokhwa camera backends and the official video facade, including initial offers, explicit answers and token-bound upgrades. The own-executable camera helper uses private bounded H.264 pipes and is killed on cancellation or screen lock; no archive or account data enters it. Source and sink queues hold two frames, local/peer views retain only their newest picture, and OpenH264 encoding stays local at 15fps with a 640-pixel maximum side and preserved aspect ratio. Per-account camera selection and portrait encoding now have passing batch/source checks; native camera acceptance remains pending. No camera device was opened during development.
 
 Required remaining work: attended Windows/Linux/macOS camera permissions and removal, two-device voice/video acceptance, group upstream protocol fixes and documented refusal evidence, attended language and screen-reader acceptance. Catalog and synthetic accessibility checks are covered by the final verification below. Native platform APIs and source compilation are not attended hardware or interoperability proof. Selected-camera platform identity and decoder internal allocation limits remain practical limitations.
 
@@ -521,7 +534,7 @@ Call-entry ingestion: official `CallLogSync` and `CallLogHistory` events now ret
 Remaining protocol dependencies verified against pinned whatsapp-rust94c53e8: outgoing view-once has no public ImageOptions/VideoOptions/AudioOptions option ([builders](https://github.com/oxidezap/whatsapp-rust/blob/94c53e833805c58c9f5966b08d08c990650a651e/src/media.rs)); generated-field send fixtures are not a supported builder API. Native chat custom lists have no typed list event/snapshot/CRUD facade in the pinned feature/event source; LabelSublistUpdate is explicitly inbound-only Business label metadata, and status-privacy custom_lists are audience lists, neither implements native chat lists. Community metadata supports read-only hierarchy roles through [Groups](https://github.com/oxidezap/whatsapp-rust/blob/94c53e833805c58c9f5966b08d08c990650a651e/src/features/groups.rs), while no community administration facade was found. No upstream messages or PRs were sent.
 
 
-## Final verification and blockers
+## Historical verification and blockers (October 10–11 snapshots)
 
 Final-source ARM64/x86 Linux and macOS required gates all pass. Both Linux architectures have 1,722 passing library tests per configuration and 14 ignored; macOS has 1,715 passing library tests and 13 ignored. Default executable tests: nine passed; all-feature executable tests: eleven passed; update tests: two passed in both modes. The native macOS Settings-menu integration also passes. All six Windows gates pass with 1,722 passing library tests per configuration and 13 ignored. Its ARM64 all-target/all-feature cross-compilation also passes. Detailed logs and recovery commands are in [the checkpoint](development-resume-20261010.md).
 

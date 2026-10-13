@@ -1,5 +1,16 @@
 # Active backlog batch, 2026-10-11
 
+## Current status, 2026-10-13
+
+This file preserves the October 11 validation history. The selected batch was
+subsequently committed, pushed and installed, and attended personal-account
+testing is authorized. [The current selected backlog](development-status-20261013.md)
+and [resume checkpoint](development-resume-20261012.md) govern continuation.
+Current implementation is `2a41af74`; all six Windows gates, eight source CI jobs
+and Flatpak pass, with macOS ARM64 Nix running. Native acceptance is partial.
+Historical uncommitted/uninstalled and synthetic-account-only statements below
+do not describe the current state or override the user's authorization.
+
 ## Recovery after the second restart
 
 All six required source gates pass on the corrected 342-input snapshot on
@@ -57,9 +68,10 @@ snapshot results under `visual-fix`. GNU catalog checks and pinned translation
 extraction pass. Previous package/Nix receipts remain evidence for their earlier
 snapshots, not refreshed package or release claims for this source.
 
-The feature batch remains uncommitted, unpublished and uninstalled. Attended
-phone/native cases and documented official API prerequisites remain open. No
-personal account, archive contents, live calls or user clipboard were exercised.
+At this pre-publication snapshot the feature batch was uncommitted and uninstalled,
+and no personal-account tests had run. Subsequent public delivery, installations
+and attended results are recorded in the current checkpoint above. No release
+has been tagged or published; no personal archive contents were inspected.
 
 ## Implemented source in the validated snapshot
 
@@ -112,7 +124,7 @@ The tested dependency pin remains unchanged. Shared native input/tray refs did
 not advance. [Dependency evidence](upstream-capabilities-20261011.md) records the
 fresh read-back. No upstream communication was sent.
 
-## Continue from here
+## Historical continuation instructions (superseded)
 
 The subsequent original-report audit found additional source gaps behind earlier
 coverage labels. Active integration now also includes community grouping,
@@ -133,17 +145,19 @@ catalog checks and the relevant native/visual matrix together. New input hashes
 must accompany those results; older successful receipts cannot validate changed
 camera, call, storage or bidi source.
 
-Keep every original inventory item tracked. Group calling, @all, view-once sends,
-native phone custom lists and snapshot omission convergence still require the
-documented official APIs. Referenced attachment-cache expiration is outside the
-user-selected retention policy. Phone numbers/devices are unavailable for attended
-acceptance, and personal accounts are not substitutes. Native permission,
-screen-reader/compositor/input/font/GPU and power-loss cases remain open.
+Keep original inventory items as reference, using the current selected worklist
+for active scope. Group calling, @all, view-once sends, native phone custom lists
+and snapshot omission convergence remain dependency tracks at the tested pins.
+Referenced attachment-cache expiration is outside the chosen retention policy.
+Personal-account attended testing is explicitly authorized, preserving session
+and archive. Native permission, screen-reader/compositor/input/font/GPU cases and
+cases requiring another device remain pending their evidence or prerequisites.
+Destructive power-loss tests remain unauthorized.
 
-Public main is `e303c226e360a7b0731d2734bbba8d375f9f037f`; local checkpoint commit
-`c9b5672` records the approved push and deferred builds. Current source changes
-have not been committed, pushed, installed or released. No live account, call,
-camera, user archive or personal clipboard was exercised.
+At that snapshot, public main was `e303c226e360a7b0731d2734bbba8d375f9f037f`; local checkpoint commit
+`c9b5672` recorded the approved push and deferred builds. Subsequent commits,
+pushes, installations and attended personal-account results supersede those
+pre-delivery restrictions. The current status link above records what remains.
 
 ## Approved main delivery
 
