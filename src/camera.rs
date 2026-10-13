@@ -330,10 +330,13 @@ impl VideoSession {
                                 request_keyframe(&control);
                             }
                         }
-                        3 => {
+                        3..=10 => {
+                            log::warn!("camera helper failure: stage={kind}");
+                            let message = camera_failure_message(kind);
                             let _ = ready.try_send(Err(
-                                "The selected camera is unavailable. Choose another camera.",
+                                message,
                             ));
+                            view.fail(message);
                             break;
                         }
                         _ => break,
@@ -343,7 +346,9 @@ impl VideoSession {
                     let _ = ready.try_send(Err(
                         "Camera access failed. Check permission and device availability.",
                     ));
-                    view.fail("The camera stopped. Check its connection and permissions.");
+                    if view.error().is_none() {
+                        view.fail("The camera helper stopped unexpectedly. Turn the camera off and try again.");
+                    }
                 }
                 if let Some(mut process) = child.lock().unwrap_or_else(|e| e.into_inner()).take() {
                     let _ = process.kill();
@@ -481,8 +486,48 @@ pub fn run_helper() {
             command_stop.store(true, Ordering::Release);
         });
     let mut output = std::io::stdout().lock();
-    if capture(selected.as_deref(), &stop, &keyframe, &mut output).is_err() {
-        let _ = write_packet(&mut output, 2, &[]);
+    if let Err(error) = capture(selected.as_deref(), &stop, &keyframe, &mut output) {
+        let kind = error
+            .downcast_ref::<CaptureFailure>()
+            .map_or(2, |error| error.0);
+        let _ = write_packet(&mut output, kind, &[]);
+    }
+}
+
+#[derive(Debug)]
+struct CaptureFailure(u8);
+impl std::fmt::Display for CaptureFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(camera_failure_message(self.0))
+    }
+}
+impl std::error::Error for CaptureFailure {}
+
+fn camera_failure_message(kind: u8) -> &'static str {
+    match kind {
+        3 => "The selected camera is unavailable. Choose another camera.",
+        4 => "The camera could not be opened. Check its availability and access settings.",
+        5 => "The camera stopped supplying frames. Turn it off and try another camera.",
+        6 => "The camera frame could not be decoded. Try another camera.",
+        7 => "Camera video encoding failed. Turn the camera off and try again.",
+        8 => "The camera supplied unsupported dimensions. Try another camera.",
+        9 => "Camera permission was not granted. Allow camera access and try again.",
+        10 => {
+            "Windows could not start the camera stream (0xC00D3704). Close apps using the camera and try again."
+        }
+        _ => "The camera helper stopped unexpectedly. Turn the camera off and try again.",
+    }
+}
+
+fn capture_read_failure(error: impl std::fmt::Display) -> CaptureFailure {
+    if error
+        .to_string()
+        .to_ascii_lowercase()
+        .contains("0xc00d3704")
+    {
+        CaptureFailure(10)
+    } else {
+        CaptureFailure(5)
     }
 }
 
@@ -503,7 +548,7 @@ fn read_packet(input: &mut impl Read) -> std::io::Result<(u8, Vec<u8>)> {
     let mut header = [0_u8; 5];
     input.read_exact(&mut header)?;
     let size = u32::from_le_bytes(header[1..].try_into().expect("fixed header")) as usize;
-    if size > MAX_AU || header[0] > 3 || (header[0] != 1 && size != 0) {
+    if size > MAX_AU || header[0] > 10 || (header[0] != 1 && size != 0) {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             "invalid camera helper frame",
@@ -533,7 +578,7 @@ fn capture(
             .recv_timeout(Duration::from_secs(20))
             .unwrap_or(false)
         {
-            return Err(anyhow!("camera permission not granted"));
+            return Err(CaptureFailure(9).into());
         }
     }
     if stop.load(Ordering::Acquire) {
@@ -553,21 +598,20 @@ fn capture(
     } else {
         CameraIndex::Index(0)
     };
-    let mut camera = Camera::new(index, requested)?;
+    let mut camera = Camera::new(index, requested).map_err(|_| CaptureFailure(4))?;
     if stop.load(Ordering::Acquire) {
         return Ok(());
     }
-    camera.open_stream()?;
+    camera.open_stream().map_err(|_| CaptureFailure(4))?;
     if stop.load(Ordering::Acquire) {
         let _ = camera.stop_stream();
         return Ok(());
     }
-    let mut encoder = encoder()?;
-    write_packet(output, 0, &[])?;
+    let mut encoder = encoder().map_err(|_| CaptureFailure(7))?;
     let mut next = Instant::now();
     let mut number = 0_u64;
     while !stop.load(Ordering::Acquire) {
-        let frame = camera.frame()?;
+        let frame = camera.frame().map_err(capture_read_failure)?;
         if stop.load(Ordering::Acquire) {
             break;
         }
@@ -577,11 +621,11 @@ fn capture(
             || resolution.width() > 4096
             || resolution.height() > 4096
         {
-            return Err(anyhow!("unsupported camera dimensions"));
+            return Err(CaptureFailure(8).into());
         }
-        let rgb = frame.decode_image::<RgbFormat>()?;
+        let rgb = decode_camera_frame(&frame).map_err(|_| CaptureFailure(6))?;
         if rgb.width() == 0 || rgb.height() == 0 || rgb.width() > 4096 || rgb.height() > 4096 {
-            return Err(anyhow!("unsupported camera dimensions"));
+            return Err(CaptureFailure(8).into());
         }
         let (width, height) = encoding_dimensions(rgb.width(), rgb.height())?;
         let rgb =
@@ -593,9 +637,16 @@ fn capture(
         if keyframe.swap(false, Ordering::AcqRel) || number.is_multiple_of(u64::from(FPS) * 2) {
             encoder.force_intra_frame();
         }
-        let access = encoder.encode(&yuv)?.to_vec();
+        let access = encoder
+            .encode(&yuv)
+            .map_err(|_| CaptureFailure(7))?
+            .to_vec();
         // Queues are bounded. A dropped delta frame means the next frame must be an IDR.
         if !stop.load(Ordering::Acquire) {
+            if number == 0 {
+                // Readiness means an actual frame can be encoded, not just an open stream.
+                write_packet(output, 0, &[])?;
+            }
             write_packet(output, 1, &access)?;
         }
         number += 1;
@@ -608,6 +659,24 @@ fn capture(
     }
     let _ = camera.stop_stream();
     Ok(())
+}
+
+// Nokhwa's optional MJPEG decoder is disabled. Use the app's existing JPEG decoder
+// instead, while keeping Nokhwa's native conversions for uncompressed camera formats.
+fn decode_camera_frame(frame: &nokhwa::Buffer) -> Result<image::RgbImage> {
+    if frame.source_frame_format() == FrameFormat::MJPEG {
+        let mut reader = image::ImageReader::with_format(
+            std::io::Cursor::new(frame.buffer()),
+            image::ImageFormat::Jpeg,
+        );
+        let mut limits = image::Limits::default();
+        limits.max_image_width = Some(4096);
+        limits.max_image_height = Some(4096);
+        reader.limits(limits);
+        Ok(reader.decode()?.to_rgb8())
+    } else {
+        Ok(frame.decode_image::<RgbFormat>()?)
+    }
 }
 
 // H.264 needs even dimensions. Bound the longest side and retain portrait/landscape shape,
@@ -635,6 +704,48 @@ fn encoder() -> Result<Encoder> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mjpeg_camera_frames_decode_with_the_existing_jpeg_decoder() {
+        let picture = image::RgbImage::from_pixel(16, 12, image::Rgb([120, 80, 40]));
+        let mut jpeg = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new(&mut jpeg)
+            .encode_image(&picture)
+            .unwrap();
+        let frame = nokhwa::Buffer::new(Resolution::new(16, 12), &jpeg, FrameFormat::MJPEG);
+        let decoded = decode_camera_frame(&frame).unwrap();
+        assert_eq!(decoded.dimensions(), (16, 12));
+        assert!(decoded.pixels().all(|pixel| pixel.0[0].abs_diff(120) < 10));
+        assert!(
+            decode_camera_frame(&nokhwa::Buffer::new(
+                Resolution::new(16, 12),
+                b"invalid",
+                FrameFormat::MJPEG
+            ))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn camera_failure_pipe_retains_the_specific_safe_stage() {
+        for kind in 3..=10 {
+            let mut packet = Vec::new();
+            write_packet(&mut packet, kind, &[]).unwrap();
+            assert_eq!(
+                read_packet(&mut packet.as_slice()).unwrap(),
+                (kind, Vec::new())
+            );
+            assert!(!camera_failure_message(kind).contains("helper stopped"));
+        }
+    }
+
+    #[test]
+    fn windows_camera_resource_failure_is_not_reported_as_permission_denial() {
+        let failure = capture_read_failure("ReadFrameError (0xC00D3704)");
+        assert_eq!(failure.0, 10);
+        assert!(camera_failure_message(failure.0).contains("0xC00D3704"));
+        assert_eq!(capture_read_failure("Other read failure").0, 5);
+    }
     #[test]
     fn camera_selection_survives_reordering_and_refuses_a_missing_device() {
         let a = CameraInfo::new("Front", "", "device-a", CameraIndex::Index(0));

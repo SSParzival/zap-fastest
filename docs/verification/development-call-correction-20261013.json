@@ -1,0 +1,349 @@
+{
+  "generated_at_utc": "2026-10-13T22:23:15.686870+00:00",
+  "source_parent": "a64972a7cfdf8e9c323fa1c8bf855b67620e4b6d",
+  "frozen_inputs": {
+    "count": 324,
+    "sha256": "4fa0df019b76f1b5d6737dde5461afd611e11d698d6286348ae876c6a2d45c27"
+  },
+  "windows_gates": [
+    {
+      "name": "fmt",
+      "command": [
+        "H:\\Packages\\rustup-legacy\\toolchains\\1.98.0-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+        "fmt",
+        "--all",
+        "--check"
+      ],
+      "exit_code": 0,
+      "started": "2026-10-13T22:06:48.961707+00:00",
+      "finished": "2026-10-13T22:06:51.290948+00:00"
+    },
+    {
+      "name": "clippy",
+      "command": [
+        "H:\\Packages\\rustup-legacy\\toolchains\\1.98.0-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+        "clippy",
+        "--locked",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "started": "2026-10-13T22:06:51.291386+00:00",
+      "finished": "2026-10-13T22:07:23.107368+00:00"
+    },
+    {
+      "name": "clippy-all",
+      "command": [
+        "H:\\Packages\\rustup-legacy\\toolchains\\1.98.0-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+        "clippy",
+        "--locked",
+        "--all-targets",
+        "--all-features",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "started": "2026-10-13T22:07:23.107872+00:00",
+      "finished": "2026-10-13T22:07:52.021227+00:00"
+    },
+    {
+      "name": "test",
+      "command": [
+        "H:\\Packages\\rustup-legacy\\toolchains\\1.98.0-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+        "test",
+        "--locked",
+        "--all-targets",
+        "--",
+        "--test-threads=2"
+      ],
+      "exit_code": 0,
+      "started": "2026-10-13T22:07:52.021659+00:00",
+      "finished": "2026-10-13T22:15:59.007531+00:00"
+    },
+    {
+      "name": "test-all",
+      "command": [
+        "H:\\Packages\\rustup-legacy\\toolchains\\1.98.0-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+        "test",
+        "--locked",
+        "--all-targets",
+        "--all-features",
+        "--",
+        "--test-threads=2"
+      ],
+      "exit_code": 0,
+      "started": "2026-10-13T22:15:59.008007+00:00",
+      "finished": "2026-10-13T22:21:48.071276+00:00"
+    },
+    {
+      "name": "doc",
+      "command": [
+        "H:\\Packages\\rustup-legacy\\toolchains\\1.98.0-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+        "doc",
+        "--locked",
+        "--all-features",
+        "--no-deps"
+      ],
+      "exit_code": 0,
+      "started": "2026-10-13T22:21:48.072096+00:00",
+      "finished": "2026-10-13T22:22:15.892584+00:00"
+    }
+  ],
+  "library_tests_each": {
+    "passed": 1835,
+    "failed": 0,
+    "existing_hardware_ignored": 13
+  },
+  "synthetic_visuals": {
+    "round_1": [
+      {
+        "name": "voice-00",
+        "page": "call-incoming",
+        "size": "1180x780",
+        "exit_code": 0,
+        "seconds": 1.51,
+        "capture_took_focus": false
+      },
+      {
+        "name": "voice-01",
+        "page": "call-active",
+        "size": "1180x780",
+        "exit_code": 0,
+        "seconds": 1.51,
+        "capture_took_focus": false
+      },
+      {
+        "name": "voice-02",
+        "page": "call-stalled",
+        "size": "1180x780",
+        "exit_code": 0,
+        "seconds": 1.51,
+        "capture_took_focus": false
+      },
+      {
+        "name": "voice-03",
+        "page": "call-active,call-devices",
+        "size": "1180x780",
+        "exit_code": 0,
+        "seconds": 1.51,
+        "capture_took_focus": false
+      },
+      {
+        "name": "video-00",
+        "page": "call-video-requested",
+        "size": "1180x780",
+        "exit_code": 0,
+        "seconds": 1.51,
+        "capture_took_focus": false
+      },
+      {
+        "name": "video-01",
+        "page": "call-camera-opening",
+        "size": "1180x780",
+        "exit_code": 0,
+        "seconds": 1.51,
+        "capture_took_focus": false
+      },
+      {
+        "name": "video-02",
+        "page": "call-video-waiting",
+        "size": "1180x780",
+        "exit_code": 0,
+        "seconds": 1.51,
+        "capture_took_focus": false
+      },
+      {
+        "name": "video-03",
+        "page": "call-video",
+        "size": "1180x780",
+        "exit_code": 0,
+        "seconds": 1.51,
+        "capture_took_focus": false
+      },
+      {
+        "name": "narrow-00",
+        "page": "call-incoming-video,large-text,call-localized",
+        "size": "400x440",
+        "exit_code": 0,
+        "seconds": 1.51,
+        "capture_took_focus": false
+      },
+      {
+        "name": "narrow-01",
+        "page": "call-video,large-text",
+        "size": "400x440",
+        "exit_code": 0,
+        "seconds": 1.41,
+        "capture_took_focus": false
+      },
+      {
+        "name": "narrow-02",
+        "page": "call-active,call-devices,large-text",
+        "size": "400x440",
+        "exit_code": 0,
+        "seconds": 1.51,
+        "capture_took_focus": false
+      },
+      {
+        "name": "narrow-03",
+        "page": "call-video,screen-private,light",
+        "size": "400x440",
+        "exit_code": 0,
+        "seconds": 1.51,
+        "capture_took_focus": false
+      }
+    ],
+    "confirmation_round": [
+      {
+        "name": "voice-00",
+        "page": "call-incoming",
+        "size": "1180x780",
+        "exit_code": 0,
+        "seconds": 1.51,
+        "capture_took_focus": false
+      },
+      {
+        "name": "voice-01",
+        "page": "call-active",
+        "size": "1180x780",
+        "exit_code": 0,
+        "seconds": 1.51,
+        "capture_took_focus": false
+      },
+      {
+        "name": "voice-02",
+        "page": "call-stalled",
+        "size": "1180x780",
+        "exit_code": 0,
+        "seconds": 1.51,
+        "capture_took_focus": false
+      },
+      {
+        "name": "voice-03",
+        "page": "call-active,call-devices",
+        "size": "1180x780",
+        "exit_code": 0,
+        "seconds": 1.51,
+        "capture_took_focus": false
+      },
+      {
+        "name": "video-00",
+        "page": "call-video-requested",
+        "size": "1180x780",
+        "exit_code": 0,
+        "seconds": 1.51,
+        "capture_took_focus": false
+      },
+      {
+        "name": "video-01",
+        "page": "call-camera-opening",
+        "size": "1180x780",
+        "exit_code": 0,
+        "seconds": 1.51,
+        "capture_took_focus": false
+      },
+      {
+        "name": "video-02",
+        "page": "call-video-waiting",
+        "size": "1180x780",
+        "exit_code": 0,
+        "seconds": 1.51,
+        "capture_took_focus": false
+      },
+      {
+        "name": "video-03",
+        "page": "call-video",
+        "size": "1180x780",
+        "exit_code": 0,
+        "seconds": 1.51,
+        "capture_took_focus": false
+      },
+      {
+        "name": "narrow-00",
+        "page": "call-incoming-video,large-text,call-localized",
+        "size": "400x440",
+        "exit_code": 0,
+        "seconds": 1.51,
+        "capture_took_focus": false
+      },
+      {
+        "name": "narrow-01",
+        "page": "call-video,large-text",
+        "size": "400x440",
+        "exit_code": 0,
+        "seconds": 1.51,
+        "capture_took_focus": false
+      },
+      {
+        "name": "narrow-02",
+        "page": "call-active,call-devices,large-text",
+        "size": "400x440",
+        "exit_code": 0,
+        "seconds": 1.51,
+        "capture_took_focus": false
+      },
+      {
+        "name": "narrow-03",
+        "page": "call-video,screen-private,light",
+        "size": "400x440",
+        "exit_code": 0,
+        "seconds": 1.51,
+        "capture_took_focus": false
+      }
+    ],
+    "all_sheets_inspected": true,
+    "further_cosmetic_rounds": false
+  },
+  "native_enumeration": {
+    "microphones": 2,
+    "speakers": 2,
+    "cameras": 1,
+    "audio_discovery_errors": false,
+    "device_names_logged": false
+  },
+  "camera_probe": {
+    "windows_hresult": "0xC00D3704",
+    "native_formats_tested": [
+      "MJPEG",
+      "YUYV",
+      "NV12"
+    ],
+    "final_helper": {
+      "packets": [
+        {
+          "kind": 10,
+          "bytes": 0
+        }
+      ],
+      "exit": 0
+    },
+    "images_saved_or_displayed": false,
+    "camera_stream_success": false
+  },
+  "outgoing_audio": {
+    "attended_direction": "outgoing",
+    "failure_preceded_camera": true,
+    "authenticated_rtp_received": 0,
+    "microphone_capture_progressed": true,
+    "speaker_streams_opened": 1,
+    "speaker_stalls": 0,
+    "precise_transport_cause": "unresolved",
+    "new_diagnostics": [
+      "microphone frames handed to library channel",
+      "forwarding envelopes rejected before RTP classification"
+    ],
+    "peer_reception_confirmed": false,
+    "live_calls_placed_by_agent": false
+  },
+  "delivery": {
+    "commit": "pending",
+    "ci": "pending",
+    "release_build": "pending",
+    "installation": "pending",
+    "version": "0.30.0",
+    "release_published": false
+  }
+}

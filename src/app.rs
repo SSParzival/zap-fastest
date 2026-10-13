@@ -10976,6 +10976,25 @@ mod tests {
     use crate::model::{ChatKind, Content, Dialog, Media, MediaState, ReplyTarget, ToastKind};
 
     #[test]
+    fn discovered_call_devices_and_failures_populate_the_current_account() {
+        let mut app = app();
+        let devices = crate::calls::DeviceList {
+            microphones: vec![crate::calls::AudioDevice {
+                id: "fixture-mic".into(),
+                label: "Synthetic microphone".into(),
+            }],
+            speakers: vec![crate::calls::AudioDevice {
+                id: "fixture-speaker".into(),
+                label: "Synthetic speaker".into(),
+            }],
+            microphone_error: Some("Microphone discovery failed. Try refreshing devices.".into()),
+            ..Default::default()
+        };
+        app.apply_backend_event(Event::CallDevices(Box::new(devices.clone())), false);
+        assert_eq!(app.account().call_devices, devices);
+    }
+
+    #[test]
     fn accessibility_announces_live_open_chat_events_but_never_locked_or_hidden_accounts() {
         let mut app = app();
         app.account_mut().settings.notifications = false;

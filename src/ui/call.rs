@@ -62,37 +62,37 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
         } else {
             gettext(locale, "Voice call")
         })
-        .id(egui::Id::new(("voice-call", app.account().id.as_str())))
+        .id(egui::Id::new(("compact-call", app.account().id.as_str())))
         .collapsible(false)
         .resizable(false)
         .title_bar(ctx.content_rect().height() >= 500.0)
         .constrain_to(ctx.content_rect().shrink(16.0))
         .max_size(ctx.content_rect().shrink(16.0).size())
         .auto_sized()
-        .default_width(440.0)
-        .default_pos(ctx.content_rect().center() - egui::vec2(220.0, 200.0))
+        .default_width(360.0)
+        .default_pos(egui::pos2(ctx.content_rect().right() - 392.0, ctx.content_rect().top() + 80.0))
         .vscroll(false)
         .show(ctx, |ui| {
             let mut controls = call_controls(locale, &call);
-            let compact = ctx.content_rect().height() < 500.0;
+            let compact = true;
             let split = compact && call.phase == CallPhase::Incoming && call.video_requested;
             let width = if split { (ui.available_width() - 8.0) / 2.0 } else { ((ui.available_width() - 16.0) / 3.0).min(128.0) };
             let heights: Vec<_> = controls.iter().map(|(_, label, _, _)| {
                 let height = ui.painter().layout(label.to_string(), egui::TextStyle::Body.resolve(ui.style()), app.palette.text, if compact { width - 32.0 } else { width }).size().y;
-                if compact { height.max(20.0) + 16.0 } else { height + 56.0 }
+                if compact { height.max(28.0) + 16.0 } else { height + 56.0 }
             }).collect();
             let controls_height = if split { heights[0].max(heights[1]) + heights[2] + 8.0 } else { heights.into_iter().fold(0.0_f32, f32::max) };
             // Reserve the actual footer plus title/margins. The body alone scrolls;
             // it must never claim the space needed by wrapped call-control labels.
             let height = (ui.available_height().min(ctx.content_rect().height() - if compact { 96.0 } else { 160.0 + ui.text_style_height(&egui::TextStyle::Heading) }) - controls_height - if compact { 4.0 } else { 36.0 })
-                .clamp(16.0, 400.0);
+                .clamp(16.0, 280.0);
             let body = egui::ScrollArea::vertical()
                 .id_salt(("call-body", app.account().id.as_str(), call.generation))
                 .max_height(height)
                 .min_scrolled_height(height)
                 .auto_shrink([false, true])
                 .show(ui, |ui| {
-            if compact {
+            if ctx.content_rect().height() < 500.0 {
                 ui.label(gettext(locale, if call.video_active || call.video_requested { "Video call" } else { "Voice call" }));
             }
             ui.add_space(if compact { 0.0 } else { 12.0 });
@@ -183,6 +183,9 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             if toggle.clicked() {
                 expanded = !expanded;
                 ctx.data_mut(|data| data.insert_temp(id, expanded));
+                if expanded {
+                    app.actions.push(Action::RefreshAudioDevices);
+                }
             }
             if expanded {
                 ui.add_space(8.0);
@@ -407,7 +410,7 @@ fn control(
     tone: ControlTone,
 ) -> egui::Response {
     let font = egui::TextStyle::Body.resolve(ui.style());
-    let compact = ui.ctx().content_rect().height() < 500.0;
+    let compact = true;
     let galley = ui.painter().layout(
         label.to_owned(),
         font,
@@ -418,7 +421,7 @@ fn control(
         egui::vec2(
             width,
             if compact {
-                16.0 + galley.size().y.max(20.0)
+                16.0 + galley.size().y.max(28.0)
             } else {
                 56.0 + galley.size().y
             },
@@ -559,7 +562,11 @@ fn video(
         }
     }
     let width = ui.available_width();
-    let height = (width * 9.0 / 16.0).min(ctx.content_rect().height() * 0.3);
+    let height = if textures.peer.is_none() && textures.local.is_none() {
+        56.0
+    } else {
+        (width * 9.0 / 16.0).min(ctx.content_rect().height() * 0.22)
+    };
     let (region, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
     let hidden = app.settings.screen_privacy.hides(
         crate::settings::ScreenPrivacyWhat::Media,
@@ -603,7 +610,7 @@ fn video(
         }
     }
     if let Some(error) = view.error() {
-        ui.label(error);
+        ui.label(gettext(locale, error));
     }
     ctx.data_mut(|data| data.insert_temp(id, textures));
 }
@@ -611,6 +618,10 @@ fn video(
 pub(crate) fn devices(app: &mut App, ui: &mut egui::Ui) {
     let locale = app.locale;
     for kind in [DeviceKind::Microphone, DeviceKind::Speaker] {
+        let discovery_error = match kind {
+            DeviceKind::Microphone => app.call_devices.microphone_error.clone(),
+            DeviceKind::Speaker => app.call_devices.speaker_error.clone(),
+        };
         let mut chosen = match kind {
             DeviceKind::Microphone => app.account().settings.call_microphone.clone(),
             DeviceKind::Speaker => app.account().settings.call_speaker.clone(),
@@ -659,6 +670,17 @@ pub(crate) fn devices(app: &mut App, ui: &mut egui::Ui) {
             );
         });
         let _ = selector;
+        if discovery_error.is_some() {
+            ui.label(gettext(
+                locale,
+                match kind {
+                    DeviceKind::Microphone => {
+                        "Microphone discovery failed. Try refreshing devices."
+                    }
+                    DeviceKind::Speaker => "Speaker discovery failed. Try refreshing devices.",
+                },
+            ));
+        }
         if chosen != before {
             app.actions.push(match kind {
                 DeviceKind::Microphone => Action::SetCallMicrophone(chosen),

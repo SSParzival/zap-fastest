@@ -200,6 +200,8 @@ pub struct AudioDevice {
 pub struct DeviceList {
     pub microphones: Vec<AudioDevice>,
     pub speakers: Vec<AudioDevice>,
+    pub microphone_error: Option<String>,
+    pub speaker_error: Option<String>,
     pub cameras: Vec<crate::camera::CameraDevice>,
     pub camera_error: Option<String>,
     pub cameras_discovered: bool,
@@ -340,17 +342,21 @@ pub fn capabilities() -> CallCapabilities {
 /// pickers are never reached.
 pub fn devices() -> DeviceList {
     let capable = capabilities();
+    let microphones = if capable.voice {
+        crate::call_audio::try_microphones()
+    } else {
+        Ok(Vec::new())
+    };
+    let speakers = if capable.voice {
+        crate::call_audio::try_speakers()
+    } else {
+        Ok(Vec::new())
+    };
     DeviceList {
-        microphones: if capable.voice {
-            audio_devices(crate::call_audio::microphones())
-        } else {
-            Vec::new()
-        },
-        speakers: if capable.voice {
-            audio_devices(crate::call_audio::speakers())
-        } else {
-            Vec::new()
-        },
+        microphone_error: microphones.as_ref().err().map(|error| (*error).into()),
+        speaker_error: speakers.as_ref().err().map(|error| (*error).into()),
+        microphones: audio_devices(microphones.unwrap_or_default()),
+        speakers: audio_devices(speakers.unwrap_or_default()),
         ..Default::default()
     }
 }
@@ -1191,7 +1197,7 @@ impl Call {
         }
         let stats = handle.media_stats();
         log::info!(
-            "[CALL] media stats at={} rtp_received={} unexpected_pt={} srtp_failed={} sframe_failed={} unclassified={} pipe_dropped={} decoded={} delivered={} foreign_decoded={} concealed={} without_decoder={} without_encoder={} mlow_sid={} mlow_dropped={} sink_dropped={} trimmed={} codec_switches={} video_sink_dropped={} peer_keyframes={}",
+            "[CALL] media stats at={} rtp_received={} unexpected_pt={} srtp_failed={} sframe_failed={} unclassified={} pipe_dropped={} decoded={} delivered={} foreign_decoded={} concealed={} without_decoder={} without_encoder={} mlow_sid={} mlow_dropped={} sink_dropped={} trimmed={} codec_switches={} video_sink_dropped={} peer_keyframes={} forwarding_rejected={}",
             marker,
             stats.rtp_received,
             stats.rtp_payload_type_unexpected,
@@ -1217,6 +1223,7 @@ impl Call {
             stats.codec_switches,
             stats.video_sink_dropped,
             stats.peer_keyframe_requests,
+            stats.forwarding_envelope_rejected,
         );
         self.log_audio_path(marker);
     }
@@ -1238,7 +1245,7 @@ impl Call {
             .as_ref()
             .is_some_and(|processing| processing.failed());
         log::info!(
-            "[CALL] audio path at={} mic_opens={} speaker_opens={} speaker_stalls={} speaker_restarts={} live={} cleanup_capture_blocks={} cleanup_render_blocks={} cleanup_failed={}",
+            "[CALL] audio path at={} mic_opens={} speaker_opens={} speaker_stalls={} speaker_restarts={} live={} cleanup_capture_blocks={} cleanup_render_blocks={} cleanup_failed={} mic_frames_sent={}",
             marker,
             self.mic
                 .as_ref()
@@ -1256,6 +1263,9 @@ impl Call {
             cleanup_capture_blocks,
             cleanup_render_blocks,
             cleanup_failed,
+            self.mic
+                .as_ref()
+                .map_or(0, |mic| mic.frames_sent.load(Ordering::Relaxed)),
         );
     }
 
@@ -2278,8 +2288,14 @@ mod hardware_tests {
     #[ignore = "reads this machine's real devices"]
     fn the_machine_this_runs_on_lists_its_devices() {
         let list = super::devices();
-        eprintln!("microphones: {:#?}", list.microphones);
-        eprintln!("speakers: {:#?}", list.speakers);
+        eprintln!(
+            "microphones={} speakers={} microphone_failed={} speaker_failed={}",
+            list.microphones.len(),
+            list.speakers.len(),
+            list.microphone_error.is_some(),
+            list.speaker_error.is_some()
+        );
+        assert!(list.microphone_error.is_none() && list.speaker_error.is_none());
         for device in list.microphones.iter().chain(&list.speakers) {
             assert!(!device.id.is_empty(), "a device is named by its node name");
             assert!(

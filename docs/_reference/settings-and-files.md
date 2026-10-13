@@ -147,7 +147,13 @@ beside their labels.
 
 Choose a microphone, sound output and camera under **Audio devices**, or expand
 **Audio and camera devices** in **Calls**. Refresh the list after connecting a
-device. The selected output plays the local outgoing-call tone; it stops when
+device. Opening the in-call device section refreshes all three lists without
+opening the camera. Discovery failures are shown beside the affected selector.
+The compact, movable call panel keeps labeled microphone, camera and end-call
+controls visible; device settings expand only when needed. The video waiting
+area grows when frames arrive. Camera failures identify opening, frame capture,
+decoding or encoding failures rather than assuming access was denied.
+The selected output plays the local outgoing-call tone; it stops when
 the peer answers or the call ends. The tone is not mixed into outgoing call audio.
 Wait for WhatsApp to connect before starting a call. A connected call shows
 Starting call immediately while devices and the connection are prepared.

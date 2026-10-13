@@ -275,8 +275,12 @@ impl Layout {
 /// The name is what the platform both reports and accepts back, so it is what a saved setting
 /// holds and what a stream looks for.
 pub fn microphones() -> Vec<(String, String)> {
+    try_microphones().unwrap_or_default()
+}
+
+pub fn try_microphones() -> Result<Vec<(String, String)>, &'static str> {
     match rodio::microphone::available_inputs() {
-        Ok(inputs) => dedupe(
+        Ok(inputs) => Ok(dedupe(
             inputs
                 .into_iter()
                 .map(|input| {
@@ -289,10 +293,10 @@ pub fn microphones() -> Vec<(String, String)> {
                     (name, label)
                 })
                 .collect(),
-        ),
+        )),
         Err(_error) => {
             log::warn!("call device or transport operation failed");
-            Vec::new()
+            Err("Microphone discovery failed. Try refreshing devices.")
         }
     }
 }
@@ -302,14 +306,19 @@ pub fn microphones() -> Vec<(String, String)> {
 /// A device that exists only to swallow sound (ALSA's `null`, which rodio's own listing hides) is
 /// left out: offering it would let a call send the peer's voice nowhere.
 pub fn speakers() -> Vec<(String, String)> {
+    try_speakers().unwrap_or_default()
+}
+
+pub fn try_speakers() -> Result<Vec<(String, String)>, &'static str> {
     let devices = match rodio::cpal::default_host().output_devices() {
         Ok(devices) => devices,
         Err(_error) => {
             log::warn!("call device or transport operation failed");
-            return Vec::new();
+            return Err("Speaker discovery failed. Try refreshing devices.");
         }
     };
-    dedupe(
+    let mut description_failed = false;
+    let found = dedupe(
         devices
             .filter(|device| {
                 device
@@ -318,7 +327,13 @@ pub fn speakers() -> Vec<(String, String)> {
                     .unwrap_or(true)
             })
             .filter_map(|device| {
-                let name = device.description().ok()?.name().to_string();
+                let name = match device.description() {
+                    Ok(description) => description.name().to_string(),
+                    Err(_) => {
+                        description_failed = true;
+                        return None;
+                    }
+                };
                 let label = if name.is_empty() {
                     "Speaker".to_owned()
                 } else {
@@ -327,7 +342,12 @@ pub fn speakers() -> Vec<(String, String)> {
                 Some((name, label))
             })
             .collect(),
-    )
+    );
+    if description_failed {
+        Err("Speaker discovery failed. Try refreshing devices.")
+    } else {
+        Ok(found)
+    }
 }
 
 /// Keeps one entry per name, in label order, which is what a picker wants.
@@ -586,6 +606,8 @@ pub struct AudioInput {
     /// behind the engine's channel, from a reader that was restarted, and how it sees that a mute
     /// restarts nothing at all.
     pub opens: Arc<AtomicUsize>,
+    /// Whole frames handed to the library's microphone channel, without sample contents.
+    pub frames_sent: Arc<AtomicUsize>,
 }
 
 impl AudioInput {
@@ -607,12 +629,14 @@ impl AudioInput {
         // One per call, read by the test above and written by the pump below, so a reader that
         // survives a mute or a rebind is told from one that was started again.
         let opens = Arc::new(AtomicUsize::new(0));
+        let frames_sent = Arc::new(AtomicUsize::new(0));
         tokio::spawn(mic_pump(
             out,
             swaps,
             fell,
             target.clone(),
             Arc::clone(&opens),
+            Arc::clone(&frames_sent),
             processing.clone(),
         ));
         (
@@ -621,6 +645,7 @@ impl AudioInput {
                 swap: Some(swap),
                 fell_back,
                 opens,
+                frames_sent,
             },
             rx,
         )
@@ -648,6 +673,7 @@ async fn mic_pump(
     fell: async_channel::Sender<()>,
     initial: Option<String>,
     opens: Arc<AtomicUsize>,
+    frames_sent: Arc<AtomicUsize>,
     processing: Option<Arc<crate::call_processing::CallProcessing>>,
 ) {
     let mut target = initial;
@@ -686,6 +712,7 @@ async fn mic_pump(
                                     if sent.is_err() {
                                         return;
                                     }
+                                    frames_sent.fetch_add(1, Ordering::Relaxed);
                                 }
                                 requested = swaps.recv() => {
                                     match requested {
@@ -1744,6 +1771,7 @@ mod tests {
                 Err(_) => {}
             }
         }
+        assert!(input.frames_sent.load(Ordering::Relaxed) >= got.len());
         drop(input);
         assert!(got.len() >= 5, "the engine got {} frames", got.len());
         for frame in &got {

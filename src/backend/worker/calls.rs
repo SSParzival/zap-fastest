@@ -392,6 +392,16 @@ impl Worker {
             devices.camera_error = self.call_devices.camera_error.clone();
             devices.cameras_discovered = self.call_devices.cameras_discovered;
         }
+        log::info!(
+            "call devices published: microphones={} speakers={} cameras={} microphone_failed={} speaker_failed={} camera_failed={} cameras_discovered={}",
+            devices.microphones.len(),
+            devices.speakers.len(),
+            devices.cameras.len(),
+            devices.microphone_error.is_some(),
+            devices.speaker_error.is_some(),
+            devices.camera_error.is_some(),
+            devices.cameras_discovered,
+        );
         self.call_devices = devices.clone();
         self.emit(Event::CallDevices(Box::new(devices)));
     }
@@ -1219,15 +1229,16 @@ impl Drop for DeviceDiscovery {
 async fn discover_audio_devices() -> calls::DeviceList {
     tokio::task::spawn_blocking(calls::devices)
         .await
-        .unwrap_or_default()
+        .unwrap_or_else(|_| calls::DeviceList {
+            microphone_error: Some("Microphone discovery failed. Try refreshing devices.".into()),
+            speaker_error: Some("Speaker discovery failed. Try refreshing devices.".into()),
+            ..Default::default()
+        })
 }
 
 async fn discover_devices() -> calls::DeviceList {
-    let (audio, cameras) = tokio::join!(
-        tokio::task::spawn_blocking(calls::devices),
-        crate::camera::devices(),
-    );
-    let mut devices = audio.unwrap_or_default();
+    let (audio, cameras) = tokio::join!(discover_audio_devices(), crate::camera::devices(),);
+    let mut devices = audio;
     devices.cameras_discovered = true;
     match cameras {
         Ok(cameras) => devices.cameras = cameras,
@@ -1414,6 +1425,33 @@ mod tests {
                 "Could not start the call"
             ),
             "Could not start the call"
+        );
+    }
+
+    #[test]
+    fn device_discovery_failures_reach_the_account_event_and_a_refresh_clears_them() {
+        let (mut worker, events, _commands, _runtime) =
+            super::super::offline_worker("15550000000@s.whatsapp.net");
+        let failed = calls::DeviceList {
+            microphone_error: Some("Microphone discovery failed. Try refreshing devices.".into()),
+            speaker_error: Some("Speaker discovery failed. Try refreshing devices.".into()),
+            ..Default::default()
+        };
+        worker.publish_call_devices(failed.clone());
+        assert!(matches!(events.try_recv(), Ok(Event::CallDevices(list)) if *list == failed));
+        worker.publish_call_devices(calls::DeviceList {
+            microphones: vec![calls::AudioDevice {
+                id: "fixture-mic".into(),
+                label: "Synthetic microphone".into(),
+            }],
+            speakers: vec![calls::AudioDevice {
+                id: "fixture-speaker".into(),
+                label: "Synthetic speaker".into(),
+            }],
+            ..Default::default()
+        });
+        assert!(
+            matches!(events.try_recv(), Ok(Event::CallDevices(list)) if list.microphones.len() == 1 && list.speakers.len() == 1 && list.microphone_error.is_none() && list.speaker_error.is_none())
         );
     }
 
