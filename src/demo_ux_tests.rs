@@ -371,6 +371,55 @@ fn device_selectors_have_programmatic_names_and_full_values() {
 }
 
 #[test]
+fn call_errors_explain_unprocessed_audio_without_pushing_end_call_below_the_window() {
+    let mut app = app();
+    apply_flags(&mut app, Some("call-active,large-text"));
+    let call = app.call.as_mut().unwrap();
+    call.audio_processing_failed = true;
+    call.peer_audio = Some(crate::calls::PeerAudio::Stalled);
+    call.lost_devices = vec![crate::calls::LostDevice {
+        kind: crate::calls::DeviceKind::Microphone,
+        name: "Synthetic microphone with a deliberately long device name".into(),
+    }];
+    let ctx = egui::Context::default();
+    app.attach(&ctx);
+    ctx.enable_accesskit();
+    let _scale = crate::theme::text_scale(&ctx, app.settings.text_scale);
+    let mut end_call = None;
+    let mut warning = false;
+    for _ in 0..3 {
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(400.0, 440.0),
+                )),
+                ..Default::default()
+            },
+            |ui| crate::ui::call::show(&mut app, ui.ctx()),
+        );
+        output.textures_delta.clear();
+        if let Some(tree) = output.platform_output.accesskit_update {
+            for (_, node) in tree.nodes {
+                if node.label() == Some("End call") {
+                    end_call = node.bounds();
+                }
+                if node.label().or_else(|| node.value())
+                    == Some(
+                        "Microphone cleanup is unavailable. Audio is being sent without echo cancellation.",
+                    )
+                {
+                    warning = true;
+                }
+            }
+        }
+    }
+    let end_call = end_call.expect("End call remains accessible");
+    assert!(end_call.y0 >= 0.0 && end_call.y1 <= 440.0, "{end_call:?}");
+    assert!(warning, "unprocessed capture is disclosed");
+}
+
+#[test]
 fn the_account_switcher_masks_identity_when_screen_privacy_is_enabled() {
     let mut app = app();
     apply_flags(&mut app, Some("accounts,screen-private"));

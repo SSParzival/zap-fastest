@@ -3286,3 +3286,7 @@ msgstr "播放 / 暂停"
 
 msgid "Preparing call…"
 msgstr "正在准备通话…"
+
+#: src/ui/call.rs
+msgid "Microphone cleanup is unavailable. Audio is being sent without echo cancellation."
+msgstr "麦克风音频处理不可用。正在发送未经回声消除的音频。"

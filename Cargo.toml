@@ -22,6 +22,8 @@ path = "src/main.rs"
 anyhow = "1"
 # Native call audio queues, already used by the official protocol library.
 async-channel = "2.5"
+# Local WebRTC voice cleanup, pure Rust, with no network or native service.
+sonora = "=0.2.0"
 tempfile = "3"
 # Hashes saved stickers by content. Already included through wacore.
 sha2 = "0.11"

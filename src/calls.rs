@@ -151,6 +151,8 @@ pub struct CallUpdate {
     /// Set when the engine says the peer's audio is missing, so a silent call says why instead of
     /// just being silent.
     pub peer_audio: Option<PeerAudio>,
+    /// Local cleanup failed; unprocessed capture continues with an explicit warning.
+    pub audio_processing_failed: bool,
     /// Devices the user picked that the machine no longer has, so the call screen can name them
     /// instead of quietly using another one.
     pub lost_devices: Vec<LostDevice>,
@@ -406,6 +408,7 @@ pub struct Call {
     started: Option<Instant>,
     outcome: Option<CallOutcome>,
     peer_audio: Option<PeerAudio>,
+    audio_warning_progress: (u32, u32, u32),
     /// The offer of an incoming call that has not been answered. Held because `accept` borrows it.
     incoming: Option<Box<IncomingCall>>,
     handle: Option<Arc<CallHandle>>,
@@ -413,6 +416,7 @@ pub struct Call {
     /// relay is allocated as soon as our offer is acked, long before anyone answers: a call is
     /// Active only once the peer has answered *and* there is a media path to talk over.
     media_ready: bool,
+    processing: Option<Arc<crate::call_processing::CallProcessing>>,
     mic: Option<AudioInput>,
     speaker: Option<AudioOutput>,
     microphone: Option<String>,
@@ -441,6 +445,20 @@ impl std::fmt::Display for CameraSetupError {
 impl std::error::Error for CameraSetupError {}
 
 impl Call {
+    pub(crate) fn ringtone(
+        &self,
+        tone: crate::call_audio::CallTone,
+    ) -> Option<crate::call_audio::Ringback> {
+        // A bookkeeping snapshot has neither a live offer nor a media handle.
+        if self.incoming.is_none() && self.handle.is_none() {
+            return None;
+        }
+        Some(crate::call_audio::Ringback::with_tone(
+            self.speaker_device.clone(),
+            tone,
+            self.processing.clone(),
+        ))
+    }
     /// Places an outgoing 1:1 call.
     pub async fn place(
         client: &Arc<Client>,
@@ -479,8 +497,11 @@ impl Call {
         } else {
             None
         };
-        let (mic, mic_rx) = AudioInput::spawn(microphone.clone());
-        let (output, output_tx) = AudioOutput::spawn(speaker.clone());
+        let processing = crate::call_processing::CallProcessing::new();
+        let (mic, mic_rx) =
+            AudioInput::spawn_processed(microphone.clone(), Some(Arc::clone(&processing)));
+        let (output, output_tx) =
+            AudioOutput::spawn_processed(speaker.clone(), Some(Arc::clone(&processing)));
 
         let voip = client.voip();
         let mut offer = voip.call(&peer).audio(mic_rx, output_tx);
@@ -509,9 +530,11 @@ impl Call {
             started: None,
             outcome: None,
             peer_audio: None,
+            audio_warning_progress: (0, 0, 0),
             incoming: None,
             handle: Some(handle),
             media_ready: false,
+            processing: Some(processing),
             mic: Some(mic),
             speaker: Some(output),
             microphone,
@@ -540,9 +563,11 @@ impl Call {
             started: None,
             outcome: None,
             peer_audio: None,
+            audio_warning_progress: (0, 0, 0),
             incoming: Some(incoming),
             handle: None,
             media_ready: false,
+            processing: None,
             mic: None,
             speaker: None,
             microphone: devices.microphone,
@@ -568,9 +593,11 @@ impl Call {
             started: None,
             outcome: None,
             peer_audio: None,
+            audio_warning_progress: (0, 0, 0),
             incoming: None,
             handle: None,
             media_ready: false,
+            processing: None,
             mic: None,
             speaker: None,
             microphone: None,
@@ -612,9 +639,11 @@ impl Call {
             started: None,
             outcome: None,
             peer_audio: None,
+            audio_warning_progress: (0, 0, 0),
             incoming: self.incoming.clone(),
             handle: None,
             media_ready: false,
+            processing: None,
             mic: None,
             speaker: None,
             microphone: self.microphone.clone(),
@@ -643,6 +672,10 @@ impl Call {
             muted: self.handle.as_ref().is_some_and(|handle| handle.is_muted()),
             outcome: self.outcome,
             peer_audio: self.peer_audio,
+            audio_processing_failed: self
+                .processing
+                .as_ref()
+                .is_some_and(|processing| processing.failed()),
             lost_devices: self.lost_devices.clone(),
             microphone: self.microphone.clone(),
             speaker: self.speaker_device.clone(),
@@ -794,8 +827,11 @@ impl Call {
         } else {
             None
         };
-        let (mic, mic_rx) = AudioInput::spawn(microphone.clone());
-        let (output, output_tx) = AudioOutput::spawn(speaker.clone());
+        let processing = crate::call_processing::CallProcessing::new();
+        let (mic, mic_rx) =
+            AudioInput::spawn_processed(microphone.clone(), Some(Arc::clone(&processing)));
+        let (output, output_tx) =
+            AudioOutput::spawn_processed(speaker.clone(), Some(Arc::clone(&processing)));
 
         let voip = client.voip();
         let mut answer = voip.accept(&incoming).audio(mic_rx, output_tx);
@@ -812,6 +848,7 @@ impl Call {
         self.handle = Some(handle);
         self.video = video;
         self.video_requested = false;
+        self.processing = Some(processing);
         self.mic = Some(mic);
         self.speaker = Some(output);
         self.incoming = None;
@@ -894,6 +931,7 @@ impl Call {
         if let Some(mut speaker) = self.speaker.take() {
             speaker.stop();
         }
+        self.processing = None;
         self.handle = None;
         self.incoming = None;
         log::info!("call state updated");
@@ -1024,6 +1062,7 @@ impl Call {
                     "[CALL] the peer's audio is not becoming sound: reason={dominant_reason:?} silent_ms={silent_for_ms} rtp_received={rtp_received} frames_produced={frames_produced}"
                 );
                 let reason = silence_reason(*dominant_reason);
+                self.audio_warning_progress = self.audio_progress();
                 if self.peer_audio == Some(PeerAudio::Silent(reason)) {
                     return None;
                 }
@@ -1032,6 +1071,7 @@ impl Call {
             }
             CallEvent::AudioReceptionStalled { silent_for_ms } => {
                 log::warn!("[CALL] no audio is arriving from the peer: silent_ms={silent_for_ms}");
+                self.audio_warning_progress = self.audio_progress();
                 if self.peer_audio == Some(PeerAudio::Stalled) {
                     return None;
                 }
@@ -1047,8 +1087,8 @@ impl Call {
                 log::info!(
                     "[CALL] audio codec switched {from:?} -> {to:?} source={source:?} packets={packets_observed}"
                 );
-                // The decode path moved, so whatever silence was reported is over.
-                if self.peer_audio.take().is_some() {
+                // A codec choice alone cannot prove that incoming sound recovered.
+                if self.refresh_audio_health() {
                     return Some(self.update());
                 }
                 None
@@ -1073,6 +1113,34 @@ impl Call {
                 None
             }
             _ => None,
+        }
+    }
+
+    fn audio_progress(&self) -> (u32, u32, u32) {
+        self.handle.as_ref().map_or((0, 0, 0), |handle| {
+            let stats = handle.media_stats();
+            (
+                stats.rtp_received,
+                stats.audio_frames_decoded,
+                stats.audio_frames_delivered,
+            )
+        })
+    }
+
+    pub(crate) fn refresh_audio_health(&mut self) -> bool {
+        self.clear_recovered_audio(self.audio_progress())
+    }
+
+    fn clear_recovered_audio(&mut self, progress: (u32, u32, u32)) -> bool {
+        if self.peer_audio.is_some()
+            && progress.0 > self.audio_warning_progress.0
+            && progress.1 > self.audio_warning_progress.1
+            && progress.2 > self.audio_warning_progress.2
+        {
+            self.peer_audio = None;
+            true
+        } else {
+            false
         }
     }
 
@@ -1136,8 +1204,16 @@ impl Call {
     /// whose sink was reopened: a reader or writer open that keeps climbing during a call is a
     /// stream being restarted rather than rebound.
     pub fn log_audio_path(&self, marker: &str) {
+        let (cleanup_capture_blocks, cleanup_render_blocks) = self
+            .processing
+            .as_ref()
+            .map_or((0, 0), |processing| processing.counters());
+        let cleanup_failed = self
+            .processing
+            .as_ref()
+            .is_some_and(|processing| processing.failed());
         log::info!(
-            "[CALL] audio path at={} mic_opens={} speaker_opens={} speaker_stalls={} speaker_restarts={} live={}",
+            "[CALL] audio path at={} mic_opens={} speaker_opens={} speaker_stalls={} speaker_restarts={} live={} cleanup_capture_blocks={} cleanup_render_blocks={} cleanup_failed={}",
             marker,
             self.mic
                 .as_ref()
@@ -1152,6 +1228,9 @@ impl Call {
                 .as_ref()
                 .map_or(0, |speaker| speaker.restarts.load(Ordering::Relaxed)),
             self.phase.is_live(),
+            cleanup_capture_blocks,
+            cleanup_render_blocks,
+            cleanup_failed,
         );
     }
 
@@ -1356,6 +1435,29 @@ fn silence_reason(reason: whatsapp_rust::voip_control::MediaSilenceReason) -> Si
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn audio_alarm_clears_only_after_new_received_decoded_and_delivered_frames() {
+        let mut call = super::Call::test_snapshot("fixture@s.whatsapp.net");
+        call.media(&super::CallEvent::AudioReceptionStalled {
+            silent_for_ms: 3000,
+        });
+        assert_eq!(call.update().peer_audio, Some(super::PeerAudio::Stalled));
+        for progress in [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 1)] {
+            assert!(!call.clear_recovered_audio(progress));
+            assert_eq!(call.update().peer_audio, Some(super::PeerAudio::Stalled));
+        }
+        assert!(call.clear_recovered_audio((1, 1, 1)));
+        assert_eq!(call.update().peer_audio, None);
+        assert!(!call.clear_recovered_audio((1, 1, 1)));
+    }
+    #[test]
+    fn a_bookkeeping_snapshot_cannot_open_a_ringtone_device() {
+        let call = super::Call::test_snapshot("fixture@s.whatsapp.net");
+        assert!(
+            call.ringtone(crate::call_audio::CallTone::Incoming)
+                .is_none()
+        );
+    }
     use super::*;
 
     /// A machine with a microphone and a speaker, named the way a picker would show them.
@@ -1626,6 +1728,7 @@ mod tests {
             muted: false,
             outcome: None,
             peer_audio: None,
+            audio_processing_failed: false,
             lost_devices: Vec::new(),
             microphone: None,
             speaker: None,
@@ -1801,9 +1904,11 @@ mod tests {
             started: None,
             outcome: None,
             peer_audio: None,
+            audio_warning_progress: (0, 0, 0),
             incoming: None,
             handle: None,
             media_ready: false,
+            processing: None,
             mic: None,
             speaker: None,
             microphone: None,

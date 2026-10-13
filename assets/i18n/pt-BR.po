@@ -3438,3 +3438,7 @@ msgstr "Reproduzir / pausar"
 
 msgid "Preparing call…"
 msgstr "Preparando chamada…"
+
+#: src/ui/call.rs
+msgid "Microphone cleanup is unavailable. Audio is being sent without echo cancellation."
+msgstr "O tratamento do microfone está indisponível. O áudio é enviado sem cancelamento de eco."

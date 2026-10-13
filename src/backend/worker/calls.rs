@@ -45,6 +45,23 @@ pub(super) enum PreparationSignal {
     Resolved(String),
 }
 
+fn ringing_tone(
+    direction: crate::model::CallDirection,
+    phase: calls::CallPhase,
+    preparing: bool,
+) -> Option<crate::call_audio::CallTone> {
+    use crate::call_audio::CallTone;
+    use crate::model::CallDirection;
+    if preparing {
+        return None;
+    }
+    match (direction, phase) {
+        (CallDirection::Incoming, calls::CallPhase::Incoming) => Some(CallTone::Incoming),
+        (CallDirection::Outgoing, calls::CallPhase::Ringing) => Some(CallTone::Outgoing),
+        _ => None,
+    }
+}
+
 impl CallRuntime {
     /// A runtime whose media plane is not watched yet: a call that is still ringing has no handle
     /// to watch, and gets one the moment it is placed or answered.
@@ -415,22 +432,20 @@ impl Worker {
         if let Some(runtime) = self.call.as_mut()
             && runtime.call.generation() == update.generation
         {
-            if update.direction == crate::model::CallDirection::Outgoing
-                && matches!(
-                    update.phase,
-                    calls::CallPhase::Dialing | calls::CallPhase::Ringing
-                )
-            {
+            if let Some(tone) = ringing_tone(
+                update.direction,
+                update.phase,
+                self.call_preparing.is_some(),
+            ) {
                 if let Some(ringback) = &runtime.ringback {
                     if runtime.last.speaker != update.speaker {
                         ringback.bind(update.speaker.clone());
                     }
                 } else {
-                    runtime.ringback =
-                        Some(crate::call_audio::Ringback::start(update.speaker.clone()));
+                    runtime.ringback = runtime.call.ringtone(tone);
                 }
             } else {
-                // Stop at the peer's answer, not only after relay allocation or hangup.
+                // Stop at either answer, not only after relay allocation or hangup.
                 runtime.ringback = None;
             }
             runtime.video_used |= update.video_requested || update.video_active;
@@ -699,6 +714,11 @@ impl Worker {
         let Some(mut call) = runtime.call.prepare_answer() else {
             return;
         };
+        // Answering admits capture preparation immediately. Stop the chime before
+        // opening the microphone, so local ringing cannot leak into the call.
+        if let Some(runtime) = self.call.as_mut() {
+            runtime.ringback = None;
+        }
         let camera = self.call_camera.clone();
         let commands = self.commands.clone();
         self.call_prepare_generation = self.call_prepare_generation.wrapping_add(1);
@@ -1081,7 +1101,8 @@ impl Worker {
         // Once per heartbeat, the engine's own counters for this call. A call that is up but carrying
         // no audio is otherwise indistinguishable in a bug report from one where nobody spoke, and
         // these numbers are what tell the two apart.
-        if let Some(runtime) = self.call.as_ref() {
+        if let Some(runtime) = self.call.as_mut() {
+            runtime.call.refresh_audio_health();
             runtime.call.log_media_stats();
         }
         // Discovery opens every audio device to name it, so it runs on a blocking thread rather
@@ -1240,6 +1261,55 @@ pub(super) fn message_content(call: &wa::message::CallLogMessage) -> Content {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn call_feedback_rings_incoming_offers_and_stops_for_answers_or_preparation() {
+        use crate::call_audio::CallTone;
+        use crate::calls::CallPhase;
+        use crate::model::CallDirection;
+        assert_eq!(
+            super::ringing_tone(CallDirection::Incoming, CallPhase::Incoming, false),
+            Some(CallTone::Incoming)
+        );
+        assert_eq!(
+            super::ringing_tone(CallDirection::Outgoing, CallPhase::Dialing, false),
+            None
+        );
+        assert_eq!(
+            super::ringing_tone(CallDirection::Outgoing, CallPhase::Ringing, false),
+            Some(CallTone::Outgoing)
+        );
+        for direction in [CallDirection::Incoming, CallDirection::Outgoing] {
+            for phase in [
+                CallPhase::Incoming,
+                CallPhase::Dialing,
+                CallPhase::Ringing,
+                CallPhase::Accepted,
+                CallPhase::Connecting,
+                CallPhase::Active,
+                CallPhase::Ended,
+                CallPhase::Failed,
+            ] {
+                assert_eq!(
+                    super::ringing_tone(direction, phase, true),
+                    None,
+                    "{direction:?} {phase:?}"
+                );
+            }
+            for phase in [
+                CallPhase::Accepted,
+                CallPhase::Connecting,
+                CallPhase::Active,
+                CallPhase::Ended,
+                CallPhase::Failed,
+            ] {
+                assert_eq!(
+                    super::ringing_tone(direction, phase, false),
+                    None,
+                    "{direction:?} {phase:?}"
+                );
+            }
+        }
+    }
     #[tokio::test]
     async fn rejected_call_requests_clear_the_immediate_preparing_indicator() {
         for reason in 0..5 {

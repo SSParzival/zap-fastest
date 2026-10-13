@@ -135,3 +135,101 @@ tests also passed. Missing upstream OpenSSL PDB files generated linker warnings,
 without changing the successful exit results. All nine new UX regressions pass.
 Cross-platform CI, default release build, protected installation and attended
 acceptance remain pending at this source checkpoint.
+
+## Installed build and attended failure
+
+Default-feature `cargo build --locked --release` passed. Installed executable
+SHA256 is `15e1d6ffb2d61ac2847c6ec3dfcf4afa01b05e4c3aca8b1421a15723388a40a0`.
+The fresh cold backup at
+`C:/Users/Victor/AppData/Local/ZapFasterRollback/20261013-113535`
+verified 5,856 files (5,910,093,668 bytes). The exact executable rollback was
+rehearsed before replacement; profile and Windows keyring were preserved.
+An initial backup attempt stopped before replacement on the cache junction;
+the reviewed target `D:/Downloads/ZapFast/cache` was copied and verified without
+changing the junction. The user reopened the installed client (PID 36312).
+
+The user then reported an outgoing voice call with one-way audio: the other
+person hears the user, but the user hears nothing; calling through the phone
+works. Only call-control evidence from the voluntarily supplied screenshot was
+used. Its private chat contents are not copied into reports or visual evidence.
+
+Allowlisted numeric log extraction for 14:39:57Z through 14:41:47Z shows 12
+media samples with `rtp_received=0`, `decoded=0` and `delivered=0`. Local input
+and output each opened once, with no output stalls or restarts. This places
+the observed failure before local speaker playback. It does not establish the
+particular relay, signaling or remote endpoint cause.
+
+Protocol receive processing belongs to whatsapp-rust, pinned at `94c53e83`;
+the client uses its normal call builder and audio source/sink interface.
+Current upstream `0dc38af0` is three commits ahead, with no targeted VoIP fix.
+The similar [upstream issue 1098](https://github.com/oxidezap/whatsapp-rust/issues/1098)
+was closed in July, so it is a lead rather than proof of this failure's cause.
+User scope excludes changing WhatsApp protocol behavior, and AGENTS.md says
+not to vendor, fork or patch upstream crates here. No receive-path workaround
+or speculative dependency upgrade has been applied. A targeted upstream
+receive-path diagnosis/fix and a successful attended duplex call are specific
+prerequisites. Calling is **not release-ready**. Incoming-direction, video,
+hangup/history, timing and the other requested native observations remain pending.
+
+## Functional call follow-up
+
+The user reports that an incoming voice call works in both directions. It has
+no local ringing sound, and the peer reports echo/poor audio while the user uses
+speakers; a regular WhatsApp call does not have that echo. These observations
+separate the outgoing receive failure from missing local call feedback and
+microphone processing.
+
+The implementation now adds an incoming two-chime ringtone using the existing
+selected-output/recovery path. It stops before answer preparation opens the
+microphone, and on refusal, cancellation or ending. Outgoing ringback waits for
+the peer's actual Ringing phase, rather than implying ringing during Dialing.
+Focused tone/lifecycle tests passed before the final follow-up gates.
+
+`call_processing.rs` adds the unmodified Sonora 0.2.0 pure-Rust WebRTC processing
+dependency, with AEC3, high-pass filtering and low noise suppression. Automatic
+gain changes are disabled. Each call has its own processor shared only by its
+native microphone and speaker threads. The reference is fed immediately before
+actual speaker queueing, including outgoing ringback, rather than at network
+receipt. The existing 16 kHz/60 ms transport framing and protocol API remain
+unchanged. No audio is saved, logged or sent to a processing service.
+
+Controlled fixtures measure 53.2 dB echo reduction with real transport frame
+sizes, exceeding noise suppression alone by over 20 dB. An independent near-end
+signal survives, silence remains silent, and invalid framing exposes a cleanup
+failure until a device reset. The initial moderate noise setting failed the
+near-end preservation check; low suppression corrected the implementation
+without weakening that check. This is synthetic evidence, not hardware acceptance.
+The standalone initial experiment processed a 20-second fixture in about 92 ms;
+it does not measure call startup or end-to-end delay.
+
+Cleanup failures retain unprocessed microphone audio and publish an explicit,
+localized warning. End call appears above long diagnostics, with a narrow/large
+text regression. Numeric capture/render cleanup counters support attended
+diagnosis without exposing samples or identities. The dependency's license
+notice is included in `THIRD-PARTY-NOTICES.md`.
+
+321 affected source/asset/dependency/packaging/license inputs were frozen before
+the follow-up's final checks. Static Flatpak manifest parity passed. The full
+Flatpak Python test cannot execute its POSIX helper directly on Windows
+(`WinError 193`); its Linux workflow must supply that coverage. All final Cargo,
+matching CI, updated default build/installation and attended ringtone/echo
+acceptance remain pending at this follow-up checkpoint. There are no further
+cosmetic capture rounds. The outgoing zero-inbound-audio defect remains open.
+
+The original UI commit `47a222d3` passed all nine jobs in CI `38412467273`,
+including Linux/macOS native window smoke tests and the three Nix packages.
+The call follow-up passed all six Windows gates, with 1,823 library tests and
+13 existing ignored tests in each configuration, plus binary/integration tests.
+Two subsequent functional corrections receive focused affected checks: a direct
+call-render test now explicitly applies 150% text, and bookkeeping snapshots
+without an actual offer/handle cannot open a ringtone device. Audio-health
+warnings now clear only after new authenticated RTP, decoded frames and delivered
+frames, rather than treating a codec choice as proof of recovery. The original
+zero-reception failure is not hidden by this change.
+
+The final corrections passed both default/all-feature clippy and both focused
+call suites: 97 passed, two existing ignored in each configuration. Formatting
+passed and no frozen application inputs changed afterward. These focused
+receipts extend the successful full matrix rather than repeating unaffected
+tests. Updated all-feature rustdoc, source push/CI, default release build and
+the second protected installation are the remaining delivery steps.

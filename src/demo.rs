@@ -2038,6 +2038,7 @@ fn call_sample(app: &mut App, scenario: &str) {
         started: (phase == CallPhase::Active).then(std::time::Instant::now),
         muted: scenario == "call-muted",
         outcome: None,
+        audio_processing_failed: false,
         peer_audio: (scenario == "call-stalled").then_some(PeerAudio::Stalled),
         lost_devices: Vec::new(),
         microphone: None,

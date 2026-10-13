@@ -40,7 +40,13 @@ const BLOCK_MS: usize = 20;
 /// engine's own jitter cushion rather than under it.
 pub const SPEAKER_QUEUE: usize = 5;
 
-/// Local outgoing-call feedback, never sent to the peer or the microphone path.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CallTone {
+    Outgoing,
+    Incoming,
+}
+
+/// Local call feedback, never sent to the peer or the microphone path.
 /// Uses the same selected-output/recovery path as call playback.
 pub(crate) struct Ringback {
     output: AudioOutput,
@@ -48,8 +54,12 @@ pub(crate) struct Ringback {
 }
 
 impl Ringback {
-    pub(crate) fn start(device: Option<String>) -> Self {
-        let (output, frames) = AudioOutput::spawn(device);
+    pub(crate) fn with_tone(
+        device: Option<String>,
+        tone: CallTone,
+        processing: Option<Arc<crate::call_processing::CallProcessing>>,
+    ) -> Self {
+        let (output, frames) = AudioOutput::spawn_processed(device, processing);
         let task = tokio::spawn(async move {
             let mut tick = tokio::time::interval(Duration::from_millis(60));
             tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -59,7 +69,11 @@ impl Ringback {
                 if frames.is_closed() {
                     break;
                 }
-                let _ = frames.try_send(ringback_frame(sample));
+                let frame = match tone {
+                    CallTone::Outgoing => ringback_frame(sample),
+                    CallTone::Incoming => incoming_ring_frame(sample),
+                };
+                let _ = frames.try_send(frame);
                 sample = (sample + FRAME_SAMPLES) % (RATE as usize * 4);
             }
         });
@@ -90,6 +104,28 @@ fn ringback_frame(first: usize) -> Vec<i16> {
             let time = position as f32 / RATE as f32;
             let wave = (time * 440.0 * std::f32::consts::TAU).sin()
                 + (time * 480.0 * std::f32::consts::TAU).sin();
+            (wave * fade * 0.06 * i16::MAX as f32) as i16
+        })
+        .collect()
+}
+
+/// Two short chimes followed by a pause distinguish an incoming call from ringback.
+fn incoming_ring_frame(first: usize) -> Vec<i16> {
+    let rate = RATE as usize;
+    (first..first + FRAME_SAMPLES)
+        .map(|sample| {
+            let position = sample % (rate * 4);
+            let burst = if position < rate / 4 {
+                position
+            } else if (rate / 2..rate * 3 / 4).contains(&position) {
+                position - rate / 2
+            } else {
+                return 0;
+            };
+            let fade = (burst.min(rate / 4 - burst) as f32 / (RATE as f32 * 0.01)).min(1.0);
+            let time = burst as f32 / RATE as f32;
+            let wave = (time * 640.0 * std::f32::consts::TAU).sin()
+                + (time * 800.0 * std::f32::consts::TAU).sin();
             (wave * fade * 0.06 * i16::MAX as f32) as i16
         })
         .collect()
@@ -539,6 +575,7 @@ impl Sink {
 /// behind it, still writing into that same channel, so nothing about the call's codec or stream
 /// state is rebuilt for a device switch.
 pub struct AudioInput {
+    processing: Option<Arc<crate::call_processing::CallProcessing>>,
     /// Asks the pump to restart on another device; dropping it stops the pump.
     swap: Option<async_channel::Sender<Option<String>>>,
     /// Set when the pump gave up on the selected device and reopened on the system default.
@@ -553,6 +590,13 @@ pub struct AudioInput {
 
 impl AudioInput {
     pub fn spawn(target: Option<String>) -> (Self, async_channel::Receiver<Vec<i16>>) {
+        Self::spawn_processed(target, None)
+    }
+
+    pub(crate) fn spawn_processed(
+        target: Option<String>,
+        processing: Option<Arc<crate::call_processing::CallProcessing>>,
+    ) -> (Self, async_channel::Receiver<Vec<i16>>) {
         let (out, rx) = async_channel::bounded::<Vec<i16>>(4);
         // Unbounded so a device the user picks while the pump is busy is never dropped: a capacity
         // of one would silently discard the newer selection when two arrive before the pump reads
@@ -569,9 +613,11 @@ impl AudioInput {
             fell,
             target.clone(),
             Arc::clone(&opens),
+            processing.clone(),
         ));
         (
             Self {
+                processing,
                 swap: Some(swap),
                 fell_back,
                 opens,
@@ -582,6 +628,9 @@ impl AudioInput {
 
     /// Rebinds the microphone, keeping the engine's channel alive.
     pub fn bind(&self, target: Option<String>) {
+        if let Some(processing) = &self.processing {
+            processing.reset();
+        }
         if let Some(swap) = &self.swap {
             let _ = swap.try_send(target);
         }
@@ -599,10 +648,11 @@ async fn mic_pump(
     fell: async_channel::Sender<()>,
     initial: Option<String>,
     opens: Arc<AtomicUsize>,
+    processing: Option<Arc<crate::call_processing::CallProcessing>>,
 ) {
     let mut target = initial;
     loop {
-        let reader = match MicReader::start(target.as_deref()) {
+        let reader = match MicReader::start(target.as_deref(), processing.clone()) {
             Ok(reader) => {
                 opens.fetch_add(1, Ordering::Relaxed);
                 reader
@@ -685,7 +735,10 @@ struct MicReader {
 }
 
 impl MicReader {
-    fn start(device: Option<&str>) -> Result<Self, String> {
+    fn start(
+        device: Option<&str>,
+        processing: Option<Arc<crate::call_processing::CallProcessing>>,
+    ) -> Result<Self, String> {
         let (tx, rx) = async_channel::bounded::<Vec<i16>>(4);
         let stop = Arc::new(AtomicBool::new(false));
         let delivered = Arc::new(AtomicBool::new(false));
@@ -696,7 +749,16 @@ impl MicReader {
             let delivered = Arc::clone(&delivered);
             std::thread::Builder::new()
                 .name("call-microphone".to_owned())
-                .spawn(move || read_microphone(name.as_deref(), &tx, &stop, &delivered, &ready))
+                .spawn(move || {
+                    read_microphone(
+                        name.as_deref(),
+                        &tx,
+                        &stop,
+                        &delivered,
+                        &ready,
+                        processing.as_deref(),
+                    )
+                })
                 .map_err(|error| format!("the microphone thread could not start: {error}"))?
         };
         match opened.recv() {
@@ -732,6 +794,7 @@ fn read_microphone(
     stop: &AtomicBool,
     delivered: &AtomicBool,
     ready: &std::sync::mpsc::Sender<Result<(), String>>,
+    processing: Option<&crate::call_processing::CallProcessing>,
 ) {
     let mut microphone = match open_microphone(device) {
         Ok(microphone) => {
@@ -756,7 +819,10 @@ fn read_microphone(
         }
         frames.clear();
         converter.push(&block, &mut frames);
-        for frame in frames.drain(..) {
+        for mut frame in frames.drain(..) {
+            if let Some(processing) = processing {
+                processing.capture(&mut frame);
+            }
             let mut pending = frame;
             loop {
                 match tx.try_send(pending) {
@@ -784,6 +850,7 @@ fn read_microphone(
 
 /// The speaker side: the engine's frames written to whichever device is selected.
 pub struct AudioOutput {
+    processing: Option<Arc<crate::call_processing::CallProcessing>>,
     swap: Option<async_channel::Sender<Option<String>>>,
     /// Set when the pump gave up on the selected device and reopened on the system default.
     pub fell_back: async_channel::Receiver<()>,
@@ -803,8 +870,22 @@ pub struct AudioOutput {
     pub restarts: Arc<AtomicUsize>,
 }
 
+struct PlaybackState {
+    opens: Arc<AtomicUsize>,
+    stalls: Arc<AtomicUsize>,
+    restarts: Arc<AtomicUsize>,
+    processing: Option<Arc<crate::call_processing::CallProcessing>>,
+}
+
 impl AudioOutput {
     pub fn spawn(target: Option<String>) -> (Self, async_channel::Sender<Vec<i16>>) {
+        Self::spawn_processed(target, None)
+    }
+
+    pub(crate) fn spawn_processed(
+        target: Option<String>,
+        processing: Option<Arc<crate::call_processing::CallProcessing>>,
+    ) -> (Self, async_channel::Sender<Vec<i16>>) {
         let (tx, rx) = async_channel::bounded::<Vec<i16>>(SPEAKER_QUEUE);
         // Unbounded for the same reason the microphone's is: a newer device selection must not be
         // dropped because the previous one has not been read yet.
@@ -818,12 +899,16 @@ impl AudioOutput {
             swaps,
             fell,
             target.clone(),
-            Arc::clone(&opens),
-            Arc::clone(&stalls),
-            Arc::clone(&restarts),
+            PlaybackState {
+                opens: Arc::clone(&opens),
+                stalls: Arc::clone(&stalls),
+                restarts: Arc::clone(&restarts),
+                processing: processing.clone(),
+            },
         ));
         (
             Self {
+                processing,
                 swap: Some(swap),
                 fell_back,
                 opens,
@@ -836,6 +921,9 @@ impl AudioOutput {
 
     /// Rebinds the speaker, keeping the engine's channel alive.
     pub fn bind(&self, target: Option<String>) {
+        if let Some(processing) = &self.processing {
+            processing.reset();
+        }
         if let Some(swap) = &self.swap {
             let _ = swap.try_send(target);
         }
@@ -852,16 +940,20 @@ async fn play_pump(
     swaps: async_channel::Receiver<Option<String>>,
     fell: async_channel::Sender<()>,
     initial: Option<String>,
-    opens: Arc<AtomicUsize>,
-    stalls: Arc<AtomicUsize>,
-    restarts: Arc<AtomicUsize>,
+    state: PlaybackState,
 ) {
+    let PlaybackState {
+        opens,
+        stalls,
+        restarts,
+        processing,
+    } = state;
     let mut target = initial;
     // Restarts in a row that never played a sample. Reset by any stream that plays one, so this
     // counts a device that is not there rather than a busy one.
     let mut unplayed = 0_usize;
     loop {
-        let writer = match SpkWriter::start(target.as_deref()) {
+        let writer = match SpkWriter::start(target.as_deref(), processing.clone()) {
             Ok(writer) => {
                 opens.fetch_add(1, Ordering::Relaxed);
                 writer
@@ -981,7 +1073,10 @@ struct SpkWriter {
 }
 
 impl SpkWriter {
-    fn start(device: Option<&str>) -> Result<Self, String> {
+    fn start(
+        device: Option<&str>,
+        processing: Option<Arc<crate::call_processing::CallProcessing>>,
+    ) -> Result<Self, String> {
         let (tx, rx) = async_channel::bounded::<Vec<i16>>(SPEAKER_QUEUE);
         let stop = Arc::new(AtomicBool::new(false));
         let accepted = Arc::new(AtomicBool::new(false));
@@ -1001,10 +1096,13 @@ impl SpkWriter {
                         name.as_deref(),
                         &rx,
                         &stop,
-                        &accepted,
-                        &stalled,
-                        &played,
+                        SpeakerProgress {
+                            accepted: &accepted,
+                            stalled: &stalled,
+                            played: &played,
+                        },
                         &ready,
+                        processing.as_deref(),
                     )
                 })
                 .map_err(|error| format!("the speaker thread could not start: {error}"))?
@@ -1042,15 +1140,25 @@ impl Drop for SpkWriter {
     }
 }
 
+struct SpeakerProgress<'a> {
+    accepted: &'a AtomicBool,
+    stalled: &'a AtomicBool,
+    played: &'a AtomicBool,
+}
+
 fn write_speaker(
     device: Option<&str>,
     frames: &async_channel::Receiver<Vec<i16>>,
     stop: &AtomicBool,
-    accepted: &AtomicBool,
-    stalled: &AtomicBool,
-    played: &AtomicBool,
+    progress: SpeakerProgress<'_>,
     ready: &std::sync::mpsc::Sender<Result<(), String>>,
+    processing: Option<&crate::call_processing::CallProcessing>,
 ) {
+    let SpeakerProgress {
+        accepted,
+        stalled,
+        played,
+    } = progress;
     let sink = match open_sink(device) {
         Ok(sink) => {
             let _ = ready.send(Ok(()));
@@ -1071,6 +1179,9 @@ fn write_speaker(
         };
         if stop.load(Ordering::Relaxed) {
             return;
+        }
+        if let Some(processing) = processing {
+            processing.render(&frame);
         }
         sink.append(sink.layout().convert(&frame));
         accepted.store(true, Ordering::Relaxed);
@@ -1339,9 +1450,45 @@ pub(crate) mod fake {
 #[cfg(test)]
 mod tests {
     #[tokio::test]
+    async fn voice_cleanup_is_shared_by_the_real_input_and_output_threads() {
+        let (_fixture, _) = super::fake::install(vec![0.0], 1, super::RATE, (super::RATE, 1));
+        let processing = crate::call_processing::CallProcessing::new();
+        let (mut input, frames) =
+            super::AudioInput::spawn_processed(None, Some(Arc::clone(&processing)));
+        let (mut output, speaker) =
+            super::AudioOutput::spawn_processed(None, Some(Arc::clone(&processing)));
+        speaker
+            .send(vec![1000; super::FRAME_SAMPLES])
+            .await
+            .unwrap();
+        let frame = tokio::time::timeout(std::time::Duration::from_secs(2), frames.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(frame.len(), super::FRAME_SAMPLES);
+        for _ in 0..100 {
+            if processing.counters().1 >= 6 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        let (capture, render) = processing.counters();
+        assert!(
+            capture >= 6 && render >= 6,
+            "capture={capture}, render={render}"
+        );
+        assert!(!processing.failed());
+        input.stop();
+        output.stop();
+    }
+    #[tokio::test]
     async fn ringback_uses_selected_output_rebinds_and_stops_when_dropped() {
         let (_fixture, speaker) = super::fake::install(vec![0.0], 1, super::RATE, (super::RATE, 1));
-        let ringback = super::Ringback::start(Some("synthetic-headset".into()));
+        let ringback = super::Ringback::with_tone(
+            Some("synthetic-headset".into()),
+            super::CallTone::Outgoing,
+            None,
+        );
         for _ in 0..100 {
             if speaker.written_count() > 1 {
                 break;
@@ -1397,6 +1544,29 @@ mod tests {
             );
         }
         assert_eq!(audible, super::ringback_frame(super::RATE as usize * 4));
+    }
+    #[test]
+    fn incoming_ringing_has_two_chimes_a_pause_and_a_bounded_level() {
+        let rate = super::RATE as usize;
+        for first in [0, rate / 2] {
+            let frame = super::incoming_ring_frame(first);
+            assert_eq!(frame.len(), super::FRAME_SAMPLES);
+            assert_eq!(frame[0], 0);
+            assert!(frame.iter().any(|sample| *sample != 0));
+            assert!(frame.iter().all(|sample| sample.abs() <= 4000));
+        }
+        for first in [rate / 4, rate * 3 / 4, rate, rate * 2, rate * 3] {
+            assert!(
+                super::incoming_ring_frame(first)
+                    .iter()
+                    .all(|sample| *sample == 0)
+            );
+        }
+        assert_eq!(
+            super::incoming_ring_frame(0),
+            super::incoming_ring_frame(rate * 4)
+        );
+        assert_ne!(super::incoming_ring_frame(0), super::ringback_frame(0));
     }
     use super::*;
 

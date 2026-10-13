@@ -3418,3 +3418,7 @@ msgstr "Oynat / duraklat"
 
 msgid "Preparing call…"
 msgstr "Arama hazırlanıyor…"
+
+#: src/ui/call.rs
+msgid "Microphone cleanup is unavailable. Audio is being sent without echo cancellation."
+msgstr "Mikrofon işleme kullanılamıyor. Ses yankı giderme olmadan gönderiliyor."

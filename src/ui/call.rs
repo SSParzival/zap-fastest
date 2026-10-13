@@ -81,15 +81,6 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 ));
                 ctx.request_repaint_after(std::time::Duration::from_secs(1));
             }
-            if let Some(audio) = call.peer_audio {
-                ui.label(peer_audio_label(locale, audio));
-            }
-            for lost in &call.lost_devices {
-                ui.label(
-                    gettext(locale, "{device} is unavailable; using the system default")
-                        .replace("{device}", &lost.name),
-                );
-            }
             ui.horizontal_wrapped(|ui| {
                 if call.phase == CallPhase::Incoming {
                     if call.video_requested
@@ -126,6 +117,18 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                     }
                 }
             });
+            if let Some(audio) = call.peer_audio {
+                ui.label(peer_audio_label(locale, audio));
+            }
+            if call.audio_processing_failed {
+                ui.label(gettext(locale, "Microphone cleanup is unavailable. Audio is being sent without echo cancellation."));
+            }
+            for lost in &call.lost_devices {
+                ui.label(
+                    gettext(locale, "{device} is unavailable; using the system default")
+                        .replace("{device}", &lost.name),
+                );
+            }
             if call.phase == CallPhase::Active {
                 if call.video_starting {
                     ui.label(gettext(locale, "Opening the camera…"));

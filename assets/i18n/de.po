@@ -3471,3 +3471,7 @@ msgstr "Wiedergabe / Pause"
 
 msgid "Preparing call…"
 msgstr "Anruf wird vorbereitet…"
+
+#: src/ui/call.rs
+msgid "Microphone cleanup is unavailable. Audio is being sent without echo cancellation."
+msgstr "Die Mikrofonaufbereitung ist nicht verfügbar. Audio wird ohne Echounterdrückung gesendet."

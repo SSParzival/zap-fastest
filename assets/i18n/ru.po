@@ -3461,3 +3461,7 @@ msgstr "Воспроизвести / пауза"
 
 msgid "Preparing call…"
 msgstr "Подготовка звонка…"
+
+#: src/ui/call.rs
+msgid "Microphone cleanup is unavailable. Audio is being sent without echo cancellation."
+msgstr "Обработка микрофона недоступна. Звук передаётся без эхоподавления."

@@ -3425,3 +3425,7 @@ msgstr "Putar / jeda"
 
 msgid "Preparing call…"
 msgstr "Menyiapkan panggilan…"
+
+#: src/ui/call.rs
+msgid "Microphone cleanup is unavailable. Audio is being sent without echo cancellation."
+msgstr "Pemrosesan mikrofon tidak tersedia. Audio dikirim tanpa peredam gema."

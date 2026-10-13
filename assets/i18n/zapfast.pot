@@ -3228,3 +3228,7 @@ msgstr ""
 
 msgid "Preparing call…"
 msgstr ""
+
+#: src/ui/call.rs
+msgid "Microphone cleanup is unavailable. Audio is being sent without echo cancellation."
+msgstr ""

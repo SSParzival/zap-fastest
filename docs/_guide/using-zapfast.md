@@ -677,6 +677,15 @@ chosen microphone instead of switching silently. Active playback follows output
 changes or pauses with an error. Physical Bluetooth/HDMI routing and device
 removal still require attended testing.
 
+Incoming calls play a local two-chime ringtone through the selected call output.
+It stops when you answer, decline, or the caller ends the call. Outgoing ringback
+starts after the other device reports ringing. Call microphone cleanup uses the
+speaker audio as a reference to reduce acoustic echo, with gentle noise
+suppression. It runs locally and never records or uploads the reference audio.
+If cleanup becomes unavailable, microphone audio is sent without it and an
+explicit warning appears.
+Headphones can still help when room acoustics or speaker volume cause residual echo.
+
 The rate-limit queue adapts [pulgueta's PR #364](https://github.com/crmne/zapfast/pull/364),
 with fork-specific durable reconnect recovery and transfer handling. The gallery
 and viewer adapt [pulgueta's PR #264](https://github.com/crmne/zapfast/pull/264)
