@@ -75,6 +75,36 @@ use super::{
 };
 use crate::app::PAGE;
 use crate::archive::Archive;
+
+/// Local latency diagnostics only: fixed source labels and elapsed time, never
+/// command/event payloads, account identifiers or archive contents.
+struct WorkerTiming {
+    stage: &'static str,
+    started: Instant,
+}
+
+impl WorkerTiming {
+    fn start(stage: &'static str) -> Self {
+        Self {
+            stage,
+            started: Instant::now(),
+        }
+    }
+
+    fn run<T>(stage: &'static str, operation: impl FnOnce() -> T) -> T {
+        let _timing = Self::start(stage);
+        operation()
+    }
+}
+
+impl Drop for WorkerTiming {
+    fn drop(&mut self) {
+        let ms = self.started.elapsed().as_millis();
+        if ms >= 250 {
+            log::info!("worker latency: stage={}, elapsed_ms={ms}", self.stage);
+        }
+    }
+}
 use crate::model::{
     ATTACHMENT_DOWNLOAD_LIMIT, Chat, ChatId, ChatKind, Contact, Content, Delivery, Gif, GifError,
     LIVE_LOCATION_LIMIT, LinkPreview, Media, MentionRef, Message, Quoted, Reaction,
@@ -473,6 +503,7 @@ pub async fn run(
     mut inbox: mpsc::UnboundedReceiver<Command>,
     waker: Waker,
 ) {
+    let startup_timing = WorkerTiming::start("startup");
     let archive = loop {
         let path = dirs.archive_db();
         let opened = tokio::task::spawn_blocking(move || Archive::open(&path)).await;
@@ -726,6 +757,7 @@ pub async fn run(
     discard_attachment_staging(&worker.dirs.media_cache_dir());
     discard_attachment_staging(&worker.dirs.sticker_cache_dir());
     worker.start_bot().await;
+    drop(startup_timing);
     let mut wa_events = wa_events;
     let mut tick = tokio::time::interval(Duration::from_secs(5));
     loop {
@@ -780,6 +812,7 @@ pub async fn run(
                 }
             } => worker.pump_outgoing(),
             _ = tick.tick() => {
+                let _timing = WorkerTiming::start("maintenance-tick");
                 if worker.logout_cleanup_blocked {
                     continue;
                 }
@@ -791,8 +824,8 @@ pub async fn run(
                 worker.expire_older_requests();
                 worker.expire_disappearing_messages();
                 if !worker.stories.rows_empty() { worker.emit_statuses(); }
-                worker.retry_avatars();
-                worker.pump_group_info();
+                WorkerTiming::run("retry-avatars", || worker.retry_avatars());
+                WorkerTiming::run("pump-group-info", || worker.pump_group_info());
                 worker.pump_favorite_stickers();
                 worker.pump_read_sync();
                 worker.pump_star_sync();
@@ -3284,6 +3317,11 @@ impl Worker {
 
     /// The callback owns its original generation, even if it runs after logout.
     async fn handle_session_event(&mut self, generation: u64, event: Arc<wa_events::Event>) {
+        let _timing = WorkerTiming::start(match &*event {
+            wa_events::Event::Connected(_) => "connected-event",
+            wa_events::Event::HistorySync(_) => "history-event",
+            _ => "other-event",
+        });
         if generation == self.privacy_generation {
             self.handle_wa_event(event).await;
         }
@@ -3351,23 +3389,23 @@ impl Worker {
                     None => (None, None, None),
                 };
                 self.remember_identity(pn, lid, name);
-                self.recover_outgoing();
+                WorkerTiming::run("recover-outgoing", || self.recover_outgoing());
                 self.set_status(LinkStatus::Connected);
                 self.retry_message_removals();
                 // A new connection may reach a phone that was away before.
                 self.older_warned.clear();
                 self.refresh_legacy_preferences();
-                self.retry_avatars();
+                WorkerTiming::run("connected-retry-avatars", || self.retry_avatars());
                 self.pump_read_sync();
                 self.pump_archive_sync();
                 self.pump_favorite_chats();
                 self.poll_history.reconnect(Instant::now());
                 self.background_history.reconnect();
                 self.push_favorites();
-                self.fetch_missing_favorites();
-                self.recover_favorites();
-                self.recover_first_names();
-                let _ = self.archive.retry_poll_votes();
+                WorkerTiming::run("fetch-favorite-stickers", || self.fetch_missing_favorites());
+                WorkerTiming::run("recover-favorite-stickers", || self.recover_favorites());
+                WorkerTiming::run("recover-first-names", || self.recover_first_names());
+                let _ = WorkerTiming::run("retry-poll-votes", || self.archive.retry_poll_votes());
                 self.pump_poll_votes();
                 if let Some(client) = self.client.clone() {
                     let me = self.me_pn.clone().and_then(|pn| Self::jid_of(&pn));
@@ -5095,6 +5133,7 @@ impl Worker {
     // --- history ---------------------------------------------------------
 
     async fn on_history_sync(&mut self, lazy: &wa_events::LazyHistorySync) {
+        let _timing = WorkerTiming::start("history-sync");
         let on_demand =
             lazy.sync_type() == ON_DEMAND || lazy.peer_data_request_session_id().is_some();
         if !on_demand {
@@ -5187,6 +5226,7 @@ impl Worker {
     }
 
     async fn replay_captured_history(&mut self) {
+        let _timing = WorkerTiming::start("replay-captured-history");
         // Bounded to one chunk per worker tick. Pending sources stay encrypted.
         if !self.privacy_ready || self.background_history.paused {
             return;
@@ -6055,6 +6095,13 @@ impl Worker {
 
     /// Dispatches UI commands and validates asynchronous completions before applying them.
     async fn handle_command(&mut self, command: Command) {
+        let _timing = WorkerTiming::start(match &command {
+            Command::LoadChat { .. } => "load-chat-command",
+            Command::SetDownloadFolder(_) => "download-folder-command",
+            Command::ConfigureSync(_) => "configure-sync-command",
+            Command::StartCall { .. } | Command::StartVideoCall { .. } => "start-call-command",
+            _ => "other-command",
+        });
         if self.logout_cleanup_blocked
             && !matches!(
                 &command,

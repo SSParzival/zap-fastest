@@ -315,3 +315,35 @@ The final delivery changes only macOS Nix's budget to 120 minutes, retaining
 No check or build target is removed or weakened. This CI-only change follows
 the frozen application checks; application/asset/dependency inputs and the
 installed binary remain unchanged. Matching final CI is still required.
+
+### Attended startup queue delay and cross-platform correction
+
+The user reported about a minute after opening before calling became usable.
+Allowlisted local timestamps on the installed call redesign distinguish this
+from a handshake delay: process start 19:37:35Z, link connecting 19:37:38Z,
+connected 19:37:41Z, voice request queued by the UI 19:37:43Z, and received by
+the worker 19:38:50Z. The queue delay is approximately 67 seconds (timestamps
+have one-second precision). Subsequent device discovery took 11 ms and complete
+call preparation took 43 ms. This establishes a local worker scheduling delay,
+not its precise blocking operation. No archive contents or identities were
+read to obtain these timings. A separate warm metadata-only scan of 646 cache
+files took 2 ms; it is not a measurement of the original startup scan.
+
+`UX-LATENCY-1` remains open until an attended startup trace identifies the
+operation and a comparable repeat demonstrates a fix. Local slow-operation
+timing markers cover startup, command/event dispatch, connected recovery,
+maintenance, media exports/usage/indexing/audits, history replay and cache
+retention. They emit only fixed source labels and elapsed milliseconds for
+operations taking at least 250 ms. They do not send telemetry, record payloads
+or alter protocol, scheduling, history recovery or privacy gates. These markers
+are diagnosis, not a claimed performance improvement.
+
+CI `38453894251` passed Windows tests, quality, dependency advisories and Windows
+ARM compilation, but Linux default tests and Linux ARM Nix checks found a real
+one-point clipped camera selector at 400x300 and 150% text. Windows had passed
+the same assertion. The compact call body now receives eight more points of
+height; the strict full-selector visibility assertion remains unchanged. This
+is a functional cross-platform correction after the bounded capture workflow,
+not another cosmetic iteration. The macOS test runner canceled while queued,
+before any steps. The outstanding Nix jobs and a new matching CI run must be
+reported separately from successful receipts.

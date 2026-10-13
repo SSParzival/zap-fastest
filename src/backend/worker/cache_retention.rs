@@ -26,6 +26,7 @@ impl Worker {
     /// Call from the existing worker tick. None is due at startup; changes to
     /// the policy reset it to None. Busy/private workers retry on a later tick.
     pub(super) async fn expire_unreferenced_cache(&mut self) {
+        let _timing = WorkerTiming::start("cache-retention");
         let Some(days) = self.cache_retention_days.filter(|days| *days > 0) else {
             return;
         };

@@ -137,6 +137,7 @@ impl Worker {
     }
 
     async fn pump_managed_exports(&mut self) {
+        let _timing = WorkerTiming::start("managed-exports");
         if !self.privacy_ready
             || !self.automatic_exports.enabled
             || self.background_history.paused
@@ -235,12 +236,14 @@ impl Worker {
     }
 
     pub(super) async fn pump_background_media(&mut self) {
+        let _timing = WorkerTiming::start("background-media");
         self.pump_managed_exports().await;
         if self
             .background_media_usage
             .as_ref()
             .is_none_or(|(checked, _)| checked.elapsed() >= Duration::from_secs(30))
         {
+            let _timing = WorkerTiming::start("media-usage-scan");
             let root = self.dirs.media_cache_dir();
             let usage = tokio::task::spawn_blocking(move || {
                 crate::archive::storage::managed_media_bytes(&root)
@@ -287,7 +290,7 @@ impl Worker {
         {
             return;
         }
-        if self.archive.seed_media_jobs().is_err() {
+        if WorkerTiming::run("seed-media-jobs", || self.archive.seed_media_jobs()).is_err() {
             log::warn!("could not seed background media jobs");
             return;
         }
@@ -384,6 +387,7 @@ impl Worker {
     }
 
     pub(super) async fn audit_completed_media(&mut self) {
+        let _timing = WorkerTiming::start("completed-media-audit");
         // Keep the same account, lock, privacy and connection gates as scheduling.
         if !self.background_media_enabled
             || self.background_history.paused
