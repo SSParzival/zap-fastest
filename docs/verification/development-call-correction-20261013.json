@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-10-13T22:23:15.686870+00:00",
+  "generated_at_utc": "2026-10-13T22:42:34.114368+00:00",
   "source_parent": "a64972a7cfdf8e9c323fa1c8bf855b67620e4b6d",
   "frozen_inputs": {
     "count": 324,
@@ -311,7 +311,9 @@
       "YUYV",
       "NV12"
     ],
-    "final_helper": {
+    "images_saved_or_displayed": false,
+    "camera_stream_success": true,
+    "initial_typed_helper": {
       "packets": [
         {
           "kind": 10,
@@ -320,8 +322,42 @@
       ],
       "exit": 0
     },
-    "images_saved_or_displayed": false,
-    "camera_stream_success": false
+    "release_helper_probe": {
+      "packets": [
+        {
+          "kind": 0,
+          "bytes": 0
+        },
+        {
+          "kind": 1,
+          "bytes": 4539
+        },
+        {
+          "kind": 1,
+          "bytes": 999
+        },
+        {
+          "kind": 1,
+          "bytes": 2730
+        },
+        {
+          "kind": 1,
+          "bytes": 2933
+        },
+        {
+          "kind": 1,
+          "bytes": 4751
+        }
+      ],
+      "exit": 1
+    },
+    "harness_intentionally_stopped_helper": true,
+    "standalone_windows_probe": "Samples obtained under STA/MTA and enabled/disabled converters",
+    "user_reports_other_known_camera_consumer": false,
+    "windows_device_status": "OK",
+    "active_recent_camera_use_marker": false,
+    "peer_video_delivery_verified": true,
+    "cause_of_resource_failure_clearing": "not established"
   },
   "outgoing_audio": {
     "attended_direction": "outgoing",
@@ -339,11 +375,244 @@
     "live_calls_placed_by_agent": false
   },
   "delivery": {
-    "commit": "pending",
-    "ci": "pending",
-    "release_build": "pending",
-    "installation": "pending",
+    "commit": "592fe1fe31c492f75bed9cddff786beaedf83f75",
+    "pushed_to": "fork/main",
+    "ci": {
+      "run": 38477502877,
+      "url": "https://github.com/eternalwaitt/zap-faster/actions/runs/38477502877",
+      "status": "in_progress",
+      "conclusion": "",
+      "checked_at_utc": "2026-10-13T22:42:34.114368+00:00",
+      "jobs": [
+        {
+          "name": "compile (Windows arm64)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "test (windows-latest)",
+          "status": "in_progress",
+          "conclusion": ""
+        },
+        {
+          "name": "Nix package (x86_64-linux)",
+          "status": "in_progress",
+          "conclusion": ""
+        },
+        {
+          "name": "test (macos-latest)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Nix package (aarch64-linux)",
+          "status": "in_progress",
+          "conclusion": ""
+        },
+        {
+          "name": "Dependency advisories",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "quality",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "test (ubuntu-latest)",
+          "status": "in_progress",
+          "conclusion": ""
+        },
+        {
+          "name": "Nix package (aarch64-darwin)",
+          "status": "in_progress",
+          "conclusion": ""
+        }
+      ]
+    },
+    "release_build": {
+      "source_commit": "592fe1fe31c492f75bed9cddff786beaedf83f75",
+      "command": [
+        "H:\\Packages\\rustup-legacy\\toolchains\\1.98.0-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+        "build",
+        "--locked",
+        "--release"
+      ],
+      "exit_code": 0,
+      "started_at_utc": "2026-10-13T22:23:44.901491+00:00",
+      "finished_at_utc": "2026-10-13T22:33:06.830631+00:00",
+      "seconds": 561.93,
+      "sha256": "6229FEB968C429F431B9E8723643D15BB848686CF3A94ACB4301F14C4E9506B3",
+      "bytes": 64798208,
+      "binary": "H:\\Github\\zap-faster\\target\\release\\zap-faster.exe",
+      "version": "zap-faster 0.30.0"
+    },
+    "installation": {
+      "backup": {
+        "backup_root": "C:\\Users\\Victor\\AppData\\Local\\ZapFasterRollback\\20261013-193420",
+        "installed_executable": "C:\\Users\\Victor\\AppData\\Local\\Programs\\ZapFast\\zap-faster.exe",
+        "old_sha256": "A078DFF3A7A77F493D5E886815717A73C19215347B8369643DF44A7D8B905A38",
+        "new_sha256": "6229FEB968C429F431B9E8723643D15BB848686CF3A94ACB4301F14C4E9506B3",
+        "verified_files": 5907,
+        "verified_bytes": 5922183285,
+        "keyring": "Retained under the same Windows user; machine-local rollback",
+        "copied_at": "2026-10-13T19:35:30.4979787-03:00",
+        "publication": "not authorized",
+        "rollback_rehearsed": true
+      },
+      "readback": {
+        "sha256": "6229FEB968C429F431B9E8723643D15BB848686CF3A94ACB4301F14C4E9506B3",
+        "bytes": 64798208
+      },
+      "client_automatically_reopened": false
+    },
     "version": "0.30.0",
-    "release_published": false
+    "release_published": false,
+    "attended_acceptance": "Voice worked before camera; local and peer video visible. Audio failed after camera-on and peer reported lag. Device choices unconfirmed."
+  },
+  "attended_camera_transition": {
+    "voice_worked_before_camera": true,
+    "audio_stopped_after_camera_on": true,
+    "peer_reported_video_lag": true,
+    "camera_off_recovery": "not tested",
+    "observations": [
+      {
+        "time": "2026-10-13T22:43:36Z",
+        "kind": "media stats",
+        "marker": "heartbeat",
+        "counters": {
+          "rtp_received": "165",
+          "unexpected_pt": "0",
+          "srtp_failed": "0",
+          "sframe_failed": "0",
+          "unclassified": "0",
+          "pipe_dropped": "0",
+          "decoded": "279",
+          "delivered": "0",
+          "foreign_decoded": "0",
+          "concealed": "0",
+          "without_decoder": "0",
+          "without_encoder": "0",
+          "mlow_sid": "9",
+          "mlow_dropped": "63",
+          "sink_dropped": "0",
+          "trimmed": "0",
+          "codec_switches": "0",
+          "video_sink_dropped": "0",
+          "peer_keyframes": "0",
+          "forwarding_rejected": "0"
+        }
+      },
+      {
+        "time": "2026-10-13T22:43:36Z",
+        "kind": "audio path",
+        "marker": "heartbeat",
+        "counters": {
+          "mic_opens": "1",
+          "speaker_opens": "1",
+          "speaker_stalls": "0",
+          "speaker_restarts": "0",
+          "live": "true",
+          "cleanup_capture_blocks": "3792",
+          "cleanup_render_blocks": "6246",
+          "cleanup_failed": "false",
+          "mic_frames_sent": "632"
+        }
+      },
+      {
+        "time": "2026-10-13T22:43:41Z",
+        "kind": "media stats",
+        "marker": "heartbeat",
+        "counters": {
+          "rtp_received": "234",
+          "unexpected_pt": "0",
+          "srtp_failed": "0",
+          "sframe_failed": "0",
+          "unclassified": "0",
+          "pipe_dropped": "0",
+          "decoded": "279",
+          "delivered": "0",
+          "foreign_decoded": "0",
+          "concealed": "0",
+          "without_decoder": "0",
+          "without_encoder": "0",
+          "mlow_sid": "16",
+          "mlow_dropped": "125",
+          "sink_dropped": "0",
+          "trimmed": "0",
+          "codec_switches": "0",
+          "video_sink_dropped": "0",
+          "peer_keyframes": "0",
+          "forwarding_rejected": "0"
+        }
+      },
+      {
+        "time": "2026-10-13T22:43:41Z",
+        "kind": "audio path",
+        "marker": "heartbeat",
+        "counters": {
+          "mic_opens": "1",
+          "speaker_opens": "1",
+          "speaker_stalls": "0",
+          "speaker_restarts": "0",
+          "live": "true",
+          "cleanup_capture_blocks": "4290",
+          "cleanup_render_blocks": "6746",
+          "cleanup_failed": "false",
+          "mic_frames_sent": "715"
+        }
+      },
+      {
+        "time": "2026-10-13T22:43:56Z",
+        "kind": "media stats",
+        "marker": "heartbeat",
+        "counters": {
+          "rtp_received": "461",
+          "unexpected_pt": "0",
+          "srtp_failed": "0",
+          "sframe_failed": "0",
+          "unclassified": "0",
+          "pipe_dropped": "0",
+          "decoded": "279",
+          "delivered": "0",
+          "foreign_decoded": "0",
+          "concealed": "0",
+          "without_decoder": "0",
+          "without_encoder": "0",
+          "mlow_sid": "28",
+          "mlow_dropped": "340",
+          "sink_dropped": "0",
+          "trimmed": "0",
+          "codec_switches": "0",
+          "video_sink_dropped": "0",
+          "peer_keyframes": "1",
+          "forwarding_rejected": "0"
+        }
+      },
+      {
+        "time": "2026-10-13T22:43:56Z",
+        "kind": "audio path",
+        "marker": "heartbeat",
+        "counters": {
+          "mic_opens": "1",
+          "speaker_opens": "1",
+          "speaker_stalls": "0",
+          "speaker_restarts": "0",
+          "live": "true",
+          "cleanup_capture_blocks": "5790",
+          "cleanup_render_blocks": "8246",
+          "cleanup_failed": "false",
+          "mic_frames_sent": "965"
+        }
+      }
+    ],
+    "determination": "Authenticated RTP continues while decoded audio stops and MLOW off-point rejection increases. Microphone handoff continues without device restarts, stalls or cleanup failure. Exact rejected profile and cause of camera transition are not exposed by aggregate counters.",
+    "boundary": "whatsapp-rust/wacore MLOW decoder and engine at 94c53e833805c58c9f5966b08d08c990650a651e",
+    "upstream_decoder_latest_commit_checked": "2b9a8d799ec2da008cc47fbd1c61d8995d652238",
+    "upstream_fix_available": false,
+    "video_lag_cause": "Unverified; current counters do not measure capture, outbound delivery or peer rendering latency",
+    "resolved": false,
+    "privacy": "Only fixed labels, timestamps and numeric or boolean counters retained; no personal content, media or protocol payloads"
   }
 }
