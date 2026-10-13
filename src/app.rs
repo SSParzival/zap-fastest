@@ -6585,7 +6585,11 @@ impl App {
                             .is_some_and(|call| call.phase.is_live())
                 }) {
                     self.toast_error("Finish the current call first");
+                } else if !self.is_connected() {
+                    self.toast_error("Wait for WhatsApp to connect before starting a call");
                 } else {
+                    self.call_preparing = true;
+                    log::info!("call request queued: voice");
                     self.backend.send(Command::StartCall { chat });
                 }
             }
@@ -6598,7 +6602,11 @@ impl App {
                             .is_some_and(|call| call.phase.is_live())
                 }) {
                     self.toast_error("Finish the current call first");
+                } else if !self.is_connected() {
+                    self.toast_error("Wait for WhatsApp to connect before starting a call");
                 } else {
+                    self.call_preparing = true;
+                    log::info!("call request queued: video");
                     self.backend.send(Command::StartVideoCall { chat });
                 }
             }
@@ -11039,6 +11047,70 @@ mod tests {
     fn app() -> App {
         let root = std::env::temp_dir().join(format!("zapfast-app-{}", std::process::id()));
         App::headless(AppDirs::under(&root), Settings::default()).0
+    }
+
+    #[test]
+    fn call_click_before_connection_is_explained_and_never_queued_for_later() {
+        for video in [false, true] {
+            let mut app = app();
+            let (backend, mut commands) = crate::backend::Backend::recording();
+            app.backend = backend;
+            app.link = LinkStatus::Connecting;
+            let chat = "15550000001@s.whatsapp.net".to_owned();
+            let action = if video {
+                Action::StartVideoCall(chat)
+            } else {
+                Action::StartCall(chat)
+            };
+            app.apply(action, &egui::Context::default());
+            assert!(!app.call_preparing);
+            assert!(commands.try_recv().is_err());
+            assert!(
+                app.toasts
+                    .iter()
+                    .any(|toast| toast.message.contains("Wait for WhatsApp to connect"))
+            );
+            app.link = LinkStatus::Connected;
+            assert!(
+                commands.try_recv().is_err(),
+                "reconnect cannot place the earlier rejected call"
+            );
+        }
+    }
+
+    #[test]
+    fn connected_call_click_shows_preparation_before_worker_acknowledges_and_blocks_duplicates() {
+        for video in [false, true] {
+            let mut app = app();
+            let (backend, mut commands) = crate::backend::Backend::recording();
+            app.backend = backend;
+            app.link = LinkStatus::Connected;
+            let chat = "15550000001@s.whatsapp.net".to_owned();
+            let start = || {
+                if video {
+                    Action::StartVideoCall(chat.clone())
+                } else {
+                    Action::StartCall(chat.clone())
+                }
+            };
+            app.apply(start(), &egui::Context::default());
+            assert!(
+                app.call_preparing,
+                "feedback must not wait for worker queue processing"
+            );
+            let command = commands.try_recv().unwrap();
+            assert!(matches!(
+                (video, command),
+                (true, Command::StartVideoCall { .. }) | (false, Command::StartCall { .. })
+            ));
+            app.apply(start(), &egui::Context::default());
+            assert!(
+                commands.try_recv().is_err(),
+                "repeated clicks must not queue another call"
+            );
+            app.apply_backend_event(Event::CallPreparing(false), true);
+            assert!(!app.call_preparing);
+        }
     }
 
     #[test]

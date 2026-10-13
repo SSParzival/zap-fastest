@@ -149,6 +149,10 @@ Choose a microphone, sound output and camera under **Audio devices**, or expand
 **Audio and camera devices** in **Calls**. Refresh the list after connecting a
 device. The selected output plays the local outgoing-call tone; it stops when
 the peer answers or the call ends. The tone is not mixed into outgoing call audio.
+Wait for WhatsApp to connect before starting a call. A connected call shows
+Starting call immediately while devices and the connection are prepared.
+Calls requested before connection are explained and rejected, so they cannot
+unexpectedly start later when the client finishes opening.
 
 **Calls** shows recent account-local outcomes, dates and known durations first.
 Click outside it, press Escape, or use its close button to dismiss it. A device

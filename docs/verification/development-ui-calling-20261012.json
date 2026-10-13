@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-10-12T23:40:00.923386+00:00",
+  "generated_at_utc": "2026-10-12T20:40:00.923386-03:00",
   "base_head": "03a5b287a2fbc32becc9c64ee4d092a2813e0dc4",
   "canonical_lf_sha256": {
     ".coderabbit.yaml": "fb9b7400019481f0927aec12cbfe2c3af1598acb46b5a80d16e596a90ed19943",
@@ -358,8 +358,8 @@
         "--check"
       ],
       "exit_code": 0,
-      "started": "2026-10-12T23:30:25.690511+00:00",
-      "finished": "2026-10-12T23:30:27.880632+00:00"
+      "started": "2026-10-12T20:30:25.690511-03:00",
+      "finished": "2026-10-12T20:30:27.880632-03:00"
     },
     {
       "name": "clippy",
@@ -373,8 +373,8 @@
         "warnings"
       ],
       "exit_code": 0,
-      "started": "2026-10-12T23:30:27.881016+00:00",
-      "finished": "2026-10-12T23:30:42.315265+00:00"
+      "started": "2026-10-12T20:30:27.881016-03:00",
+      "finished": "2026-10-12T20:30:42.315265-03:00"
     },
     {
       "name": "clippy-all",
@@ -389,8 +389,8 @@
         "warnings"
       ],
       "exit_code": 0,
-      "started": "2026-10-12T23:30:42.315697+00:00",
-      "finished": "2026-10-12T23:30:54.349754+00:00"
+      "started": "2026-10-12T20:30:42.315697-03:00",
+      "finished": "2026-10-12T20:30:54.349754-03:00"
     },
     {
       "name": "test",
@@ -403,8 +403,8 @@
         "--test-threads=2"
       ],
       "exit_code": 0,
-      "started": "2026-10-12T23:30:54.350111+00:00",
-      "finished": "2026-10-12T23:33:51.824374+00:00"
+      "started": "2026-10-12T20:30:54.350111-03:00",
+      "finished": "2026-10-12T20:33:51.824374-03:00"
     },
     {
       "name": "test-all",
@@ -418,8 +418,8 @@
         "--test-threads=2"
       ],
       "exit_code": 0,
-      "started": "2026-10-12T23:33:51.824892+00:00",
-      "finished": "2026-10-12T23:39:24.917159+00:00"
+      "started": "2026-10-12T20:33:51.824892-03:00",
+      "finished": "2026-10-12T20:39:24.917159-03:00"
     },
     {
       "name": "doc",
@@ -431,8 +431,8 @@
         "--no-deps"
       ],
       "exit_code": 0,
-      "started": "2026-10-12T23:39:24.917695+00:00",
-      "finished": "2026-10-12T23:39:51.680234+00:00"
+      "started": "2026-10-12T20:39:24.917695-03:00",
+      "finished": "2026-10-12T20:39:51.680234-03:00"
     }
   ],
   "synthetic_visuals": [
@@ -549,7 +549,7 @@
   ],
   "visual_review": "All eleven synthetic confirmation captures reviewed. No reported overlap remains; End call is visible before video.",
   "visual_input_manifest": {
-    "generated_at_utc": "2026-10-12T23:18:26.826461+00:00",
+    "generated_at_utc": "2026-10-12T20:18:26.826461-03:00",
     "local_head": "03a5b287a2fbc32becc9c64ee4d092a2813e0dc4",
     "canonical_lf_sha256": {
       ".coderabbit.yaml": "fb9b7400019481f0927aec12cbfe2c3af1598acb46b5a80d16e596a90ed19943",
@@ -901,6 +901,29 @@
   },
   "subsequent_changes": "Call fixture now uses normal learn_lid; assertions follow renamed Calls UI; synthetic tour searches Language. Production layout unchanged after confirmation.",
   "linux_demo_link": "Canceled after prolonged disk-bound linking. No source failure reported. Container restored to stopped, 5 GiB and 2 CPUs unchanged.",
-  "native_acceptance": "Pending updated installation and attended verification. User independently reports satisfactory voice-call quality on prior candidate.",
-  "release": "No tag or publication authorized or performed."
+  "native_acceptance": "User reports a call initiated shortly after opening eventually started after a long delay. Elapsed time and queue/device/setup cause unmeasured. Startup admission/feedback correction in progress; other attended checks remain pending.",
+  "release": "No tag or publication authorized or performed.",
+  "implementation_head": "3b3b0a53f16006668f50b50d47d61bd195d3c503",
+  "installation": {
+    "backup_root": "C:\\Users\\Victor\\AppData\\Local\\ZapFasterRollback\\20261012-204818",
+    "installed_executable": "C:\\Users\\Victor\\AppData\\Local\\Programs\\ZapFast\\zap-faster.exe",
+    "old_sha256": "6DF2A96D4DB95C6E0C12E5A6562E68183B9E7BF2493E3C6C0E3234E3E23AC088",
+    "new_sha256": "DA335552FDE13027517D928E5DC6598D78DC485E2AE4EA8A23B5FB52DEE40EED",
+    "verified_files": 5835,
+    "verified_bytes": 5908123690,
+    "keyring": "Retained under the same Windows user; machine-local rollback",
+    "copied_at": "2026-10-12T20:49:36.9376181-03:00",
+    "publication": "not authorized"
+  },
+  "release_build": {
+    "exit_code": 0,
+    "duration": "7m 49s",
+    "version": "0.30.0",
+    "installed_hash_verified": true
+  },
+  "fresh_ci": {
+    "source_run": 38323347352,
+    "flatpak_run": 38323371017,
+    "state": "completed, all nine source jobs and Flatpak passed"
+  }
 }

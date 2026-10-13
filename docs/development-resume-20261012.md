@@ -132,7 +132,28 @@ Source CI `38309276530` passed all nine jobs and Flatpak `38310864553` passed.
 The user was asked to reopen the existing shortcut, leave Settings foreground,
 and report reconnect/layout. Installed native layout and corrected offline-merge
 rechecks remain pending that coordination. The broader UI/calling follow-up is
-tracked in `development-ui-calling-20261012.md` and still needs its own CI and install.
+tracked in `development-ui-calling-20261012.md`, with the latest status below.
+
+Latest follow-up: `3b3b0a53f16006668f50b50d47d61bd195d3c503` is pushed to
+fork/main. All six required Windows gates passed (1,803 library tests, 13
+existing ignored). The 7m 49s default release build was installed with cold
+rollback `C:/Users/Victor/AppData/Local/ZapFasterRollback/20261012-204818`,
+5,835 verified profile files and unchanged same-user keyring. Installed SHA256
+is `da335552fde13027517d928e5dc6598d78dc485e2ae4ea8a23b5fb52dee40eed`;
+version remains 0.30.0. Source CI `38323347352` passed all nine jobs and
+Flatpak `38323371017` passed. User reopen/reconnect, Settings fit, Calls dismissal, local tone
+and completed-call entries remain pending. Do not scan a QR or relink.
+
+New native report: a call initiated just after opening eventually started after
+a long delay. Startup admission and immediate preparation feedback are being
+corrected in `src/app.rs` and `src/backend/worker/calls.rs`; the installed build
+is still `3b3b0a53`. The exact queue/device/protocol delay is unmeasured.
+Focused tests passed (two admission/feedback cases and thirteen call-worker
+cases), followed by all six required Windows gates passing: 1,806 library tests,
+13 existing ignored, 10 default / 12 all-feature executable tests and two updater
+tests. Frozen inputs and commands are in
+`verification/development-call-start-20261012.json`. Corrected build/install
+and measured attended acceptance remain pending.
 
 Connected Settings read-back observed `Phone history: response received`.
 This establishes a response, not complete recovery or a specific repair anchor.

@@ -540,18 +540,31 @@ impl Worker {
     }
 
     async fn start_call_mode(&mut self, chat: ChatId, with_video: bool) {
-        if !self.privacy_ready || self.call_privacy_paused || self.call_chat_hidden(&chat, false) {
+        log::info!("call request received by worker");
+        if !self.privacy_ready || self.call_privacy_paused {
+            self.emit(Event::CallPreparing(false));
+            self.emit(Event::Error(
+                "Calling is unavailable while account privacy protection is active".into(),
+            ));
+            return;
+        }
+        if self.call_chat_hidden(&chat, false) {
+            self.emit(Event::CallPreparing(false));
             return;
         }
         if self.call_busy() {
+            self.emit(Event::CallPreparing(false));
+            self.emit(Event::Error("Finish the current call first".into()));
             return;
         }
         if !callable_chat(&chat) {
+            self.emit(Event::CallPreparing(false));
             log::warn!("[CALL] refusing a call to a chat that is not one to one");
             self.emit(Event::Error("Calls are one to one only".to_owned()));
             return;
         }
         let Some(client) = self.client.clone() else {
+            self.emit(Event::CallPreparing(false));
             log::warn!("[CALL] cannot start a call: WhatsApp is not connected");
             self.emit(Event::Error(
                 "Zap Faster is not connected to WhatsApp".to_owned(),
@@ -571,8 +584,10 @@ impl Worker {
         self.call_preparing = Some((
             generation,
             tokio::spawn(async move {
+                let preparation_started = Instant::now();
                 let result = tokio::time::timeout(Duration::from_secs(45), async {
                     let devices = discover_audio_devices().await;
+                    log::info!("call device discovery finished: {} ms", preparation_started.elapsed().as_millis());
                     let resolved =
                         calls::resolve_devices(&devices, wanted.microphone, wanted.speaker);
                     let _ = commands.send(Command::CallDevicesDiscovered(devices));
@@ -592,6 +607,11 @@ impl Worker {
                 })
                 .await
                 .unwrap_or_else(|_| Err("The call did not connect in time".into()));
+                log::info!(
+                    "call preparation finished: {} ms, success={}",
+                    preparation_started.elapsed().as_millis(),
+                    result.is_ok()
+                );
                 let _ = commands.send(Command::CallPrepared { generation, result });
             }),
         ));
@@ -1220,6 +1240,38 @@ pub(super) fn message_content(call: &wa::message::CallLogMessage) -> Content {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn rejected_call_requests_clear_the_immediate_preparing_indicator() {
+        for reason in 0..5 {
+            let (mut worker, events, _commands, _runtime) =
+                super::super::offline_worker("15550000000@s.whatsapp.net");
+            worker.privacy_ready = reason != 0;
+            worker.call_privacy_paused = reason == 1;
+            if reason == 2 {
+                worker.call = Some(CallRuntime::new(Call::test_snapshot(
+                    "15550000001@s.whatsapp.net",
+                )));
+            }
+            let chat = if reason == 3 {
+                "fixture@unknown"
+            } else {
+                "15550000001@s.whatsapp.net"
+            };
+            worker.start_call_mode(chat.into(), false).await;
+            let mut cleared = false;
+            let mut explained = false;
+            while let Ok(event) = events.try_recv() {
+                assert!(!matches!(event, Event::CallPreparing(true)));
+                cleared |= matches!(event, Event::CallPreparing(false));
+                explained |= matches!(event, Event::Error(_));
+            }
+            assert!(
+                cleared && explained,
+                "rejection {reason} must complete the UI request"
+            );
+            assert!(worker.call_preparing.is_none());
+        }
+    }
     use super::*;
 
     #[test]

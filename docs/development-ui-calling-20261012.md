@@ -51,9 +51,31 @@ full run caught outdated Calls labels, a call mapping fixture and the tour's
 now-scrolled Language control. Those fixtures were corrected without weakening
 coverage; the complete checks passed afterward. The receipt is
 `verification/development-ui-calling-20261012.json`.
-Commits/push, fresh CI, updated Windows install and
-attended runtime confirmation remain pending. The installed personal client is
-still the prior candidate, with its verified rollback backup intact.
+Committed and pushed on linear main as
+`3b3b0a53f16006668f50b50d47d61bd195d3c503`. Upstream main remains
+`e00e377ee6c617206245455a04146a5dd5c24265`. Fresh source CI `38323347352`
+passed all nine jobs; Flatpak `38323371017` passed.
+The default Windows release build passed in 7m 49s and was installed after
+graceful shutdown and a verified cold rollback backup at
+`C:/Users/Victor/AppData/Local/ZapFasterRollback/20261012-204818`:
+5,835 profile files, 5,908,123,690 bytes, previous executable preserved,
+same-user keyring unchanged. Installed SHA256:
+`da335552fde13027517d928e5dc6598d78dc485e2ae4ea8a23b5fb52dee40eed`.
+Executable hash and version 0.30.0 were read back. No tag or publication occurred.
+The user was asked to reopen the existing shortcut and confirm reconnect,
+Settings fit, Calls dismissal, dialing tone and completed-call entries through
+a user-initiated call with a willing person. Attended confirmation remains pending.
+
+Attended follow-up: the user reports that a call initiated just after opening
+eventually started after a long delay. They have not reported measured elapsed
+time or whether the client was already connected. The startup call buttons could
+enqueue a request before the worker finished startup, and preparation feedback
+was only set after the worker accepted it. A focused correction now rejects
+pre-connection requests with an explanation, sets preparation immediately for
+connected requests, prevents duplicate clicks and clears preparation on worker
+rejection. Timing markers record only phase and elapsed milliseconds, never
+recipients, identifiers, message content or device names. Actual queue/device/
+setup delay remains unconfirmed until measured with the corrected build.
 
 Continue the original batch acceptance afterward, including the corrected offline
 merge recheck, storage/download protections, notifications/privacy and video/
