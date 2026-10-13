@@ -670,6 +670,7 @@ pub async fn run(
         recent_hashes: HashMap::new(),
         emoji_cache: HashMap::new(),
         favorite_fetches: HashSet::new(),
+        favorite_local_checked: HashSet::new(),
         sticker_pace: Default::default(),
         sticker_failed: HashSet::new(),
         sticker_download_failed: HashSet::new(),
@@ -707,6 +708,7 @@ pub async fn run(
         background_media: HashSet::new(),
         call: None,
         call_preparing: None,
+        outgoing_call_request: None,
         call_preparing_signals: Default::default(),
         call_video_preparing: None,
         disappearing_pending: HashSet::new(),
@@ -1118,6 +1120,7 @@ struct Worker {
     background_media: HashSet<(ChatId, String, i64)>,
     call: Option<calls::CallRuntime>,
     call_preparing: Option<(u64, tokio::task::JoinHandle<()>)>,
+    outgoing_call_request: Option<crate::calls::CallRequest>,
     call_prepare_generation: u64,
     call_preparing_signals: std::collections::VecDeque<calls::PreparationSignal>,
     call_video_preparing: Option<(u64, tokio::task::JoinHandle<()>)>,
@@ -1229,6 +1232,7 @@ struct Worker {
     emoji_cache: HashMap<PathBuf, EmojiStamp>,
     /// Favorite stickers being fetched from the phone's list, by hash.
     favorite_fetches: HashSet<String>,
+    favorite_local_checked: HashSet<String>,
     /// Favorites waiting for their turn, and the pause the server asked for.
     sticker_pace: sticker_pace::Pace,
     /// Recent stickers whose download failed this session, not asked again.
@@ -6163,8 +6167,12 @@ impl Worker {
             Command::StatusDownloaded { key, token, result } => {
                 self.status_downloaded(key, token, result)
             }
-            Command::StartCall { chat } => self.start_call(chat).await,
-            Command::StartVideoCall { chat } => self.start_video_call(chat).await,
+            Command::StartCall { chat, request } => {
+                self.start_call_mode(chat, false, request).await
+            }
+            Command::StartVideoCall { chat, request } => {
+                self.start_call_mode(chat, true, request).await
+            }
             Command::CallPrepared { generation, result } => {
                 self.call_prepared(generation, result).await
             }
@@ -16415,6 +16423,7 @@ fn offline_worker(
         recent_hashes: HashMap::new(),
         emoji_cache: HashMap::new(),
         favorite_fetches: HashSet::new(),
+        favorite_local_checked: HashSet::new(),
         sticker_pace: Default::default(),
         sticker_failed: HashSet::new(),
         sticker_download_failed: HashSet::new(),
@@ -16452,6 +16461,7 @@ fn offline_worker(
         background_media: HashSet::new(),
         call: None,
         call_preparing: None,
+        outgoing_call_request: None,
         call_preparing_signals: Default::default(),
         call_video_preparing: None,
         disappearing_pending: HashSet::new(),

@@ -3448,7 +3448,16 @@ impl App {
                 }
             }
             Event::CallDismissed => self.call = None,
-            Event::CallPreparing(preparing) => self.call_preparing = preparing,
+            Event::CallPreparing(preparing) => {
+                self.call_preparing = preparing
+                    && !self
+                        .pending_call_request
+                        .as_ref()
+                        .is_some_and(|request| request.is_cancelled());
+                if !preparing {
+                    self.pending_call_request = None;
+                }
+            }
             Event::CallDevices(devices) => self.call_devices = *devices,
             Event::CallLog(records) => self.call_records = records,
             Event::Statuses(rows) => self.statuses = rows,
@@ -6579,6 +6588,7 @@ impl App {
             Action::StartCall(chat) => {
                 if self.accounts.iter().any(|account| {
                     account.call_preparing
+                        || account.pending_call_request.is_some()
                         || account
                             .call
                             .as_ref()
@@ -6589,13 +6599,16 @@ impl App {
                     self.toast_error("Wait for WhatsApp to connect before starting a call");
                 } else {
                     self.call_preparing = true;
+                    let request = crate::calls::CallRequest::default();
+                    self.pending_call_request = Some(request.clone());
                     log::info!("call request queued: voice");
-                    self.backend.send(Command::StartCall { chat });
+                    self.backend.send(Command::StartCall { chat, request });
                 }
             }
             Action::StartVideoCall(chat) => {
                 if self.accounts.iter().any(|account| {
                     account.call_preparing
+                        || account.pending_call_request.is_some()
                         || account
                             .call
                             .as_ref()
@@ -6606,8 +6619,10 @@ impl App {
                     self.toast_error("Wait for WhatsApp to connect before starting a call");
                 } else {
                     self.call_preparing = true;
+                    let request = crate::calls::CallRequest::default();
+                    self.pending_call_request = Some(request.clone());
                     log::info!("call request queued: video");
-                    self.backend.send(Command::StartVideoCall { chat });
+                    self.backend.send(Command::StartVideoCall { chat, request });
                 }
             }
             Action::AnswerCall => {
@@ -6641,7 +6656,13 @@ impl App {
                 }
             }
             Action::DeclineCall => self.backend.send(Command::DeclineCall),
-            Action::HangupCall => self.backend.send(Command::HangupCall),
+            Action::HangupCall => {
+                if let Some(request) = &self.pending_call_request {
+                    request.cancel();
+                    self.call_preparing = false;
+                }
+                self.backend.send(Command::HangupCall);
+            }
             Action::SetCallMuted(muted) => self.backend.send(Command::SetCallMuted(muted)),
             Action::SetCallVideo(enabled) => self.backend.send(Command::SetCallVideo(enabled)),
             Action::RefreshAudioDevices => self.backend.send(Command::RefreshAudioDevices),
@@ -9508,6 +9529,10 @@ impl App {
             );
             if account.reported_history.as_ref() != Some(&policy) {
                 account.reported_history = Some(policy.clone());
+                if paused && let Some(request) = &account.pending_call_request {
+                    request.cancel();
+                    account.call_preparing = false;
+                }
                 account.backend.send(Command::CallPrivacyPaused(paused));
                 account.backend.send(Command::BackgroundHistory {
                     enabled: policy.0,
@@ -9763,6 +9788,9 @@ impl App {
     /// closes, and notifications already on the desktop are withdrawn.
     pub fn lock_app(&mut self) {
         for account in &self.accounts {
+            if let Some(request) = &account.pending_call_request {
+                request.cancel();
+            }
             account.backend.send(Command::CallPrivacyPaused(true));
         }
         if self.settings.app_lock_hash.is_none() || self.app_lock.is_locked() {
@@ -11110,6 +11138,46 @@ mod tests {
             );
             app.apply_backend_event(Event::CallPreparing(false), true);
             assert!(!app.call_preparing);
+        }
+    }
+
+    #[test]
+    fn cancelling_a_queued_call_dismisses_preparation_and_ignores_late_start_feedback() {
+        for video in [false, true] {
+            let mut app = app();
+            let (backend, mut commands) = crate::backend::Backend::recording();
+            app.backend = backend;
+            app.link = LinkStatus::Connected;
+            let chat = "15550000001@s.whatsapp.net".to_owned();
+            let ctx = egui::Context::default();
+            app.apply(
+                if video {
+                    Action::StartVideoCall(chat)
+                } else {
+                    Action::StartCall(chat)
+                },
+                &ctx,
+            );
+            let request = match commands.try_recv().unwrap() {
+                Command::StartCall { request, .. } | Command::StartVideoCall { request, .. } => {
+                    request
+                }
+                _ => panic!("expected queued call"),
+            };
+            app.apply(Action::HangupCall, &ctx);
+            assert!(
+                request.is_cancelled(),
+                "cancellation reaches the pending command before worker dispatch"
+            );
+            assert!(!app.call_preparing);
+            assert!(matches!(commands.try_recv(), Ok(Command::HangupCall)));
+            app.apply_backend_event(Event::CallPreparing(true), true);
+            assert!(
+                !app.call_preparing,
+                "late preparation feedback must not reopen the canceled dialog"
+            );
+            app.apply_backend_event(Event::CallPreparing(false), true);
+            assert!(app.pending_call_request.is_none());
         }
     }
 

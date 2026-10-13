@@ -684,7 +684,10 @@ impl Worker {
     fn fetch_favorite(&mut self, hash: String) {
         let dir = self.dirs.saved_sticker_dir();
         let path = dir.join(format!("{hash}.webp"));
-        if path.exists() || self.favorite_fetches.contains(&hash) || self.copy_local_favorite(&hash)
+        let already_checked = self.favorite_local_checked.remove(&hash);
+        if path.exists()
+            || self.favorite_fetches.contains(&hash)
+            || (!already_checked && self.copy_local_favorite(&hash))
         {
             return;
         }
@@ -753,37 +756,59 @@ impl Worker {
     /// A file on this computer holding the sticker with this content hash: in
     /// the phone's recent stickers, stickers from chats, or a pack.
     fn local_sticker_copy(&self, hash: &str) -> Option<PathBuf> {
-        let mut candidates: Vec<PathBuf> = Vec::new();
+        self.local_sticker_copies(&HashSet::from([hash.to_owned()]))
+            .remove(hash)
+            .and_then(|paths| verified_sticker_copy(hash, paths))
+    }
+
+    /// Search the bounded archive/catalog once for the whole recovery batch.
+    fn local_sticker_copies(&self, wanted: &HashSet<String>) -> HashMap<String, Vec<PathBuf>> {
+        let mut candidates: HashMap<String, Vec<PathBuf>> = HashMap::new();
+        if wanted.is_empty() {
+            return candidates;
+        }
         if let Ok(phone) = self.archive.phone_stickers() {
-            candidates.extend(
-                phone
-                    .into_iter()
-                    .filter(|sticker| sticker.hash == hash)
-                    .filter_map(|sticker| sticker.path),
-            );
+            for sticker in phone {
+                if wanted.contains(&sticker.hash)
+                    && let Some(path) = sticker.path
+                {
+                    candidates.entry(sticker.hash).or_default().push(path);
+                }
+            }
         }
         if let Ok(rows) = self.archive.recent_stickers(REFERENCE_SEARCH, true) {
-            candidates.extend(rows.into_iter().filter_map(|sticker| {
-                let raw = sticker.raw.as_deref()?;
-                let message = wa::Message::decode_from_slice(raw).ok()?;
-                let found = message.get_base_message().sticker_message.as_option()?;
-                (sticker_hash(found.file_sha256.as_deref(), None).as_deref() == Some(hash))
-                    .then_some(sticker.path)
-            }));
+            for sticker in rows {
+                let Some(raw) = sticker.raw.as_deref() else {
+                    continue;
+                };
+                let Ok(message) = wa::Message::decode_from_slice(raw) else {
+                    continue;
+                };
+                let Some(found) = message.get_base_message().sticker_message.as_option() else {
+                    continue;
+                };
+                if let Some(hash) = sticker_hash(found.file_sha256.as_deref(), None)
+                    && wanted.contains(&hash)
+                {
+                    candidates.entry(hash).or_default().push(sticker.path);
+                }
+            }
         }
-        candidates.extend(
-            self.sticker_packs()
-                .into_iter()
-                .flat_map(|pack| pack.stickers)
-                .filter(|path| {
-                    path.file_stem()
-                        .is_some_and(|stem| stem.to_string_lossy() == hash)
-                }),
-        );
-        candidates.into_iter().find(|path| {
-            std::fs::read(path)
-                .is_ok_and(|bytes| super::super::sticker_store::content_hash(&bytes) == hash)
-        })
+        for path in self
+            .sticker_packs()
+            .into_iter()
+            .flat_map(|pack| pack.stickers)
+        {
+            if let Some(hash) = path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .map(str::to_owned)
+                && wanted.contains(&hash)
+            {
+                candidates.entry(hash).or_default().push(path);
+            }
+        }
+        candidates
     }
 
     /// Fetches favorites the phone named whose files never arrived, such as
@@ -801,11 +826,31 @@ impl Worker {
             }
         };
         // Copies already on this computer first; only the rest need the servers.
+        let mut copies = self.local_sticker_copies(&missing.iter().cloned().collect());
+        self.favorite_local_checked.clear();
         let mut owed = Vec::new();
+        let mut copied = false;
         for hash in missing {
-            if !self.copy_local_favorite(&hash) && !self.favorite_recently_gone(&hash) {
+            let source = copies
+                .remove(&hash)
+                .and_then(|paths| verified_sticker_copy(&hash, paths));
+            let saved = source.is_some_and(|source| {
+                match super::super::sticker_store::save(&dir, &source) {
+                    Ok(_) => true,
+                    Err(_) => {
+                        log::warn!("could not copy a favorite sticker from its local file");
+                        false
+                    }
+                }
+            });
+            copied |= saved;
+            if !saved && !self.favorite_recently_gone(&hash) {
+                self.favorite_local_checked.insert(hash.clone());
                 owed.push(hash);
             }
+        }
+        if copied {
+            self.emit_stickers();
         }
         let missing = owed;
         if !missing.is_empty() {
@@ -1111,6 +1156,13 @@ impl Worker {
         }
         self.emit_stickers();
     }
+}
+
+fn verified_sticker_copy(hash: &str, paths: Vec<PathBuf>) -> Option<PathBuf> {
+    paths.into_iter().find(|path| {
+        std::fs::read(path)
+            .is_ok_and(|bytes| super::super::sticker_store::content_hash(&bytes) == hash)
+    })
 }
 
 #[cfg(test)]
@@ -1585,6 +1637,54 @@ mod tests {
     /// Favorites with no copy here wait their turn instead of all going to
     /// the servers at once, and one whose file was gone from the servers is
     /// not asked for again on the next connection (#298, #307).
+    #[test]
+    fn missing_favorites_reuse_local_files_as_one_batch_and_reject_wrong_hashes() {
+        let (mut worker, _root, events, _commands) = sticker_worker();
+        let pack = worker.packs_dir().join("fixture");
+        std::fs::create_dir_all(&pack).unwrap();
+        let mut expected = Vec::new();
+        for index in 0..24 {
+            let bytes = sticker_bytes(&format!("batch-{index}"));
+            let hash = crate::backend::sticker_store::content_hash(&bytes);
+            std::fs::write(pack.join(format!("{hash}.webp")), &bytes).unwrap();
+            worker
+                .archive
+                .set_favorite_sticker(&hash, true, 1, None, true)
+                .unwrap();
+            expected.push((hash, bytes));
+        }
+        let bad_hash = crate::backend::sticker_store::content_hash(b"expected contents");
+        std::fs::write(pack.join(format!("{bad_hash}.webp")), b"different contents").unwrap();
+        worker
+            .archive
+            .set_favorite_sticker(&bad_hash, true, 1, None, true)
+            .unwrap();
+        worker.fetch_missing_favorites();
+        for (hash, bytes) in expected {
+            assert_eq!(
+                std::fs::read(worker.dirs.saved_sticker_dir().join(format!("{hash}.webp")))
+                    .unwrap(),
+                bytes
+            );
+        }
+        assert!(
+            !worker
+                .dirs
+                .saved_sticker_dir()
+                .join(format!("{bad_hash}.webp"))
+                .exists()
+        );
+        assert!(worker.favorite_local_checked.contains(&bad_hash));
+        let shelves = events
+            .try_iter()
+            .filter(|event| matches!(event, Event::Stickers { .. }))
+            .count();
+        assert_eq!(
+            shelves, 1,
+            "publish the completed batch once, not rescan the shelves for every favorite"
+        );
+    }
+
     #[test]
     fn missing_favorites_queue_and_a_gone_one_rests() {
         let (mut worker, _root, _events, _commands) = sticker_worker();

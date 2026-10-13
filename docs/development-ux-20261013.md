@@ -347,3 +347,46 @@ is a functional cross-platform correction after the bounded capture workflow,
 not another cosmetic iteration. The macOS test runner canceled while queued,
 before any steps. The outstanding Nix jobs and a new matching CI run must be
 reported separately from successful receipts.
+
+### Cold-start sticker recovery and cancellation fix
+
+The diagnostic build was installed with a fresh verified 5,885-file backup
+(5,920,710,077 bytes) and rehearsed executable rollback. The attended full
+restart reproduced the delay: process start 20:38:21Z, connected 20:38:24Z,
+voice queued 20:38:26Z, worker dispatch 20:39:35Z. The fixed operation marker
+measured `fetch-favorite-stickers` at 68,819 ms inside a 68,857 ms connected
+event. This identifies the blocking local recovery operation. The user also
+reported that Cancel did not work during the wait. Both actions used that
+blocked worker queue. Only fixed labels and numeric timings were extracted.
+
+The correction collects local sticker candidates once for the whole favorite
+batch, verifies each copied file's content hash and emits the updated shelves
+once. A one-use marker avoids immediately repeating the same local search when
+the remaining favorite download is dispatched. Other sticker entry points keep
+their normal fresh local lookup and download recovery behavior.
+
+Outgoing voice and video requests now carry an account-owned cancellation
+signal shared with the UI. Cancel dismisses preparation immediately and marks
+the queued request without waiting for worker dispatch. The worker skips
+canceled requests before device discovery or sending an offer, and preparation
+can wake on cancellation. Late feedback cannot reopen the canceled dialog.
+Locking and privacy pause cancel pending requests through the same signal.
+Normal active-call hangup and cleanup retain their existing queue path.
+
+Focused verification passed 101 call tests (two existing hardware tests ignored)
+and all 16 sticker-worker tests. Regressions cover queued voice/video cancellation,
+interrupting preparation, late feedback, valid local copies, rejecting a wrong
+content hash and publishing shelves once. Final application inputs are frozen
+at manifest SHA-256
+`46a02cd03c8349a04121112d6c6a5e9009cccbf4a493ec925663dfac3d9386c4`.
+`UX-LATENCY-1` and cancellation remain pending native acceptance until the verified
+fix is installed and an immediate call after a full restart is measured again.
+No after-fix timing or native cancellation success is claimed yet.
+
+All six Windows gates passed against these unchanged frozen inputs: formatting,
+strict default/all-feature clippy, default/all-feature all-target tests, and
+strict all-feature rustdoc. Each library configuration passed 1,830 tests,
+with 13 existing hardware-dependent tests ignored. Default/all-feature binary
+tests passed 10/12 respectively and update-flag tests passed two in each.
+Build, backup, installation, matching CI and attended cold-start/cancellation
+results remain separate required evidence.

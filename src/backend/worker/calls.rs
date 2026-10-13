@@ -546,16 +546,17 @@ impl Worker {
         false
     }
 
-    pub(super) async fn start_call(&mut self, chat: ChatId) {
-        self.start_call_mode(chat, false).await;
-    }
-
-    pub(super) async fn start_video_call(&mut self, chat: ChatId) {
-        self.start_call_mode(chat, true).await;
-    }
-
-    async fn start_call_mode(&mut self, chat: ChatId, with_video: bool) {
+    pub(super) async fn start_call_mode(
+        &mut self,
+        chat: ChatId,
+        with_video: bool,
+        request: calls::CallRequest,
+    ) {
         log::info!("call request received by worker");
+        if request.is_cancelled() {
+            self.emit(Event::CallPreparing(false));
+            return;
+        }
         if !self.privacy_ready || self.call_privacy_paused {
             self.emit(Event::CallPreparing(false));
             self.emit(Event::Error(
@@ -595,14 +596,18 @@ impl Worker {
         let commands = self.commands.clone();
         self.call_prepare_generation = self.call_prepare_generation.wrapping_add(1);
         let generation = self.call_prepare_generation;
+        self.outgoing_call_request = Some(request.clone());
         self.emit(Event::CallPreparing(true));
         self.call_preparing = Some((
             generation,
             tokio::spawn(async move {
                 let preparation_started = Instant::now();
-                let result = tokio::time::timeout(Duration::from_secs(45), async {
+                let preparation = tokio::time::timeout(Duration::from_secs(45), async {
                     let devices = discover_audio_devices().await;
-                    log::info!("call device discovery finished: {} ms", preparation_started.elapsed().as_millis());
+                    log::info!(
+                        "call device discovery finished: {} ms",
+                        preparation_started.elapsed().as_millis()
+                    );
                     let resolved =
                         calls::resolve_devices(&devices, wanted.microphone, wanted.speaker);
                     let _ = commands.send(Command::CallDevicesDiscovered(devices));
@@ -619,9 +624,12 @@ impl Worker {
                         "The call could not be started. Check your connection and audio devices."))?;
                     call.set_lost_devices(resolved.lost_devices);
                     Ok(Box::new(call))
-                })
-                .await
-                .unwrap_or_else(|_| Err("The call did not connect in time".into()));
+                });
+                let result = tokio::select! {
+                    biased;
+                    _ = request.cancelled() => Err("Call cancelled".to_owned()),
+                    result = preparation => result.unwrap_or_else(|_| Err("The call did not connect in time".into())),
+                };
                 log::info!(
                     "call preparation finished: {} ms, success={}",
                     preparation_started.elapsed().as_millis(),
@@ -648,6 +656,18 @@ impl Worker {
             return;
         }
         self.call_preparing = None;
+        if self
+            .outgoing_call_request
+            .take()
+            .is_some_and(|request| request.is_cancelled())
+        {
+            if let Ok(mut call) = result {
+                call.hangup(self.client.as_ref()).await;
+            }
+            self.call_preparing_signals.clear();
+            self.emit(Event::CallPreparing(false));
+            return;
+        }
         self.emit(Event::CallPreparing(false));
         match result {
             Ok(call)
@@ -773,6 +793,9 @@ impl Worker {
     }
 
     pub(super) async fn hangup_call(&mut self) {
+        if let Some(request) = self.outgoing_call_request.take() {
+            request.cancel();
+        }
         if let Some((_, task)) = self.call_preparing.take() {
             self.call_prepare_generation = self.call_prepare_generation.wrapping_add(1);
             task.abort();
@@ -1067,6 +1090,9 @@ impl Worker {
 
     /// Releases the call on the way out, so quitting leaves no child process or task behind.
     pub(super) async fn shutdown_call(&mut self) {
+        if let Some(request) = self.outgoing_call_request.take() {
+            request.cancel();
+        }
         self.call_prepare_generation = self.call_prepare_generation.wrapping_add(1);
         if let Some((_, task)) = self.call_preparing.take() {
             task.abort();
@@ -1327,7 +1353,9 @@ mod tests {
             } else {
                 "15550000001@s.whatsapp.net"
             };
-            worker.start_call_mode(chat.into(), false).await;
+            worker
+                .start_call_mode(chat.into(), false, calls::CallRequest::default())
+                .await;
             let mut cleared = false;
             let mut explained = false;
             while let Ok(event) = events.try_recv() {
@@ -1343,6 +1371,40 @@ mod tests {
         }
     }
     use super::*;
+
+    #[tokio::test]
+    async fn cancelled_queued_call_never_prepares_devices_or_sends_an_offer() {
+        for video in [false, true] {
+            let (mut worker, events, _commands, _runtime) =
+                super::super::offline_worker("15550000000@s.whatsapp.net");
+            let request = calls::CallRequest::default();
+            request.cancel();
+            worker
+                .start_call_mode("15550000001@s.whatsapp.net".into(), video, request)
+                .await;
+            assert!(worker.call_preparing.is_none());
+            assert!(worker.call.is_none());
+            assert!(matches!(events.try_recv(), Ok(Event::CallPreparing(false))));
+            assert!(
+                events.try_recv().is_err(),
+                "no discovery, offer, error or live call is published"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn cancellation_interrupts_preparation_without_worker_dispatch() {
+        let request = calls::CallRequest::default();
+        let waiting = request.clone();
+        let task = tokio::spawn(async move { waiting.cancelled().await });
+        tokio::task::yield_now().await;
+        request.cancel();
+        tokio::time::timeout(Duration::from_secs(1), task)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(request.is_cancelled());
+    }
 
     #[test]
     fn call_preparation_keeps_protocol_details_out_of_interface_errors() {

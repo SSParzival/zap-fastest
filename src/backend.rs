@@ -161,9 +161,11 @@ pub enum Command {
     },
     StartCall {
         chat: ChatId,
+        request: crate::calls::CallRequest,
     },
     StartVideoCall {
         chat: ChatId,
+        request: crate::calls::CallRequest,
     },
     CallPrepared {
         generation: u64,

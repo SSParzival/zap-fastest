@@ -9,7 +9,7 @@
 //! seeing a port close.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Instant;
 
 use anyhow::{Result, anyhow};
@@ -22,6 +22,31 @@ use whatsapp_rust::voip::{CallEvent, CallHandle};
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
+
+/// Account-owned cancellation shared by the UI and queued/preparing call.
+/// The flag is set without waiting for the worker's command queue.
+#[derive(Clone, Debug, Default)]
+pub struct CallRequest {
+    cancelled: Arc<AtomicBool>,
+    wake: Arc<tokio::sync::Notify>,
+}
+
+impl CallRequest {
+    pub(crate) fn cancel(&self) {
+        self.cancelled.store(true, Ordering::Release);
+        self.wake.notify_one();
+    }
+
+    pub(crate) fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Acquire)
+    }
+
+    pub(crate) async fn cancelled(&self) {
+        if !self.is_cancelled() {
+            self.wake.notified().await;
+        }
+    }
+}
 
 /// Where a 1:1 call is in its life.
 ///
