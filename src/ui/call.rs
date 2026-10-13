@@ -84,7 +84,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             let controls_height = if split { heights[0].max(heights[1]) + heights[2] + 8.0 } else { heights.into_iter().fold(0.0_f32, f32::max) };
             // Reserve the actual footer plus title/margins. The body alone scrolls;
             // it must never claim the space needed by wrapped call-control labels.
-            let height = (ui.available_height().min(ctx.content_rect().height() - if compact { 96.0 } else { 160.0 + ui.text_style_height(&egui::TextStyle::Heading) }) - controls_height - if compact { 12.0 } else { 36.0 })
+            let height = (ui.available_height().min(ctx.content_rect().height() - if compact { 96.0 } else { 160.0 + ui.text_style_height(&egui::TextStyle::Heading) }) - controls_height - if compact { 4.0 } else { 36.0 })
                 .clamp(16.0, 400.0);
             let body = egui::ScrollArea::vertical()
                 .id_salt(("call-body", app.account().id.as_str(), call.generation))
