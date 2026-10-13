@@ -233,3 +233,65 @@ passed and no frozen application inputs changed afterward. These focused
 receipts extend the successful full matrix rather than repeating unaffected
 tests. Updated all-feature rustdoc, source push/CI, default release build and
 the second protected installation are the remaining delivery steps.
+
+## Attended voice acceptance and call-screen redesign
+
+The call follow-up `99cc9ee3` was built and installed with a fresh verified
+backup and rehearsed executable rollback at
+`C:/Users/Victor/AppData/Local/ZapFasterRollback/20261013-141301`.
+All 5,874 profile files (5,919,236,875 bytes) were read back by hash. The linked
+session, archive, cache junction and Windows keyring were preserved. Installed
+executable SHA-256 is
+`397367601DC217F6A6AE1AD516CEAE26DD677F95D405A927078FE72A765906B1`.
+The default build passed; its added microphone processing costs about 0.53 MiB
+in executable size. All-feature rustdoc passed. Flatpak run `38435118735`
+completed successfully for that exact source, covering the POSIX packaging
+checks that cannot execute directly on Windows.
+
+The user reopened this installation and confirmed an incoming **voice-only**
+call worked, echo improved and ringing was audible. The subsequent answer
+confirmed ringing stopped on answer; other controls were not tried. Video,
+device selection, mute, hangup and completed-call history are not claimed
+accepted. The outgoing zero-reception defect remains open.
+
+The user explicitly requested a better call screen after this attended test.
+This is a new, bounded call-surface design batch within the established native
+theme system: centered identity and status, clearly labeled large microphone,
+camera and hangup targets, a red hangup action, and an expandable device section.
+Video uses one main preview with a smaller self-preview. Labels and icons form
+one click and keyboard target; full labels wrap. Privacy hides photos/initials
+and video frames while retaining all controls. Device choices and warnings stay
+reachable without competing with primary call actions. Preparation, incoming
+voice/video, connecting, active/muted, stalled audio, video requests and camera
+opening are included in the scoped synthetic inspection. No additional protocol
+behavior is changed. Verification and replacement of this redesign remain pending.
+
+The scoped design workflow captured 24 synthetic call states/variants, fixed
+the findings together, and captured 24 confirmation views. All captures exited
+successfully without taking foreground focus. Inspection covered every sheet.
+There are no further cosmetic capture rounds. The confirmation exposed a real
+short-window overflow, investigated afterward through numerical layout tests.
+Primary call controls now stay outside the scrolling identity/video/device body.
+Very short windows use compact inline controls and place the two incoming-video
+answer choices above Decline. The same compact layout applies to 400x440 windows,
+preserving space for caller details at larger text sizes.
+
+The layout regression verifies incoming and active video calls across five
+window sizes (including 400x300 and 400x440), both light/dark themes and 100%/150%
+text. It scrolls at fine increments and requires the complete microphone,
+speaker and camera selector rectangles to become visible, rather than assuming
+all fields can fit together. Identity/video privacy tests count the actual video
+textures independently of control icons. A separate test activates mute with
+Space, tabs to the camera control, activates it with Space, expands device
+settings and clicks the hangup label. Synthetic views never open call devices.
+The post-confirmation changes receive functional verification, without another
+visual capture round. Native acceptance of the redesigned controls is pending.
+
+The final 324 source/asset/dependency/packaging inputs are frozen with manifest
+SHA-256 `66307aaab9f3e5afe81ae49f6b3a688cf207770f0af0d65d8e4910384e84c947`.
+Both default/all-feature call suites pass 98 tests, with two existing hardware
+tests ignored in each. Both clippy configurations, formatting and all-feature
+rustdoc pass with warnings denied. The final default checks extend the matching
+all-feature/rustdoc receipts after the short-window threshold correction.
+Application inputs remain unchanged. Build, installation, matching CI and native
+acceptance are the remaining delivery steps for this call-screen redesign.

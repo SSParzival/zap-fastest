@@ -933,6 +933,7 @@ fastframe_icons::icons! {
         Maximize => lucide "maximize-2",
         MessageCircle => "message-circle",
         Mic => lucide "mic",
+        MicOff => "mic-off",
         Minimize => lucide "minimize-2",
         Minus => lucide "minus",
         Monitor => lucide "monitor",
@@ -943,6 +944,7 @@ fastframe_icons::icons! {
         Pause => lucide "pause",
         Pencil => lucide "pencil",
         Phone => "phone",
+        PhoneOff => "phone-off",
         Pin => lucide "pin",
         PinOff => lucide "pin-off",
         Play => lucide "play",
@@ -968,6 +970,7 @@ fastframe_icons::icons! {
         User => lucide "user",
         Users => lucide "users",
         Video => "video",
+        VideoOff => "video-off",
         Volume2 => lucide "volume-2",
         VolumeX => lucide "volume-x",
         WifiOff => "wifi-off",
@@ -1245,7 +1248,7 @@ pub fn focus_outline(ui: &egui::Ui, id: egui::Id, rect: egui::Rect, radius: f32)
     focus_outline_on_fill(ui, id, rect, radius, Color32::TRANSPARENT);
 }
 
-fn focus_outline_on_fill(
+pub(crate) fn focus_outline_on_fill(
     ui: &egui::Ui,
     id: egui::Id,
     rect: egui::Rect,

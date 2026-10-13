@@ -309,12 +309,13 @@ fn screen_privacy_hides_call_identity_and_video_without_hiding_end_call() {
                 |ui| crate::ui::call::show(&mut app, ui.ctx()),
             );
             output.textures_delta.clear();
+            let preview_ids = crate::ui::call::video_texture_ids(app.account().id.as_str(), &ctx);
             image_meshes = ctx
                 .tessellate(output.shapes, output.pixels_per_point)
                 .iter()
                 .filter(|primitive| {
                     matches!(&primitive.primitive, egui::epaint::Primitive::Mesh(mesh)
-                        if mesh.texture_id != egui::TextureId::default())
+                        if preview_ids.contains(&mesh.texture_id))
                 })
                 .count();
             if let Some(tree) = output.platform_output.accesskit_update {
@@ -348,7 +349,7 @@ fn device_selectors_have_programmatic_names_and_full_values() {
     let mut fields = std::collections::BTreeMap::new();
     for _ in 0..3 {
         let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-            crate::ui::call::show(&mut app, ui.ctx())
+            crate::ui::call::devices(&mut app, ui)
         });
         output.textures_delta.clear();
         if let Some(tree) = output.platform_output.accesskit_update {
@@ -368,6 +369,117 @@ fn device_selectors_have_programmatic_names_and_full_values() {
             "{name}"
         );
     }
+}
+
+#[test]
+fn call_controls_support_keyboard_and_label_clicks_and_devices_expand_on_request() {
+    let mut app = app();
+    apply_flags(&mut app, Some("call-active"));
+    let ctx = egui::Context::default();
+    app.attach(&ctx);
+    let account = app.account().id.as_str().to_owned();
+    let mut draw = |events| {
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(400.0, 600.0),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ui| crate::ui::call::show(&mut app, ui.ctx()),
+        );
+        output.textures_delta.clear();
+    };
+    for _ in 0..3 {
+        draw(Vec::new());
+    }
+    let devices_id = crate::ui::call::devices_open_id(&account);
+    assert!(
+        !ctx.data(|data| data.get_temp::<bool>(devices_id))
+            .unwrap_or(false)
+    );
+    let toggle = ctx
+        .data(|data| data.get_temp::<egui::Rect>(devices_id.with("bounds")))
+        .unwrap();
+    let click = |position, pressed| egui::Event::PointerButton {
+        pos: position,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    draw(vec![
+        egui::Event::PointerMoved(toggle.center()),
+        click(toggle.center(), true),
+    ]);
+    draw(vec![click(toggle.center(), false)]);
+    assert_eq!(
+        ctx.data(|data| data.get_temp::<bool>(devices_id)),
+        Some(true)
+    );
+    let (mute, _) = ctx
+        .data(|data| {
+            data.get_temp::<(egui::Id, egui::Rect)>(egui::Id::new(("call-control-test", "Mute")))
+        })
+        .unwrap();
+    ctx.memory_mut(|memory| memory.request_focus(mute));
+    draw(vec![egui::Event::Key {
+        key: egui::Key::Space,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    }]);
+    draw(vec![egui::Event::Key {
+        key: egui::Key::Tab,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    }]);
+    let (camera, _) = ctx
+        .data(|data| {
+            data.get_temp::<(egui::Id, egui::Rect)>(egui::Id::new((
+                "call-control-test",
+                "Turn camera on",
+            )))
+        })
+        .unwrap();
+    assert_eq!(ctx.memory(|memory| memory.focused()), Some(camera));
+    draw(vec![egui::Event::Key {
+        key: egui::Key::Space,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    }]);
+    let (_, end) = ctx
+        .data(|data| {
+            data.get_temp::<(egui::Id, egui::Rect)>(egui::Id::new((
+                "call-control-test",
+                "End call",
+            )))
+        })
+        .unwrap();
+    let label = egui::pos2(end.center().x, end.bottom() - 3.0);
+    draw(vec![egui::Event::PointerMoved(label), click(label, true)]);
+    draw(vec![click(label, false)]);
+    assert!(
+        app.actions
+            .iter()
+            .any(|action| matches!(action, crate::model::Action::SetCallMuted(true)))
+    );
+    assert!(
+        app.actions
+            .iter()
+            .any(|action| matches!(action, crate::model::Action::HangupCall))
+    );
+    assert!(
+        app.actions
+            .iter()
+            .any(|action| matches!(action, crate::model::Action::SetCallVideo(true)))
+    );
 }
 
 #[test]

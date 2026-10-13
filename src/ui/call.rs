@@ -4,6 +4,7 @@ use crate::app::App;
 use crate::calls::{CallOutcome, CallPhase, DeviceKind, PeerAudio, SilenceReason};
 use crate::i18n::{Locale, gettext};
 use crate::model::{Action, CallDirection};
+use crate::theme::{self, Icon};
 
 pub fn show(app: &mut App, ctx: &egui::Context) {
     let locale = app.locale;
@@ -26,10 +27,26 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             .max_size(ctx.content_rect().shrink(16.0).size())
             .vscroll(true)
             .show(ctx, |ui| {
-                ui.label(gettext(locale, "Preparing call…"));
-                if ui.button(gettext(locale, "Cancel call")).clicked() {
-                    app.actions.push(Action::HangupCall);
-                }
+                ui.vertical_centered(|ui| {
+                    ui.add_space(16.0);
+                    theme::icon(ui, Icon::Phone, 32.0, app.palette.accent);
+                    ui.add_space(12.0);
+                    ui.label(gettext(locale, "Preparing call…"));
+                    ui.add_space(16.0);
+                    if control(
+                        ui,
+                        &app.palette,
+                        128.0_f32.min(ui.available_width()),
+                        Icon::PhoneOff,
+                        &gettext(locale, "Cancel call"),
+                        ControlTone::Danger,
+                    )
+                    .clicked()
+                    {
+                        app.actions.push(Action::HangupCall);
+                    }
+                    ui.add_space(12.0);
+                });
             });
     }
     if let Some(call) = app
@@ -48,20 +65,64 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
         .id(egui::Id::new(("voice-call", app.account().id.as_str())))
         .collapsible(false)
         .resizable(false)
+        .title_bar(ctx.content_rect().height() >= 500.0)
         .constrain_to(ctx.content_rect().shrink(16.0))
         .max_size(ctx.content_rect().shrink(16.0).size())
-        .default_width(400.0)
-        .default_height(if call.video_requested || call.video_active {
-            ctx.content_rect().shrink(16.0).height()
-        } else {
-            ctx.content_rect().shrink(16.0).height().min(520.0)
-        })
-        .default_pos(ctx.content_rect().center() - egui::vec2(200.0, 200.0))
-        .vscroll(true)
+        .auto_sized()
+        .default_width(440.0)
+        .default_pos(ctx.content_rect().center() - egui::vec2(220.0, 200.0))
+        .vscroll(false)
         .show(ctx, |ui| {
-            let name = display_name(app, ui, &call.chat, egui::TextStyle::Heading);
-            ui.heading(name);
-            ui.label(match call.phase {
+            let mut controls = call_controls(locale, &call);
+            let compact = ctx.content_rect().height() < 500.0;
+            let split = compact && call.phase == CallPhase::Incoming && call.video_requested;
+            let width = if split { (ui.available_width() - 8.0) / 2.0 } else { ((ui.available_width() - 16.0) / 3.0).min(128.0) };
+            let heights: Vec<_> = controls.iter().map(|(_, label, _, _)| {
+                let height = ui.painter().layout(label.to_string(), egui::TextStyle::Body.resolve(ui.style()), app.palette.text, if compact { width - 32.0 } else { width }).size().y;
+                if compact { height.max(20.0) + 16.0 } else { height + 56.0 }
+            }).collect();
+            let controls_height = if split { heights[0].max(heights[1]) + heights[2] + 8.0 } else { heights.into_iter().fold(0.0_f32, f32::max) };
+            // Reserve the actual footer plus title/margins. The body alone scrolls;
+            // it must never claim the space needed by wrapped call-control labels.
+            let height = (ui.available_height().min(ctx.content_rect().height() - if compact { 96.0 } else { 160.0 + ui.text_style_height(&egui::TextStyle::Heading) }) - controls_height - if compact { 12.0 } else { 36.0 })
+                .clamp(16.0, 400.0);
+            let body = egui::ScrollArea::vertical()
+                .id_salt(("call-body", app.account().id.as_str(), call.generation))
+                .max_height(height)
+                .min_scrolled_height(height)
+                .auto_shrink([false, true])
+                .show(ui, |ui| {
+            if compact {
+                ui.label(gettext(locale, if call.video_active || call.video_requested { "Video call" } else { "Voice call" }));
+            }
+            ui.add_space(if compact { 0.0 } else { 12.0 });
+            ui.vertical_centered(|ui| {
+                if call.video_view.is_none() && !compact {
+                    // An anonymous mark avoids leaking initials or photos under screen privacy.
+                    let size = if ctx.content_rect().height() < 500.0 { 48.0 } else { 72.0 };
+                    let (rect, _) = ui.allocate_exact_size(egui::Vec2::splat(size), egui::Sense::hover());
+                    let hidden = app.settings.screen_privacy.hides(
+                        crate::settings::ScreenPrivacyWhat::Name, ui.rect_contains_pointer(rect),
+                    ) || app.settings.screen_privacy.hides(
+                        crate::settings::ScreenPrivacyWhat::Media, ui.rect_contains_pointer(rect),
+                    );
+                    if hidden {
+                        ui.painter().circle_filled(rect.center(), size / 2.0, app.palette.surface);
+                        theme::paint_icon(ui, Icon::User, rect, size * 0.45, app.palette.secondary);
+                    } else if let Some(chat) = app.chat(&call.chat) {
+                        let name = app.chat_title(chat);
+                        let picture = app.avatar(&call.chat);
+                        super::widgets::paint_avatar(ui, &app.palette, rect, &name, &call.chat, picture.as_deref());
+                    }
+                    ui.add_space(8.0);
+                }
+                let name = display_name(app, ui, &call.chat, egui::TextStyle::Heading);
+                if compact {
+                    ui.label(egui::RichText::new(name).strong());
+                } else {
+                    ui.heading(name);
+                }
+                ui.label(egui::RichText::new(match call.phase {
                 CallPhase::Dialing => gettext(locale, "Calling…"),
                 CallPhase::Ringing => gettext(locale, "Ringing…"),
                 CallPhase::Incoming if call.video_requested => {
@@ -72,51 +133,17 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 CallPhase::Active => gettext(locale, "Connected"),
                 CallPhase::Ended => gettext(locale, "Call ended"),
                 CallPhase::Failed => gettext(locale, "Call failed"),
-            });
-            if let Some(start) = call.started {
+                }).color(app.palette.secondary));
+                if let Some(start) = call.started {
                 ui.label(format!(
                     "{}:{:02}",
                     start.elapsed().as_secs() / 60,
                     start.elapsed().as_secs() % 60
                 ));
                 ctx.request_repaint_after(std::time::Duration::from_secs(1));
-            }
-            ui.horizontal_wrapped(|ui| {
-                if call.phase == CallPhase::Incoming {
-                    if call.video_requested
-                        && ui.button(gettext(locale, "Answer with video")).clicked()
-                    {
-                        app.actions.push(Action::AnswerVideoCall);
-                    }
-                    if ui
-                        .button(if call.video_requested {
-                            gettext(locale, "Answer without camera")
-                        } else {
-                            gettext(locale, "Answer")
-                        })
-                        .clicked()
-                    {
-                        app.actions.push(Action::AnswerCall);
-                    }
-                    if ui.button(gettext(locale, "Decline")).clicked() {
-                        app.actions.push(Action::DeclineCall);
-                    }
-                } else {
-                    if ui
-                        .button(if call.muted {
-                            gettext(locale, "Unmute")
-                        } else {
-                            gettext(locale, "Mute")
-                        })
-                        .clicked()
-                    {
-                        app.actions.push(Action::SetCallMuted(!call.muted));
-                    }
-                    if ui.button(gettext(locale, "End call")).clicked() {
-                        app.actions.push(Action::HangupCall);
-                    }
                 }
             });
+            ui.add_space(12.0);
             if let Some(audio) = call.peer_audio {
                 ui.label(peer_audio_label(locale, audio));
             }
@@ -132,26 +159,9 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             if call.phase == CallPhase::Active {
                 if call.video_starting {
                     ui.label(gettext(locale, "Opening the camera…"));
-                    if ui.button(gettext(locale, "Cancel video")).clicked() {
-                        app.actions.push(Action::SetCallVideo(false));
-                    }
-                } else if call.video_active {
-                    if ui.button(gettext(locale, "Turn camera off")).clicked() {
-                        app.actions.push(Action::SetCallVideo(false));
-                    }
-                } else {
+                } else if !call.video_active {
                     if call.video_requested {
                         ui.label(gettext(locale, "The other person requested video."));
-                    }
-                    if ui
-                        .button(if call.video_requested {
-                            gettext(locale, "Accept video and turn camera on")
-                        } else {
-                            gettext(locale, "Turn camera on")
-                        })
-                        .clicked()
-                    {
-                        app.actions.push(Action::SetCallVideo(true));
                     }
                     if call.video_requested
                         && ui.button(gettext(locale, "Keep voice only")).clicked()
@@ -164,7 +174,37 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 video(app, ui, ctx, call.generation, view);
             }
             ui.add_space(8.0);
-            devices(app, ui);
+            ui.separator();
+            let id = devices_open_id(app.account().id.as_str());
+            let mut expanded = ctx.data(|data| data.get_temp::<bool>(id)).unwrap_or(false);
+            let toggle = theme::soft_button(ui, &app.palette, Some(if expanded { Icon::ChevronUp } else { Icon::Settings }), &gettext(locale, "Audio and camera devices"), expanded);
+            #[cfg(test)]
+            ctx.data_mut(|data| data.insert_temp(id.with("bounds"), toggle.rect));
+            if toggle.clicked() {
+                expanded = !expanded;
+                ctx.data_mut(|data| data.insert_temp(id, expanded));
+            }
+            if expanded {
+                ui.add_space(8.0);
+                devices(app, ui);
+            }
+            ui.add_space(8.0);
+                });
+            #[cfg(test)]
+            ctx.data_mut(|data| data.insert_temp(devices_open_id(app.account().id.as_str()).with("scroll"), body.inner_rect));
+            let _ = body;
+            ui.add_space(if compact { 0.0 } else { 12.0 });
+            ui.separator();
+            ui.add_space(if compact { 0.0 } else { 8.0 });
+            if split {
+                let decline = controls.pop().expect("incoming video has a decline control");
+                control_row(app, ui, width, controls);
+                ui.add_space(8.0);
+                control_row(app, ui, width, vec![decline]);
+            } else {
+                control_row(app, ui, width, controls);
+            }
+            ui.add_space(if compact { 4.0 } else { 8.0 });
         });
     }
     if app.call_log_open {
@@ -242,6 +282,235 @@ struct VideoTextures {
     peer: Option<egui::TextureHandle>,
 }
 
+#[cfg(test)]
+pub(crate) fn video_texture_ids(account: &str, ctx: &egui::Context) -> Vec<egui::TextureId> {
+    ctx.data(|data| data.get_temp::<VideoTextures>(egui::Id::new(("call-video-textures", account))))
+        .map(|textures| {
+            [textures.peer, textures.local]
+                .into_iter()
+                .flatten()
+                .map(|texture| texture.id())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+pub(crate) fn devices_open_id(account: &str) -> egui::Id {
+    egui::Id::new(("live-call-devices-open", account))
+}
+
+#[derive(Clone, Copy)]
+enum ControlTone {
+    Neutral,
+    Selected,
+    Primary,
+    Danger,
+}
+
+type CallControl = (Icon, std::borrow::Cow<'static, str>, ControlTone, Action);
+
+fn control_row(app: &mut App, ui: &mut egui::Ui, width: f32, controls: Vec<CallControl>) {
+    ui.horizontal_top(|ui| {
+        let count = controls.len() as f32;
+        ui.add_space(
+            ((ui.available_width() - (width * count + (count - 1.0) * 8.0)) / 2.0).max(0.0),
+        );
+        ui.spacing_mut().item_spacing.x = 8.0;
+        for (icon, label, tone, action) in controls {
+            if control(ui, &app.palette, width, icon, &label, tone).clicked() {
+                app.actions.push(action);
+            }
+        }
+    });
+}
+
+fn call_controls(locale: Locale, call: &crate::calls::CallUpdate) -> Vec<CallControl> {
+    let mut controls = Vec::with_capacity(3);
+    if call.phase == CallPhase::Incoming {
+        if call.video_requested {
+            controls.push((
+                Icon::Video,
+                gettext(locale, "Answer with video"),
+                ControlTone::Primary,
+                Action::AnswerVideoCall,
+            ));
+        }
+        controls.push((
+            Icon::Phone,
+            if call.video_requested {
+                gettext(locale, "Answer without camera")
+            } else {
+                gettext(locale, "Answer")
+            },
+            ControlTone::Primary,
+            Action::AnswerCall,
+        ));
+        controls.push((
+            Icon::PhoneOff,
+            gettext(locale, "Decline"),
+            ControlTone::Danger,
+            Action::DeclineCall,
+        ));
+    } else {
+        controls.push((
+            if call.muted { Icon::MicOff } else { Icon::Mic },
+            if call.muted {
+                gettext(locale, "Unmute")
+            } else {
+                gettext(locale, "Mute")
+            },
+            if call.muted {
+                ControlTone::Selected
+            } else {
+                ControlTone::Neutral
+            },
+            Action::SetCallMuted(!call.muted),
+        ));
+        if call.phase == CallPhase::Active {
+            let (label, enable) = if call.video_starting {
+                (gettext(locale, "Cancel video"), false)
+            } else if call.video_active {
+                (gettext(locale, "Turn camera off"), false)
+            } else if call.video_requested {
+                (gettext(locale, "Accept video and turn camera on"), true)
+            } else {
+                (gettext(locale, "Turn camera on"), true)
+            };
+            controls.push((
+                if enable { Icon::VideoOff } else { Icon::Video },
+                label,
+                if enable {
+                    ControlTone::Neutral
+                } else {
+                    ControlTone::Selected
+                },
+                Action::SetCallVideo(enable),
+            ));
+        }
+        controls.push((
+            Icon::PhoneOff,
+            gettext(locale, "End call"),
+            ControlTone::Danger,
+            Action::HangupCall,
+        ));
+    }
+    controls
+}
+
+/// Named call targets, with compact inline icons for very short windows.
+fn control(
+    ui: &mut egui::Ui,
+    palette: &theme::Palette,
+    width: f32,
+    icon: Icon,
+    label: &str,
+    tone: ControlTone,
+) -> egui::Response {
+    let font = egui::TextStyle::Body.resolve(ui.style());
+    let compact = ui.ctx().content_rect().height() < 500.0;
+    let galley = ui.painter().layout(
+        label.to_owned(),
+        font,
+        palette.text,
+        (width - if compact { 32.0 } else { 0.0 }).max(1.0),
+    );
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(
+            width,
+            if compact {
+                16.0 + galley.size().y.max(20.0)
+            } else {
+                56.0 + galley.size().y
+            },
+        ),
+        egui::Sense::click(),
+    );
+    theme::reveal_focus(&response);
+    #[cfg(test)]
+    ui.ctx().data_mut(|data| {
+        data.insert_temp(
+            egui::Id::new(("call-control-test", label)),
+            (response.id, response.rect),
+        )
+    });
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::Button,
+            ui.is_enabled(),
+            matches!(tone, ControlTone::Selected),
+            label,
+        )
+    });
+    let (fill, hover) = match tone {
+        ControlTone::Primary | ControlTone::Selected => (palette.accent, palette.accent_hover),
+        ControlTone::Danger => (
+            palette.danger,
+            theme::blend(palette.danger, palette.text, 0.12),
+        ),
+        ControlTone::Neutral => (palette.surface, palette.surface_hover),
+    };
+    let fill = if response.hovered() { hover } else { fill };
+    let foreground = if matches!(tone, ControlTone::Neutral) {
+        palette.text
+    } else if theme::contrast(fill, egui::Color32::BLACK)
+        > theme::contrast(fill, egui::Color32::WHITE)
+    {
+        egui::Color32::BLACK
+    } else {
+        egui::Color32::WHITE
+    };
+    let circle = egui::Rect::from_center_size(
+        egui::pos2(rect.center().x, rect.top() + 24.0),
+        egui::Vec2::splat(48.0),
+    );
+    theme::focus_outline_on_fill(
+        ui,
+        response.id,
+        if compact { rect } else { circle },
+        if compact { 6.0 } else { 24.0 },
+        fill,
+    );
+    if ui.is_rect_visible(rect) {
+        if compact {
+            ui.painter().rect_filled(rect, 6.0, fill);
+            theme::paint_icon(
+                ui,
+                icon,
+                egui::Rect::from_center_size(
+                    egui::pos2(rect.left() + 16.0, rect.center().y),
+                    egui::Vec2::splat(18.0),
+                ),
+                18.0,
+                foreground,
+            );
+            ui.painter().galley(
+                egui::pos2(rect.left() + 30.0, rect.center().y - galley.size().y / 2.0),
+                galley,
+                foreground,
+            );
+        } else {
+            ui.painter().circle_filled(circle.center(), 24.0, fill);
+            theme::paint_icon(
+                ui,
+                icon,
+                circle,
+                if response.is_pointer_button_down_on() {
+                    21.0
+                } else {
+                    23.0
+                },
+                foreground,
+            );
+            ui.painter().galley(
+                egui::pos2(rect.center().x - galley.size().x / 2.0, rect.top() + 56.0),
+                galley,
+                palette.text,
+            );
+        }
+    }
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
 fn display_name(app: &App, ui: &egui::Ui, chat: &str, style: egui::TextStyle) -> String {
     let region = egui::Rect::from_min_size(
         ui.cursor().min,
@@ -289,78 +558,47 @@ fn video(
             }
         }
     }
-    // Share a bounded preview budget so call controls remain visible in a short window.
-    // The window scrolls longer device errors or larger text without losing any controls.
-    let preview_height = (ctx.content_rect().height() * 0.3).min(480.0);
     let width = ui.available_width();
-    let fit = |texture: &egui::TextureHandle, max: egui::Vec2| {
-        let size = texture.size_vec2();
-        size * (max.x / size.x).min(max.y / size.y).min(1.0)
-    };
-    let spacing = ui.spacing().item_spacing.y;
-    let peer_size = textures
-        .peer
-        .as_ref()
-        .map(|texture| fit(texture, egui::vec2(width.min(480.0), preview_height * 0.75)));
-    let local_size = textures
-        .local
-        .as_ref()
-        .map(|texture| fit(texture, egui::vec2(width.min(160.0), preview_height * 0.25)));
-    let waiting = gettext(locale, "Waiting for the other person's video…");
-    let height = peer_size.map_or_else(
-        || {
-            ui.painter()
-                .layout(
-                    waiting.to_string(),
-                    egui::TextStyle::Body.resolve(ui.style()),
-                    app.palette.text,
-                    width,
-                )
-                .size()
-                .y
-        },
-        |size| size.y,
-    ) + local_size.map_or(0.0, |size| {
-        size.y + ui.text_style_height(&egui::TextStyle::Body) + 2.0 * spacing
-    });
+    let height = (width * 9.0 / 16.0).min(ctx.content_rect().height() * 0.3);
     let (region, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
     let hidden = app.settings.screen_privacy.hides(
         crate::settings::ScreenPrivacyWhat::Media,
         ui.rect_contains_pointer(region),
     );
-    let mut preview_ui = ui.new_child(egui::UiBuilder::new().max_rect(region));
-    preview_ui.set_clip_rect(region.intersect(ui.clip_rect()));
-    if hidden && (peer_size.is_some() || local_size.is_some()) {
-        preview_ui
-            .painter()
-            .rect_filled(region, 6.0, app.palette.surface);
-        let text = super::widgets::line(
-            &preview_ui,
-            &gettext(locale, "Content hidden"),
-            crate::theme::regular(13.5),
-            app.palette.secondary,
-            width,
-            2,
-        );
-        text.paint(
-            &preview_ui,
-            region.center() - text.size() / 2.0,
-            app.palette.secondary,
+    ui.painter().rect_filled(region, 8.0, app.palette.surface);
+    let paint_frame = |ui: &egui::Ui, texture: &egui::TextureHandle, bounds: egui::Rect| {
+        let size = texture.size_vec2();
+        let fitted = size * (bounds.width() / size.x).min(bounds.height() / size.y);
+        let image = egui::Rect::from_center_size(bounds.center(), fitted);
+        egui::Image::new(texture)
+            .corner_radius(6.0)
+            .paint_at(ui, image);
+    };
+    if hidden {
+        ui.put(
+            region,
+            egui::Label::new(gettext(locale, "Content hidden")).wrap(),
         );
     } else {
         if let Some(texture) = &textures.peer {
-            preview_ui.add(
-                egui::Image::new(texture)
-                    .max_size(egui::vec2(width.min(480.0), preview_height * 0.75)),
-            );
+            paint_frame(ui, texture, region);
         } else {
-            preview_ui.label(waiting);
+            ui.put(
+                region.shrink(16.0),
+                egui::Label::new(gettext(locale, "Waiting for the other person's video…")).wrap(),
+            );
         }
         if let Some(texture) = &textures.local {
-            preview_ui.label(gettext(locale, "Your camera"));
-            preview_ui.add(
-                egui::Image::new(texture)
-                    .max_size(egui::vec2(width.min(160.0), preview_height * 0.25)),
+            let size = egui::vec2((width * 0.25).min(104.0), (height * 0.4).min(78.0));
+            let bounds = egui::Rect::from_min_size(
+                region.right_bottom() - size - egui::vec2(8.0, 8.0),
+                size,
+            );
+            ui.painter()
+                .rect_filled(bounds.expand(2.0), 8.0, app.palette.panel);
+            paint_frame(ui, texture, bounds);
+            ui.label(
+                egui::RichText::new(gettext(locale, "Your camera")).color(app.palette.secondary),
             );
         }
     }
@@ -370,7 +608,7 @@ fn video(
     ctx.data_mut(|data| data.insert_temp(id, textures));
 }
 
-pub(super) fn devices(app: &mut App, ui: &mut egui::Ui) {
+pub(crate) fn devices(app: &mut App, ui: &mut egui::Ui) {
     let locale = app.locale;
     for kind in [DeviceKind::Microphone, DeviceKind::Speaker] {
         let mut chosen = match kind {

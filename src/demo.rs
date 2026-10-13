@@ -2063,6 +2063,12 @@ pub fn apply_flags(app: &mut App, page: Option<&str>) {
     };
     for part in page.split(',').map(str::trim) {
         match part {
+            "call-localized" => app.locale = crate::i18n::Locale::PortugueseBrazil,
+            "call-long-name" => {
+                if let Some(chat) = app.chats.iter_mut().find(|chat| chat.id == SAMPLES[0].id) {
+                    chat.name = "Synthetic contact with a deliberately long display name".into();
+                }
+            }
             "history-date" => history_date_sample(app),
             "call-preparing"
             | "call-incoming"
@@ -3663,6 +3669,16 @@ pub fn apply_flags(app: &mut App, page: Option<&str>) {
             }
         }
     }
+}
+
+/// Expands device controls only in synthetic native captures.
+pub fn open_call_devices(app: &App, ctx: &egui::Context) {
+    ctx.data_mut(|data| {
+        data.insert_temp(
+            crate::ui::call::devices_open_id(app.account().id.as_str()),
+            true,
+        )
+    });
 }
 
 const PHONE_MENU_SAMPLE: &str = "Call +1 (555) 010-2040 to arrange the pickup.";
@@ -5630,6 +5646,27 @@ mod tests {
 
     #[test]
     fn call_windows_keep_controls_inside_short_viewports_and_scroll_large_text() {
+        fn best_named(
+            shape: &egui::Shape,
+            clip: egui::Rect,
+            name: &str,
+            best: &mut (f32, egui::Rect, egui::Rect),
+        ) {
+            match shape {
+                egui::Shape::Text(text) if text.galley.text() == name => {
+                    let rect = text.galley.rect.translate(text.pos.to_vec2());
+                    if rect.intersect(clip).height() > best.0 {
+                        *best = (rect.intersect(clip).height(), rect, clip);
+                    }
+                }
+                egui::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        best_named(shape, clip, name, best);
+                    }
+                }
+                _ => {}
+            }
+        }
         fn inspect(
             shape: &egui::Shape,
             clip: egui::Rect,
@@ -5666,6 +5703,7 @@ mod tests {
             egui::vec2(400.0, 600.0),
             egui::vec2(1180.0, 780.0),
             egui::vec2(400.0, 300.0),
+            egui::vec2(400.0, 440.0),
         ] {
             for scenario in ["call-video", "call-incoming-video"] {
                 for light in [false, true] {
@@ -5698,6 +5736,9 @@ mod tests {
                         let ctx = egui::Context::default();
                         app.attach(&ctx);
                         let call_account = app.account().id.as_str().to_owned();
+                        ctx.data_mut(|data| {
+                            data.insert_temp(crate::ui::call::devices_open_id(&call_account), true)
+                        });
                         let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
                         let mut draw = |events| {
                             let mut output = ctx.run_ui(
@@ -5738,39 +5779,34 @@ mod tests {
                             "{scenario}, {size:?}, light={light}, scale={scale}: call panel {panel:?} exceeds the viewport"
                         );
                         if scale == 1.0 && size.y >= 600.0 {
-                            for label in &expected {
+                            for label in expected
+                                .iter()
+                                .filter(|label| !matches!(**label, "Microphone" | "Speaker"))
+                            {
                                 assert!(
                                     labels.contains_key(*label),
                                     "{size:?}, light={light}: {label} must be visible without scrolling"
                                 );
                             }
-                            assert!(
-                                labels.get("System default").copied().unwrap_or(0) >= 2,
-                                "{scenario}, {size:?}, light={light}: both audio selectors must be visible without scrolling"
-                            );
-                            for kind in [
-                                crate::calls::DeviceKind::Microphone,
-                                crate::calls::DeviceKind::Speaker,
-                            ] {
-                                let (selector, clip) = ctx
-                                    .data(|data| {
-                                        data.get_temp::<(egui::Rect, egui::Rect)>(
-                                            crate::ui::call::device_bounds_id(&call_account, kind),
+                        }
+                        let mut visible_selectors = std::collections::BTreeSet::new();
+                        let mut camera_best = (0.0_f32, egui::Rect::NOTHING, egui::Rect::NOTHING);
+                        let mut microphone_best = camera_best;
+                        for _ in 0..100 {
+                            for clipped in draw(vec![
+                                egui::Event::PointerMoved(
+                                    ctx.data(|data| {
+                                        data.get_temp::<egui::Rect>(
+                                            crate::ui::call::devices_open_id(&call_account)
+                                                .with("scroll"),
                                         )
                                     })
-                                    .expect("the actual selector response is registered");
-                                assert!(
-                                    clip.contains_rect(selector) && screen.contains_rect(selector),
-                                    "{scenario}, {size:?}, light={light}: {kind:?} selector {selector:?} is clipped by {clip:?}"
-                                );
-                            }
-                        }
-                        for _ in 0..20 {
-                            for clipped in draw(vec![
-                                egui::Event::PointerMoved(panel.center()),
+                                    .unwrap()
+                                    .center(),
+                                ),
                                 egui::Event::MouseWheel {
                                     unit: egui::MouseWheelUnit::Point,
-                                    delta: egui::vec2(0.0, -40.0),
+                                    delta: egui::vec2(0.0, -10.0),
                                     modifiers: egui::Modifiers::NONE,
                                     phase: egui::TouchPhase::Move,
                                 },
@@ -5782,29 +5818,63 @@ mod tests {
                                     &mut Vec::new(),
                                     &mut title,
                                 );
+                                best_named(
+                                    &clipped.shape,
+                                    clipped.clip_rect,
+                                    "Microphone",
+                                    &mut microphone_best,
+                                );
+                            }
+                            for (name, id) in [
+                                ("Camera", crate::ui::call::camera_bounds_id(&call_account)),
+                                (
+                                    "Microphone",
+                                    crate::ui::call::device_bounds_id(
+                                        &call_account,
+                                        crate::calls::DeviceKind::Microphone,
+                                    ),
+                                ),
+                                (
+                                    "Speaker",
+                                    crate::ui::call::device_bounds_id(
+                                        &call_account,
+                                        crate::calls::DeviceKind::Speaker,
+                                    ),
+                                ),
+                            ] {
+                                if let Some((selector, clip)) =
+                                    ctx.data(|data| data.get_temp::<(egui::Rect, egui::Rect)>(id))
+                                {
+                                    if name == "Camera"
+                                        && selector.intersect(clip).height() > camera_best.0
+                                    {
+                                        camera_best =
+                                            (selector.intersect(clip).height(), selector, clip);
+                                    }
+                                    if clip.contains_rect(selector)
+                                        && screen.contains_rect(selector)
+                                    {
+                                        visible_selectors.insert(name);
+                                    }
+                                }
                             }
                         }
                         for label in &expected {
                             assert!(
                                 labels.contains_key(*label),
-                                "{size:?}, light={light}, scale={scale}: {label} must remain reachable"
+                                "{scenario}, {size:?}, light={light}, scale={scale}: {label} must remain reachable; mic={microphone_best:?}, camera={camera_best:?}"
                             );
                         }
                         assert!(
                             labels.contains_key("Camera"),
                             "camera control remains reachable"
                         );
-                        let (selector, clip) = ctx
-                            .data(|data| {
-                                data.get_temp::<(egui::Rect, egui::Rect)>(
-                                    crate::ui::call::camera_bounds_id(&call_account),
-                                )
-                            })
-                            .expect("the actual camera selector response is registered");
-                        assert!(
-                            clip.contains_rect(selector) && screen.contains_rect(selector),
-                            "{scenario}, {size:?}, light={light}, scale={scale}: camera selector {selector:?} is clipped by {clip:?}"
-                        );
+                        for name in ["Camera", "Microphone", "Speaker"] {
+                            assert!(
+                                visible_selectors.contains(name),
+                                "{scenario}, {size:?}, light={light}, scale={scale}: {name} selector must become fully visible while scrolling; camera best={camera_best:?}"
+                            );
+                        }
                         assert!(
                             app.actions.is_empty(),
                             "drawing and scrolling queue no call actions"
