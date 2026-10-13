@@ -165,8 +165,9 @@ jobs:
   nix:
     name: Nix package (${{ matrix.system }})
     runs-on: ${{ matrix.os }}
-    # Uncached, aarch64-darwin takes about 53 minutes, Linux about 22.
-    timeout-minutes: 90
+    # The macOS cold build exceeded the former 90-minute job limit.
+    # Keep a finite limit and show builder output so slow steps are diagnosable.
+    timeout-minutes: ${{ matrix.system == 'aarch64-darwin' && 120 || 90 }}
     strategy:
       fail-fast: false
       matrix:
@@ -191,4 +192,4 @@ jobs:
       - name: Check flake outputs
         run: nix flake check --no-build
       - name: Build package
-        run: nix build .#default
+        run: nix build --print-build-logs .#default

@@ -295,3 +295,23 @@ rustdoc pass with warnings denied. The final default checks extend the matching
 all-feature/rustdoc receipts after the short-window threshold correction.
 Application inputs remain unchanged. Build, installation, matching CI and native
 acceptance are the remaining delivery steps for this call-screen redesign.
+
+The default Windows release build for `20c6d89f` passed in 8m22s and is installed.
+Fresh backup `C:/Users/Victor/AppData/Local/ZapFasterRollback/20261013-153516`
+contains 5,877 verified profile files (5,919,429,525 bytes); executable rollback
+was rehearsed before replacement. Installed SHA-256 is
+`5B32B6735B0F82F89BD72C3CB8613EAD03EECAAB0E1880E4FF47C1077E58DD04`.
+The UI redesign added 7,680 bytes to the previous audio build. Version remains
+0.30.0; no release was tagged or published. The user has been asked to reopen
+the usual shortcut and report actual new-control/video observations.
+
+CI `38435118695` for the audio follow-up has eight successful jobs and a
+cancelled macOS Nix package job. Its targeted retry resolved the winit fetch
+failure, then hit the existing 90-minute job timeout. The application derivation
+started at 17:52:32Z; cancellation occurred at 19:15:11Z, without builder output
+between them. This proves a timeout, not its underlying compilation cause.
+The final delivery changes only macOS Nix's budget to 120 minutes, retaining
+90 minutes on Linux, and enables live builder logs on all three package jobs.
+No check or build target is removed or weakened. This CI-only change follows
+the frozen application checks; application/asset/dependency inputs and the
+installed binary remain unchanged. Matching final CI is still required.
