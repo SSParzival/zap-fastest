@@ -1109,7 +1109,12 @@ pub fn pill_button(ui: &mut egui::Ui, palette: &Palette, label: &str, primary: b
     } else {
         palette.text
     };
-    let galley = ui.painter().layout_no_wrap(label.to_string(), font, color);
+    let galley = ui.painter().layout(
+        label.to_string(),
+        font,
+        color,
+        (ui.max_rect().width() - 36.0).max(1.0),
+    );
     let padding = Vec2::new(18.0, 8.0);
     let size = galley.size() + padding * 2.0;
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
@@ -1169,9 +1174,14 @@ pub fn soft_button(
 ) -> Response {
     let font = medium(13.0);
     let color = if active { palette.accent } else { palette.text };
-    let galley = ui.painter().layout_no_wrap(label.to_string(), font, color);
     let icon_size = 15.0;
     let icon_width = if icon.is_some() { icon_size + 6.0 } else { 0.0 };
+    let galley = ui.painter().layout(
+        label.to_string(),
+        font,
+        color,
+        (ui.max_rect().width() - 24.0 - icon_width).max(1.0),
+    );
     let padding = Vec2::new(12.0, 7.0);
     let size = Vec2::new(galley.size().x + icon_width, galley.size().y) + padding * 2.0;
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());

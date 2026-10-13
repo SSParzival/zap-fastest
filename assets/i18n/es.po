@@ -3163,17 +3163,8 @@ msgstr ""
 "{pending} registros pendientes importados se conservan por separado."
 
 #: src/ui/archive_backup.rs:107
-msgid ""
-"Existing messages, session credentials and current pending work are "
-"preserved. Imported pending sends never run. Different edited snapshots "
-"without a revision timestamp keep the current version and retain the "
-"imported alternative in the encrypted archive."
-msgstr ""
-"Se conservan los mensajes existentes, las credenciales de sesión y el "
-"trabajo pendiente actual. Los envíos pendientes importados nunca se "
-"ejecutan. Las versiones editadas distintas sin marca de tiempo de revisión "
-"conservan la versión actual y guardan la alternativa importada en el archivo "
-"cifrado."
+msgid "Session credentials and current pending work are preserved. Confirmed backup deletions listed above are applied. Imported pending sends never run. Different edited snapshots without a revision timestamp keep the current version and retain the imported alternative in the encrypted archive."
+msgstr "Se conservan las credenciales de sesión y las tareas pendientes actuales. Se aplican las eliminaciones confirmadas de la copia indicadas arriba. Los envíos pendientes importados nunca se ejecutan. Las versiones editadas distintas sin marca de tiempo de revisión conservan la versión actual y guardan la alternativa importada en el archivo cifrado."
 
 #: src/ui/archive_backup.rs:110
 msgid ""
@@ -3433,3 +3424,21 @@ msgstr "Descargar estado"
 
 #~ msgid "Pin removed"
 #~ msgstr "Mensaje sin fijar"
+
+msgid "Loading media…"
+msgstr "Cargando archivos multimedia…"
+
+msgid "Searching…"
+msgstr "Buscando…"
+
+msgid "Checking password…"
+msgstr "Verificando contraseña…"
+
+msgid "Passphrases do not match."
+msgstr "Las contraseñas no coinciden."
+
+msgid "Play / pause"
+msgstr "Reproducir / pausar"
+
+msgid "Preparing call…"
+msgstr "Preparando llamada…"

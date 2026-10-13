@@ -3149,16 +3149,8 @@ msgstr ""
 "diimpor disimpan secara terpisah."
 
 #: src/ui/archive_backup.rs:107
-msgid ""
-"Existing messages, session credentials and current pending work are "
-"preserved. Imported pending sends never run. Different edited snapshots "
-"without a revision timestamp keep the current version and retain the "
-"imported alternative in the encrypted archive."
-msgstr ""
-"Pesan yang ada, kredensial sesi, dan pekerjaan tertunda saat ini "
-"dipertahankan. Pengiriman tertunda yang diimpor tidak pernah dijalankan. "
-"Versi suntingan berbeda tanpa stempel waktu revisi mempertahankan versi saat "
-"ini dan menyimpan alternatif yang diimpor di arsip terenkripsi."
+msgid "Session credentials and current pending work are preserved. Confirmed backup deletions listed above are applied. Imported pending sends never run. Different edited snapshots without a revision timestamp keep the current version and retain the imported alternative in the encrypted archive."
+msgstr "Kredensial sesi dan pekerjaan tertunda saat ini tetap dipertahankan. Penghapusan yang dikonfirmasi dari cadangan dan tercantum di atas akan diterapkan. Pengiriman tertunda yang diimpor tidak pernah dijalankan. Versi suntingan berbeda tanpa stempel waktu revisi mempertahankan versi saat ini dan menyimpan alternatif yang diimpor di arsip terenkripsi."
 
 #: src/ui/archive_backup.rs:110
 msgid ""
@@ -3415,3 +3407,21 @@ msgstr "Unduh status"
 
 #~ msgid "Pin removed"
 #~ msgstr "Sematan dilepas"
+
+msgid "Loading media…"
+msgstr "Memuat media…"
+
+msgid "Searching…"
+msgstr "Mencari…"
+
+msgid "Checking password…"
+msgstr "Memeriksa kata sandi…"
+
+msgid "Passphrases do not match."
+msgstr "Kata sandi tidak cocok."
+
+msgid "Play / pause"
+msgstr "Putar / jeda"
+
+msgid "Preparing call…"
+msgstr "Menyiapkan panggilan…"

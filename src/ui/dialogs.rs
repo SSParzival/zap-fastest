@@ -27,7 +27,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
         .frame(frame)
         .backdrop_color(palette.shadow)
         .show(ctx, |ui| {
-            ui.set_width(match dialog {
+            let desired_width = match dialog {
                 Dialog::Shortcuts => shortcuts_width(ui.ctx().content_rect().width()),
                 Dialog::About => 380.0,
                 Dialog::Statuses => {
@@ -69,9 +69,11 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                     420.0_f32.min((ui.ctx().content_rect().width() - 64.0).max(180.0))
                 }
                 Dialog::Labels => 460.0,
-            });
+            };
+            // Reserve the frame and a scrolling gutter before the content's width.
+            ui.set_width(desired_width.min((ctx.content_rect().width() - 72.0).max(1.0)));
             ui.spacing_mut().item_spacing.y = 8.0;
-            match dialog {
+            let draw = |ui: &mut egui::Ui| match dialog {
                 Dialog::CreatePoll(chat) => super::polls::create(app, ui, &chat),
                 Dialog::SendLocation(chat) => super::locations::send(app, ui, &chat),
                 Dialog::PollResults { chat, message } => {
@@ -127,7 +129,13 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 Dialog::MessageInfo { chat, message } => {
                     super::message_info::show(app, ui, &chat, &message)
                 }
-            }
+            };
+            egui::ScrollArea::vertical()
+                .id_salt("dialog-viewport")
+                .max_height((ctx.content_rect().height() - 64.0).max(1.0))
+                .min_scrolled_height((ctx.content_rect().height() - 64.0).max(1.0))
+                .auto_shrink([false, true])
+                .show(ui, draw);
         });
     if response.should_close() {
         if response.backdrop_response.clicked() {
@@ -518,7 +526,7 @@ fn unlock_locked_chats(app: &mut App, ui: &mut egui::Ui) {
     }
     let ready = !app.chat_lock_entry.trim().is_empty()
         && (!setup || app.chat_lock_entry.trim() == app.chat_lock_confirm.trim());
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         submit |= ui
             .add_enabled_ui(ready, |ui| {
                 theme::pill_button(
@@ -557,7 +565,7 @@ fn confirm_lock_chat(app: &mut App, ui: &mut egui::Ui, id: &str) {
         theme::regular(13.0),
         palette.secondary,
     );
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         if theme::pill_button(ui, &palette, "Lock chat", true).clicked() {
             app.actions.push(Action::SetLocked(id.to_owned(), true));
             app.actions.push(Action::CloseDialog);
@@ -950,13 +958,15 @@ fn forwardable(chat: &crate::model::Chat) -> bool {
 fn title(ui: &mut egui::Ui, app: &mut App, label: &str) {
     let palette = app.palette;
     ui.horizontal(|ui| {
-        theme::text(ui, label, theme::bold(18.0), palette.text);
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             if theme::icon_button(ui, Icon::X, 16.0, palette.secondary, palette.text, "Close")
                 .clicked()
             {
                 app.actions.push(Action::CloseDialog);
             }
+            ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                theme::paragraph(ui, label, theme::bold(18.0), palette.text);
+            });
         });
     });
     ui.add_space(4.0);
@@ -1142,16 +1152,19 @@ fn confirm_delete_chat(app: &mut App, ui: &mut egui::Ui, id: &str) {
         palette.text,
     );
     ui.add_space(10.0);
-    ui.horizontal(|ui| {
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if danger_button(ui, app, "Delete") {
-                app.actions.push(Action::DeleteChat(id.to_owned()));
-                app.actions.push(Action::CloseDialog);
-            }
-            if theme::pill_button(ui, &palette, "Cancel", false).clicked() {
-                app.actions.push(Action::CloseDialog);
-            }
-        });
+    ui.horizontal_wrapped(|ui| {
+        ui.with_layout(
+            Layout::right_to_left(Align::Center).with_main_wrap(true),
+            |ui| {
+                if danger_button(ui, app, "Delete") {
+                    app.actions.push(Action::DeleteChat(id.to_owned()));
+                    app.actions.push(Action::CloseDialog);
+                }
+                if theme::pill_button(ui, &palette, "Cancel", false).clicked() {
+                    app.actions.push(Action::CloseDialog);
+                }
+            },
+        );
     });
 }
 
@@ -1170,16 +1183,19 @@ fn confirm_clear_chat(app: &mut App, ui: &mut egui::Ui, id: &str) {
         palette.text,
     );
     ui.add_space(10.0);
-    ui.horizontal(|ui| {
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if danger_button(ui, app, "Clear chat") {
-                app.actions.push(Action::ClearChat(id.to_owned()));
-                app.actions.push(Action::CloseDialog);
-            }
-            if theme::pill_button(ui, &palette, "Cancel", false).clicked() {
-                app.actions.push(Action::CloseDialog);
-            }
-        });
+    ui.horizontal_wrapped(|ui| {
+        ui.with_layout(
+            Layout::right_to_left(Align::Center).with_main_wrap(true),
+            |ui| {
+                if danger_button(ui, app, "Clear chat") {
+                    app.actions.push(Action::ClearChat(id.to_owned()));
+                    app.actions.push(Action::CloseDialog);
+                }
+                if theme::pill_button(ui, &palette, "Cancel", false).clicked() {
+                    app.actions.push(Action::CloseDialog);
+                }
+            },
+        );
     });
 }
 
@@ -1478,15 +1494,18 @@ fn confirm_start_over(app: &mut App, ui: &mut egui::Ui) {
         palette.secondary,
     );
     ui.add_space(10.0);
-    ui.horizontal(|ui| {
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if danger_button(ui, app, "Start over") {
-                app.actions.push(Action::StartOverArchive);
-            }
-            if theme::pill_button(ui, &palette, "Cancel", false).clicked() {
-                app.actions.push(Action::CloseDialog);
-            }
-        });
+    ui.horizontal_wrapped(|ui| {
+        ui.with_layout(
+            Layout::right_to_left(Align::Center).with_main_wrap(true),
+            |ui| {
+                if danger_button(ui, app, "Start over") {
+                    app.actions.push(Action::StartOverArchive);
+                }
+                if theme::pill_button(ui, &palette, "Cancel", false).clicked() {
+                    app.actions.push(Action::CloseDialog);
+                }
+            },
+        );
     });
 }
 
@@ -1540,32 +1559,35 @@ fn confirm_delete_messages(
     theme::paragraph(ui, &body, theme::regular(13.5), palette.text);
 
     ui.add_space(10.0);
-    ui.horizontal(|ui| {
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if danger_button(ui, app, crate::i18n::gettext(app.locale, "Delete").as_ref()) {
-                for id in ids {
-                    let (chat, id) = (chat.to_owned(), id.clone());
-                    let action = if for_everyone {
-                        Action::DeleteForEveryone { chat, id }
-                    } else {
-                        Action::DeleteForMe { chat, id }
-                    };
-                    app.actions.push(action);
+    ui.horizontal_wrapped(|ui| {
+        ui.with_layout(
+            Layout::right_to_left(Align::Center).with_main_wrap(true),
+            |ui| {
+                if danger_button(ui, app, crate::i18n::gettext(app.locale, "Delete").as_ref()) {
+                    for id in ids {
+                        let (chat, id) = (chat.to_owned(), id.clone());
+                        let action = if for_everyone {
+                            Action::DeleteForEveryone { chat, id }
+                        } else {
+                            Action::DeleteForMe { chat, id }
+                        };
+                        app.actions.push(action);
+                    }
+                    app.actions.push(Action::CancelSelection);
+                    app.actions.push(Action::CloseDialog);
                 }
-                app.actions.push(Action::CancelSelection);
-                app.actions.push(Action::CloseDialog);
-            }
-            if theme::pill_button(
-                ui,
-                &palette,
-                crate::i18n::gettext(app.locale, "Cancel").as_ref(),
-                false,
-            )
-            .clicked()
-            {
-                app.actions.push(Action::CloseDialog);
-            }
-        });
+                if theme::pill_button(
+                    ui,
+                    &palette,
+                    crate::i18n::gettext(app.locale, "Cancel").as_ref(),
+                    false,
+                )
+                .clicked()
+                {
+                    app.actions.push(Action::CloseDialog);
+                }
+            },
+        );
     });
 }
 
@@ -1588,16 +1610,19 @@ fn confirm_remove_sticker_pack(
         palette.text,
     );
     ui.add_space(10.0);
-    ui.horizontal(|ui| {
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if danger_button(ui, app, "Remove") {
-                app.actions.push(Action::DeleteStickerPack(dir));
-                app.actions.push(Action::CloseDialog);
-            }
-            if theme::pill_button(ui, &palette, "Cancel", false).clicked() {
-                app.actions.push(Action::CloseDialog);
-            }
-        });
+    ui.horizontal_wrapped(|ui| {
+        ui.with_layout(
+            Layout::right_to_left(Align::Center).with_main_wrap(true),
+            |ui| {
+                if danger_button(ui, app, "Remove") {
+                    app.actions.push(Action::DeleteStickerPack(dir));
+                    app.actions.push(Action::CloseDialog);
+                }
+                if theme::pill_button(ui, &palette, "Cancel", false).clicked() {
+                    app.actions.push(Action::CloseDialog);
+                }
+            },
+        );
     });
 }
 
@@ -1611,15 +1636,18 @@ fn confirm_unlink(app: &mut App, ui: &mut egui::Ui) {
         palette.text,
     );
     ui.add_space(10.0);
-    ui.horizontal(|ui| {
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if danger_button(ui, app, "Unlink") {
-                app.actions.push(Action::Unlink);
-            }
-            if theme::pill_button(ui, &palette, "Cancel", false).clicked() {
-                app.actions.push(Action::CloseDialog);
-            }
-        });
+    ui.horizontal_wrapped(|ui| {
+        ui.with_layout(
+            Layout::right_to_left(Align::Center).with_main_wrap(true),
+            |ui| {
+                if danger_button(ui, app, "Unlink") {
+                    app.actions.push(Action::Unlink);
+                }
+                if theme::pill_button(ui, &palette, "Cancel", false).clicked() {
+                    app.actions.push(Action::CloseDialog);
+                }
+            },
+        );
     });
 }
 
@@ -1641,7 +1669,7 @@ fn resume_restored_account(app: &mut App, ui: &mut egui::Ui, id: crate::model::A
         palette.text,
     );
     ui.add_space(10.0);
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         if theme::pill_button(
             ui,
             &palette,
@@ -1685,18 +1713,21 @@ fn confirm_remove(app: &mut App, ui: &mut egui::Ui, id: crate::model::AccountId)
         palette.text,
     );
     ui.add_space(10.0);
-    ui.horizontal(|ui| {
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if danger_button(ui, app, &crate::i18n::gettext(locale, "Remove")) {
-                app.actions.push(Action::RemoveAccount(id));
-                app.actions.push(Action::CloseDialog);
-            }
-            if theme::pill_button(ui, &palette, &crate::i18n::gettext(locale, "Cancel"), false)
-                .clicked()
-            {
-                app.actions.push(Action::CloseDialog);
-            }
-        });
+    ui.horizontal_wrapped(|ui| {
+        ui.with_layout(
+            Layout::right_to_left(Align::Center).with_main_wrap(true),
+            |ui| {
+                if danger_button(ui, app, &crate::i18n::gettext(locale, "Remove")) {
+                    app.actions.push(Action::RemoveAccount(id));
+                    app.actions.push(Action::CloseDialog);
+                }
+                if theme::pill_button(ui, &palette, &crate::i18n::gettext(locale, "Cancel"), false)
+                    .clicked()
+                {
+                    app.actions.push(Action::CloseDialog);
+                }
+            },
+        );
     });
 }
 
@@ -1748,19 +1779,22 @@ fn confirm_leave_group(app: &mut App, ui: &mut egui::Ui, id: &str) {
         }
     }
     ui.add_space(8.0);
-    ui.horizontal(|ui| {
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if theme::pill_button(
-                ui,
-                &palette,
-                crate::i18n::gettext(locale, "Cancel").as_ref(),
-                false,
-            )
-            .clicked()
-            {
-                app.actions.push(Action::CloseDialog);
-            }
-        });
+    ui.horizontal_wrapped(|ui| {
+        ui.with_layout(
+            Layout::right_to_left(Align::Center).with_main_wrap(true),
+            |ui| {
+                if theme::pill_button(
+                    ui,
+                    &palette,
+                    crate::i18n::gettext(locale, "Cancel").as_ref(),
+                    false,
+                )
+                .clicked()
+                {
+                    app.actions.push(Action::CloseDialog);
+                }
+            },
+        );
     });
 }
 
@@ -1814,24 +1848,27 @@ fn pair_with_phone(app: &mut App, ui: &mut egui::Ui) {
     theme::focus_outline(ui, id, field.response.rect, f32::from(theme::RADIUS));
     ui.add_space(8.0);
     ui.horizontal(|ui| {
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            let ready = app.pair_phone.chars().filter(char::is_ascii_digit).count() >= 7;
-            // Stay the main action, but look and read as unavailable until
-            // the number is long enough.
-            let get_code = ui
-                .add_enabled_ui(ready, |ui| {
-                    theme::pill_button(ui, &palette, "Get a code", true)
-                        .on_disabled_hover_text(NUMBER_TOO_SHORT)
-                })
-                .inner;
-            if (get_code.clicked() || submit) && ready {
-                app.actions
-                    .push(Action::PairWithPhone(app.pair_phone.clone()));
-            }
-            if theme::pill_button(ui, &palette, "Cancel", false).clicked() {
-                app.actions.push(Action::CloseDialog);
-            }
-        });
+        ui.with_layout(
+            Layout::right_to_left(Align::Center).with_main_wrap(true),
+            |ui| {
+                let ready = app.pair_phone.chars().filter(char::is_ascii_digit).count() >= 7;
+                // Stay the main action, but look and read as unavailable until
+                // the number is long enough.
+                let get_code = ui
+                    .add_enabled_ui(ready, |ui| {
+                        theme::pill_button(ui, &palette, "Get a code", true)
+                            .on_disabled_hover_text(NUMBER_TOO_SHORT)
+                    })
+                    .inner;
+                if (get_code.clicked() || submit) && ready {
+                    app.actions
+                        .push(Action::PairWithPhone(app.pair_phone.clone()));
+                }
+                if theme::pill_button(ui, &palette, "Cancel", false).clicked() {
+                    app.actions.push(Action::CloseDialog);
+                }
+            },
+        );
     });
 }
 
@@ -1903,9 +1940,19 @@ fn new_contact(app: &mut App, ui: &mut egui::Ui) {
         response
     });
     ui.add_space(4.0);
+    let stacked_names = ui.available_width() < 360.0;
+    let names_layout = if stacked_names {
+        Layout::top_down(Align::Min)
+    } else {
+        Layout::left_to_right(Align::Center)
+    };
     let (first_field, last_field) = ui
-        .horizontal(|ui| {
-            let half = (ui.available_width() - ui.spacing().item_spacing.x) / 2.0 - 24.0;
+        .with_layout(names_layout, |ui| {
+            let half = if stacked_names {
+                ui.available_width() - 24.0
+            } else {
+                (ui.available_width() - ui.spacing().item_spacing.x) / 2.0 - 24.0
+            };
             let format = egui::TextFormat::simple(theme::regular(16.0), palette.text);
             let mut layouter = |ui: &egui::Ui, text: &dyn egui::TextBuffer, wrap: f32| {
                 crate::bidi::layout_field(ui, text.as_str(), &format, wrap)
@@ -1978,43 +2025,46 @@ fn new_contact(app: &mut App, ui: &mut egui::Ui) {
                 palette.secondary,
             );
         }
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            let (save, message) = ui
-                .add_enabled_ui(ready, |ui| {
-                    let hint = if app.new_contact_pending {
-                        "Checking the number…"
-                    } else {
-                        NUMBER_TOO_SHORT
-                    };
-                    let save = theme::pill_button(ui, &palette, "Save contact", named)
-                        .on_disabled_hover_text(hint)
-                        .clicked();
-                    let message = theme::pill_button(ui, &palette, "Message", !named)
-                        .on_disabled_hover_text(hint)
-                        .clicked();
-                    (save, message)
-                })
-                .inner;
-            if theme::pill_button(ui, &palette, "Cancel", false).clicked() {
-                app.actions.push(Action::CloseDialog);
-            }
-            // Enter saves a named contact or opens an unnamed chat.
-            if ready && (save || (submitted && named)) {
-                app.actions.push(Action::NewContact {
-                    phone: digits.clone(),
-                    first: app.new_contact_name.trim().to_owned(),
-                    last: app.new_contact_last.trim().to_owned(),
-                    to_phone,
-                });
-            } else if ready && (message || submitted) {
-                app.actions.push(Action::NewContact {
-                    phone: digits.clone(),
-                    first: String::new(),
-                    last: String::new(),
-                    to_phone: None,
-                });
-            }
-        });
+        ui.with_layout(
+            Layout::right_to_left(Align::Center).with_main_wrap(true),
+            |ui| {
+                let (save, message) = ui
+                    .add_enabled_ui(ready, |ui| {
+                        let hint = if app.new_contact_pending {
+                            "Checking the number…"
+                        } else {
+                            NUMBER_TOO_SHORT
+                        };
+                        let save = theme::pill_button(ui, &palette, "Save contact", named)
+                            .on_disabled_hover_text(hint)
+                            .clicked();
+                        let message = theme::pill_button(ui, &palette, "Message", !named)
+                            .on_disabled_hover_text(hint)
+                            .clicked();
+                        (save, message)
+                    })
+                    .inner;
+                if theme::pill_button(ui, &palette, "Cancel", false).clicked() {
+                    app.actions.push(Action::CloseDialog);
+                }
+                // Enter saves a named contact or opens an unnamed chat.
+                if ready && (save || (submitted && named)) {
+                    app.actions.push(Action::NewContact {
+                        phone: digits.clone(),
+                        first: app.new_contact_name.trim().to_owned(),
+                        last: app.new_contact_last.trim().to_owned(),
+                        to_phone,
+                    });
+                } else if ready && (message || submitted) {
+                    app.actions.push(Action::NewContact {
+                        phone: digits.clone(),
+                        first: String::new(),
+                        last: String::new(),
+                        to_phone: None,
+                    });
+                }
+            },
+        );
     });
 }
 
@@ -2923,10 +2973,11 @@ pub fn group_name_field_id() -> egui::Id {
 /// A filled button for a destructive action.
 pub(super) fn danger_button(ui: &mut egui::Ui, app: &mut App, label: &str) -> bool {
     let palette = app.palette;
-    let galley = ui.painter().layout_no_wrap(
+    let galley = ui.painter().layout(
         label.to_owned(),
         theme::semibold(13.0),
         egui::Color32::WHITE,
+        (ui.max_rect().width() - 36.0).max(1.0),
     );
     let size = galley.size() + egui::vec2(36.0, 16.0);
     let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());

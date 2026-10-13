@@ -24,7 +24,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui, chat: &str) {
     if !app.gallery_accessible(chat) {
         return;
     }
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         if ui
             .button(crate::i18n::gettext(app.locale, "Back"))
             .clicked()
@@ -33,7 +33,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui, chat: &str) {
         }
         ui.heading(crate::i18n::gettext(app.locale, "Media, links and docs"));
     });
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         for (tab, label) in [
             (MediaTab::Media, crate::i18n::gettext(app.locale, "Media")),
             (
@@ -68,7 +68,11 @@ pub fn show(app: &mut App, ui: &mut egui::Ui, chat: &str) {
                 "Could not load this chat's media.",
             ));
         } else {
-            theme::spinner(ui, 22.0, app.palette.secondary);
+            super::login::busy(
+                ui,
+                app.palette.secondary,
+                &crate::i18n::gettext(app.locale, "Loading media…"),
+            );
         }
         return;
     };
@@ -97,82 +101,108 @@ pub fn show(app: &mut App, ui: &mut egui::Ui, chat: &str) {
             MediaTab::Docs => {
                 egui::ScrollArea::vertical()
                     .id_salt(("gallery-docs", chat))
-                    .show_rows(ui, 92.0, listing.docs.len(), |ui, range| {
-                        for row in &listing.docs[range] {
-                            let Content::Document {
-                                file_name, media, ..
-                            } = &row.content
-                            else {
-                                continue;
-                            };
-                            ui.push_id(&row.id, |ui| {
-                                let hidden = app.settings.screen_privacy.hides(
-                                    crate::settings::ScreenPrivacyWhat::Message,
-                                    ui.rect_contains_pointer(Rect::from_min_size(
-                                        ui.cursor().min,
-                                        vec2(ui.available_width(), 64.0),
-                                    )),
-                                );
-                                let label = if hidden {
-                                    crate::i18n::gettext(app.locale, "Document").into_owned()
-                                } else {
-                                    format!("{}  {}", file_name, crate::util::bytes(media.size))
+                    .show_rows(
+                        ui,
+                        108.0 * (theme::regular(14.0).size / 14.0),
+                        listing.docs.len(),
+                        |ui, range| {
+                            for row in &listing.docs[range] {
+                                let Content::Document {
+                                    file_name, media, ..
+                                } = &row.content
+                                else {
+                                    continue;
                                 };
-                                if ui.button(label).clicked() {
-                                    app.actions.push(Action::CloseDialog);
-                                    app.actions.push(Action::OpenMessage {
-                                        chat: row.chat.clone(),
-                                        message: row.id.clone(),
-                                    });
-                                }
-                                if let crate::model::MediaState::Transferring { bytes, total } =
-                                    media.state
-                                {
-                                    let fraction = total
-                                        .filter(|total| *total > 0)
-                                        .map_or(0.0, |total| bytes as f32 / total as f32);
-                                    ui.add(
-                                        egui::ProgressBar::new(fraction.min(1.0))
-                                            .text(crate::util::bytes(bytes)),
+                                ui.push_id(&row.id, |ui| {
+                                    let hidden = app.settings.screen_privacy.hides(
+                                        crate::settings::ScreenPrivacyWhat::Message,
+                                        ui.rect_contains_pointer(Rect::from_min_size(
+                                            ui.cursor().min,
+                                            vec2(ui.available_width(), 64.0),
+                                        )),
                                     );
+                                    let label = if hidden {
+                                        crate::i18n::gettext(app.locale, "Document").into_owned()
+                                    } else {
+                                        format!("{}  {}", file_name, crate::util::bytes(media.size))
+                                    };
                                     if ui
-                                        .small_button(crate::i18n::gettext(app.locale, "Cancel"))
+                                        .add(egui::Button::new(&label).truncate())
+                                        .on_hover_text(&label)
                                         .clicked()
                                     {
-                                        app.actions.push(Action::CancelDownload {
+                                        app.actions.push(Action::CloseDialog);
+                                        app.actions.push(Action::OpenMessage {
                                             chat: row.chat.clone(),
                                             message: row.id.clone(),
-                                            card: None,
                                         });
                                     }
-                                } else if matches!(
-                                    media.state,
-                                    crate::model::MediaState::Downloading
-                                ) {
-                                    theme::spinner(ui, 16.0, app.palette.accent);
-                                } else if let Some(path) = &media.path {
-                                    if ui
-                                        .small_button(crate::i18n::gettext(app.locale, "Save as…"))
+                                    if let crate::model::MediaState::Transferring { bytes, total } =
+                                        media.state
+                                    {
+                                        let fraction = total
+                                            .filter(|total| *total > 0)
+                                            .map_or(0.0, |total| bytes as f32 / total as f32);
+                                        ui.add(
+                                            egui::ProgressBar::new(fraction.min(1.0))
+                                                .text(crate::util::bytes(bytes)),
+                                        );
+                                        if ui
+                                            .small_button(crate::i18n::gettext(
+                                                app.locale, "Cancel",
+                                            ))
+                                            .clicked()
+                                        {
+                                            app.actions.push(Action::CancelDownload {
+                                                chat: row.chat.clone(),
+                                                message: row.id.clone(),
+                                                card: None,
+                                            });
+                                        }
+                                    } else if matches!(
+                                        media.state,
+                                        crate::model::MediaState::Downloading
+                                    ) {
+                                        theme::spinner(ui, 16.0, app.palette.accent);
+                                        if ui
+                                            .small_button(crate::i18n::gettext(
+                                                app.locale, "Cancel",
+                                            ))
+                                            .clicked()
+                                        {
+                                            app.actions.push(Action::CancelDownload {
+                                                chat: row.chat.clone(),
+                                                message: row.id.clone(),
+                                                card: None,
+                                            });
+                                        }
+                                    } else if let Some(path) = &media.path {
+                                        if ui
+                                            .small_button(crate::i18n::gettext(
+                                                app.locale,
+                                                "Save as…",
+                                            ))
+                                            .clicked()
+                                        {
+                                            app.actions.push(Action::SaveAttachmentAs {
+                                                path: path.clone(),
+                                                name: file_name.clone(),
+                                            });
+                                        }
+                                    } else if ui
+                                        .small_button(crate::i18n::gettext(app.locale, "Download"))
                                         .clicked()
                                     {
-                                        app.actions.push(Action::SaveAttachmentAs {
-                                            path: path.clone(),
-                                            name: file_name.clone(),
+                                        app.actions.push(Action::Download {
+                                            card: None,
+                                            chat: row.chat.clone(),
+                                            message: row.id.clone(),
                                         });
                                     }
-                                } else if ui
-                                    .small_button(crate::i18n::gettext(app.locale, "Download"))
-                                    .clicked()
-                                {
-                                    app.actions.push(Action::Download {
-                                        card: None,
-                                        chat: row.chat.clone(),
-                                        message: row.id.clone(),
-                                    });
-                                }
-                            });
-                        }
-                    });
+                                });
+                            }
+                        },
+                    );
                 if listing.docs.is_empty() {
                     ui.label(crate::i18n::gettext(app.locale, "No documents"));
                 }
@@ -180,25 +210,34 @@ pub fn show(app: &mut App, ui: &mut egui::Ui, chat: &str) {
             MediaTab::Links => {
                 egui::ScrollArea::vertical()
                     .id_salt(("gallery-links", chat))
-                    .show_rows(ui, 56.0, listing.links.len(), |ui, range| {
-                        for link in &listing.links[range] {
-                            let hidden = app.settings.screen_privacy.hides(
-                                crate::settings::ScreenPrivacyWhat::Message,
-                                ui.rect_contains_pointer(Rect::from_min_size(
-                                    ui.cursor().min,
-                                    vec2(ui.available_width(), 56.0),
-                                )),
-                            );
-                            let label = if hidden {
-                                crate::i18n::gettext(app.locale, "Link").into_owned()
-                            } else {
-                                link.title.as_deref().unwrap_or(&link.url).to_owned()
-                            };
-                            if ui.button(label).clicked() {
-                                app.actions.push(Action::OpenUrl(link.url.clone()));
+                    .show_rows(
+                        ui,
+                        56.0 * (theme::regular(14.0).size / 14.0),
+                        listing.links.len(),
+                        |ui, range| {
+                            for link in &listing.links[range] {
+                                let hidden = app.settings.screen_privacy.hides(
+                                    crate::settings::ScreenPrivacyWhat::Message,
+                                    ui.rect_contains_pointer(Rect::from_min_size(
+                                        ui.cursor().min,
+                                        vec2(ui.available_width(), 56.0),
+                                    )),
+                                );
+                                let label = if hidden {
+                                    crate::i18n::gettext(app.locale, "Link").into_owned()
+                                } else {
+                                    link.title.as_deref().unwrap_or(&link.url).to_owned()
+                                };
+                                if ui
+                                    .add(egui::Button::new(&label).truncate())
+                                    .on_hover_text(&label)
+                                    .clicked()
+                                {
+                                    app.actions.push(Action::OpenUrl(link.url.clone()));
+                                }
                             }
-                        }
-                    });
+                        },
+                    );
                 if listing.links.is_empty() {
                     ui.label(crate::i18n::gettext(app.locale, "No links"));
                 }
@@ -285,6 +324,8 @@ fn media_cell(
 ) {
     let palette = app.palette;
     let video = matches!(message.content, Content::Video { .. });
+    theme::reveal_focus(&response);
+    theme::focus_outline(ui, response.id, rect, 6.0);
     let seconds = match &message.content {
         Content::Video { seconds, .. } => *seconds,
         _ => None,

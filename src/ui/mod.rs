@@ -522,39 +522,27 @@ fn banner(app: &mut App, ui: &mut egui::Ui) {
         .fill(palette.panel)
         .inner_margin(Margin::symmetric(14, 6))
         .show(ui, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                // Progress/connection events wake the window. A long history
-                // sync must not redraw every message just to spin this icon.
+            ui.horizontal(|ui| {
+                // Progress events wake the window without an animation timer.
                 theme::icon(ui, icon, 15.0, color);
-                theme::text(ui, text, theme::medium(13.0), palette.text);
-                if retry || download.is_some() {
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if download.is_some() {
-                            if theme::soft_button(
-                                ui,
-                                &palette,
-                                Some(Icon::ExternalLink),
-                                "Update",
-                                false,
-                            )
-                            .clicked()
-                            {
-                                app.actions.push(Action::ShowUpdate);
-                            }
-                        } else if theme::soft_button(
-                            ui,
-                            &palette,
-                            Some(Icon::Refresh),
-                            "Retry",
-                            false,
-                        )
-                        .clicked()
-                        {
-                            app.actions.push(Action::Reconnect);
-                        }
-                    });
-                }
+                theme::paragraph(ui, text, theme::medium(13.0), palette.text);
             });
+            if retry || download.is_some() {
+                ui.horizontal(|ui| {
+                    let (icon, label, action) = if download.is_some() {
+                        (
+                            Icon::ExternalLink,
+                            gettext(locale, "Update"),
+                            Action::ShowUpdate,
+                        )
+                    } else {
+                        (Icon::Refresh, gettext(locale, "Retry"), Action::Reconnect)
+                    };
+                    if theme::soft_button(ui, &palette, Some(icon), &label, false).clicked() {
+                        app.actions.push(action);
+                    }
+                });
+            }
         });
 }
 

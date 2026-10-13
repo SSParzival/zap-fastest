@@ -220,7 +220,13 @@ fn search(app: &mut App, ui: &mut egui::Ui, overlay: bool) {
     if app.chat_search_hits.is_empty() {
         if app.chat_search_pending {
             ui.add_space(32.0);
-            ui.vertical_centered(|ui| theme::spinner(ui, 22.0, palette.secondary));
+            ui.vertical_centered(|ui| {
+                super::login::busy(
+                    ui,
+                    palette.secondary,
+                    &crate::i18n::gettext(app.locale, "Searching…"),
+                )
+            });
         } else {
             widgets::empty_state(
                 ui,

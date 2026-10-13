@@ -3160,16 +3160,8 @@ msgstr ""
 "importados são guardados separadamente."
 
 #: src/ui/archive_backup.rs:107
-msgid ""
-"Existing messages, session credentials and current pending work are "
-"preserved. Imported pending sends never run. Different edited snapshots "
-"without a revision timestamp keep the current version and retain the "
-"imported alternative in the encrypted archive."
-msgstr ""
-"As mensagens existentes, as credenciais da sessão e o trabalho pendente "
-"atual são preservados. Envios pendentes importados nunca são executados. "
-"Edições diferentes sem data de revisão mantêm a versão atual e guardam a "
-"alternativa importada no arquivo criptografado."
+msgid "Session credentials and current pending work are preserved. Confirmed backup deletions listed above are applied. Imported pending sends never run. Different edited snapshots without a revision timestamp keep the current version and retain the imported alternative in the encrypted archive."
+msgstr "As credenciais da sessão e o trabalho pendente atual são preservados. As exclusões confirmadas do backup listadas acima são aplicadas. Envios pendentes importados nunca são executados. Edições diferentes sem data de revisão mantêm a versão atual e guardam a alternativa importada no arquivo criptografado."
 
 #: src/ui/archive_backup.rs:110
 msgid ""
@@ -3428,3 +3420,21 @@ msgstr "Baixar status"
 
 #~ msgid "Pin removed"
 #~ msgstr "Fixação removida"
+
+msgid "Loading media…"
+msgstr "Carregando mídia…"
+
+msgid "Searching…"
+msgstr "Buscando…"
+
+msgid "Checking password…"
+msgstr "Verificando senha…"
+
+msgid "Passphrases do not match."
+msgstr "As senhas não coincidem."
+
+msgid "Play / pause"
+msgstr "Reproduzir / pausar"
+
+msgid "Preparing call…"
+msgstr "Preparando chamada…"

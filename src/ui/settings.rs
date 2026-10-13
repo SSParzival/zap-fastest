@@ -1125,6 +1125,7 @@ fn sections(app: &App) -> Vec<Section> {
             let mut enabled = app.settings.descriptive_download_names;
             let response = widgets::switch(ui, &app.palette, &mut enabled);
             theme::reveal_focus(&response);
+            response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, ui.is_enabled(), enabled, crate::i18n::gettext(app.locale, "Readable download names")));
             if response.changed() {
                 app.actions.push(Action::SetDownloadOrganization {
                     organization: app.settings.download_organization, descriptive_names: enabled,
@@ -1370,9 +1371,9 @@ fn app_lock_form(ui: &mut egui::Ui, app: &mut App) {
         FormError::WrongCurrent => gettext(locale, "Wrong password. Try again.").into_owned(),
     });
     if let Some(error) = error {
-        widgets::rich_text(ui, &error, theme::regular(12.5), palette.danger);
+        widgets::wrapped_rich_text(ui, &error, theme::regular(12.5), palette.danger);
     }
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         let confirm = match mode {
             FormMode::Set => gettext(locale, "Turn on"),
             FormMode::Change => gettext(locale, "Change password"),
@@ -2055,7 +2056,14 @@ fn account(app: &mut App, ui: &mut egui::Ui) {
                     } else {
                         name.clone().into()
                     };
-                    theme::text(ui, shown, theme::semibold(16.0), palette.text);
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(shown)
+                                .font(theme::semibold(16.0))
+                                .color(palette.text),
+                        )
+                        .truncate(),
+                    );
                     if theme::icon_button(
                         ui,
                         Icon::Pencil,

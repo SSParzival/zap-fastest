@@ -55,10 +55,20 @@ pub fn show(app: &mut App, ui: &mut egui::Ui, restore: bool) {
                 .desired_width(f32::INFINITY),
         );
     }
-    let ready = app.backup_draft.passphrase.chars().count() >= 12
-        && (restore || app.backup_draft.passphrase == app.backup_draft.confirmation);
+    let long_enough = app.backup_draft.passphrase.chars().count() >= 12;
+    let matches = restore || app.backup_draft.passphrase == app.backup_draft.confirmation;
+    if !app.backup_draft.passphrase.is_empty() && !long_enough {
+        ui.colored_label(
+            palette.secondary,
+            gettext(locale, "Backup passphrase (at least 12 characters)"),
+        );
+    } else if !app.backup_draft.confirmation.is_empty() && !matches {
+        ui.colored_label(palette.danger, gettext(locale, "Passphrases do not match."));
+    }
+    let ready =
+        long_enough && (restore || app.backup_draft.passphrase == app.backup_draft.confirmation);
     ui.add_space(12.0);
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         if ui
             .add_enabled_ui(ready, |ui| {
                 theme::pill_button(
@@ -104,12 +114,12 @@ pub fn confirm_merge(app: &mut App, ui: &mut egui::Ui) {
         .replace("{added}",&preview.added.to_string()).replace("{edited}",&preview.edited.to_string())
         .replace("{removed}",&preview.removed.to_string()).replace("{protected}",&preview.protected.to_string())
         .replace("{conflicts}",&preview.conflicts.to_string()).replace("{pending}",&preview.imported_pending.to_string()));
-    ui.label(gettext(app.locale, "Existing messages, session credentials and current pending work are preserved. Imported pending sends never run. Different edited snapshots without a revision timestamp keep the current version and retain the imported alternative in the encrypted archive."));
+    ui.label(gettext(app.locale, "Session credentials and current pending work are preserved. Confirmed backup deletions listed above are applied. Imported pending sends never run. Different edited snapshots without a revision timestamp keep the current version and retain the imported alternative in the encrypted archive."));
     ui.label(gettext(
         app.locale,
         "If the current archive changes before confirmation, prepare a new preview.",
     ));
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         if theme::pill_button(ui, &app.palette, &gettext(app.locale, "Merge"), true).clicked() {
             app.actions.push(Action::ConfirmBackupMerge);
             app.actions.push(Action::CloseDialog);

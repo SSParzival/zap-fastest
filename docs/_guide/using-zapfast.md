@@ -836,6 +836,7 @@ Backup restoration can optionally merge historical messages into the current
 account after identity matching and a review of the exact changes. Current
 credentials and pending work stay in place. Imported pending sends never run;
 ambiguous edited alternatives are retained separately in the encrypted archive.
+Confirmed deletions in the backup are applied as listed in the merge preview.
 
 ## Unused cache cleanup (development builds)
 
@@ -844,3 +845,20 @@ that are no longer referenced by the archive. It is off by default. Every
 archived attachment, background recovery file and tracked export stays protected.
 The age uses the file modification time. See the [cache policy](../cache-retention.md)
 for safety limits and remaining platform validation.
+
+## Small windows and larger text (development builds)
+
+Dialogs scroll when their contents exceed the window. Confirmation actions wrap,
+and contact name fields stack in narrow dialogs. Menus keep long action labels
+readable instead of hiding their endings. Emoji and reaction pickers fit the
+window; their tabs can scroll horizontally.
+
+The account switcher scrolls when several accounts are linked. Gallery downloads
+can be canceled while starting, as well as during transfer. Hover over a shortened
+document or link name to read it in full. Backup forms explain mismatching
+passphrases before opening the file picker.
+
+Screen privacy also hides account-switcher identities and call names/video
+previews according to its selected options. Hovering reveals them as it does
+elsewhere in the app. Call preparation remains cancellable; its status does not
+mean that the other device has started ringing.

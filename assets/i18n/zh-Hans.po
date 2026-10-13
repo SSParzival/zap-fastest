@@ -3013,15 +3013,8 @@ msgstr ""
 "个冲突的替代版本和 {pending} 条导入的待处理记录会单独保留。"
 
 #: src/ui/archive_backup.rs:107
-msgid ""
-"Existing messages, session credentials and current pending work are "
-"preserved. Imported pending sends never run. Different edited snapshots "
-"without a revision timestamp keep the current version and retain the "
-"imported alternative in the encrypted archive."
-msgstr ""
-"现有消息、会话凭据和当前待处理任务会被保留。导入的待发送消息绝不会执行。不同"
-"的编辑版本若没有修订时间，则保留当前版本，并将导入的替代版本保存在加密存档"
-"中。"
+msgid "Session credentials and current pending work are preserved. Confirmed backup deletions listed above are applied. Imported pending sends never run. Different edited snapshots without a revision timestamp keep the current version and retain the imported alternative in the encrypted archive."
+msgstr "会话凭据和当前待处理任务会保留。上方列出的已确认备份删除记录会被应用。导入的待发送消息绝不会执行。不同的编辑版本若没有修订时间，则保留当前版本，并将导入的替代版本保存在加密存档中。"
 
 #: src/ui/archive_backup.rs:110
 msgid ""
@@ -3275,3 +3268,21 @@ msgstr "下载状态"
 
 #~ msgid "Pin removed"
 #~ msgstr "已取消置顶"
+
+msgid "Loading media…"
+msgstr "正在加载媒体…"
+
+msgid "Searching…"
+msgstr "正在搜索…"
+
+msgid "Checking password…"
+msgstr "正在验证密码…"
+
+msgid "Passphrases do not match."
+msgstr "密码不一致。"
+
+msgid "Play / pause"
+msgstr "播放 / 暂停"
+
+msgid "Preparing call…"
+msgstr "正在准备通话…"

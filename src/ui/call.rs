@@ -19,8 +19,14 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
         egui::Window::new(gettext(locale, "Starting call"))
             .id(egui::Id::new(("preparing-call", app.account().id.as_str())))
             .collapsible(false)
+            .auto_sized()
+            .default_width(320.0)
+            .default_pos(ctx.content_rect().center() - egui::vec2(160.0, 64.0))
+            .constrain_to(ctx.content_rect().shrink(16.0))
+            .max_size(ctx.content_rect().shrink(16.0).size())
+            .vscroll(true)
             .show(ctx, |ui| {
-                ui.label(gettext(locale, "Connecting to WhatsApp…"));
+                ui.label(gettext(locale, "Preparing call…"));
                 if ui.button(gettext(locale, "Cancel call")).clicked() {
                     app.actions.push(Action::HangupCall);
                 }
@@ -53,10 +59,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
         .default_pos(ctx.content_rect().center() - egui::vec2(200.0, 200.0))
         .vscroll(true)
         .show(ctx, |ui| {
-            let name = app
-                .chat(&call.chat)
-                .map(|chat| app.chat_title(chat))
-                .unwrap_or_else(|| gettext(locale, "WhatsApp contact").into_owned());
+            let name = display_name(app, ui, &call.chat, egui::TextStyle::Heading);
             ui.heading(name);
             ui.label(match call.phase {
                 CallPhase::Dialing => gettext(locale, "Calling…"),
@@ -183,12 +186,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                             if app.chat(&record.chat).is_some_and(|chat| chat.locked) {
                                 continue;
                             }
-                            let name = app
-                                .chat(&record.chat)
-                                .map(|chat| app.chat_title(chat))
-                                .unwrap_or_else(|| {
-                                    gettext(locale, "WhatsApp contact").into_owned()
-                                });
+                            let name = display_name(app, ui, &record.chat, egui::TextStyle::Body);
                             ui.vertical(|ui| {
                                 if ui.link(name).clicked() {
                                     app.actions.push(Action::OpenChat(record.chat.clone()));
@@ -241,6 +239,22 @@ struct VideoTextures {
     peer: Option<egui::TextureHandle>,
 }
 
+fn display_name(app: &App, ui: &egui::Ui, chat: &str, style: egui::TextStyle) -> String {
+    let region = egui::Rect::from_min_size(
+        ui.cursor().min,
+        egui::vec2(ui.available_width(), ui.text_style_height(&style)),
+    );
+    if app.settings.screen_privacy.hides(
+        crate::settings::ScreenPrivacyWhat::Name,
+        ui.rect_contains_pointer(region),
+    ) {
+        return gettext(app.locale, "WhatsApp contact").into_owned();
+    }
+    app.chat(chat)
+        .map(|chat| app.chat_title(chat))
+        .unwrap_or_else(|| gettext(app.locale, "WhatsApp contact").into_owned())
+}
+
 fn video(
     app: &App,
     ui: &mut egui::Ui,
@@ -275,14 +289,77 @@ fn video(
     // Share a bounded preview budget so call controls remain visible in a short window.
     // The window scrolls longer device errors or larger text without losing any controls.
     let preview_height = (ctx.content_rect().height() * 0.3).min(480.0);
-    if let Some(texture) = &textures.peer {
-        ui.add(egui::Image::new(texture).max_size(egui::vec2(480.0, preview_height * 0.75)));
+    let width = ui.available_width();
+    let fit = |texture: &egui::TextureHandle, max: egui::Vec2| {
+        let size = texture.size_vec2();
+        size * (max.x / size.x).min(max.y / size.y).min(1.0)
+    };
+    let spacing = ui.spacing().item_spacing.y;
+    let peer_size = textures
+        .peer
+        .as_ref()
+        .map(|texture| fit(texture, egui::vec2(width.min(480.0), preview_height * 0.75)));
+    let local_size = textures
+        .local
+        .as_ref()
+        .map(|texture| fit(texture, egui::vec2(width.min(160.0), preview_height * 0.25)));
+    let waiting = gettext(locale, "Waiting for the other person's video…");
+    let height = peer_size.map_or_else(
+        || {
+            ui.painter()
+                .layout(
+                    waiting.to_string(),
+                    egui::TextStyle::Body.resolve(ui.style()),
+                    app.palette.text,
+                    width,
+                )
+                .size()
+                .y
+        },
+        |size| size.y,
+    ) + local_size.map_or(0.0, |size| {
+        size.y + ui.text_style_height(&egui::TextStyle::Body) + 2.0 * spacing
+    });
+    let (region, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
+    let hidden = app.settings.screen_privacy.hides(
+        crate::settings::ScreenPrivacyWhat::Media,
+        ui.rect_contains_pointer(region),
+    );
+    let mut preview_ui = ui.new_child(egui::UiBuilder::new().max_rect(region));
+    preview_ui.set_clip_rect(region.intersect(ui.clip_rect()));
+    if hidden && (peer_size.is_some() || local_size.is_some()) {
+        preview_ui
+            .painter()
+            .rect_filled(region, 6.0, app.palette.surface);
+        let text = super::widgets::line(
+            &preview_ui,
+            &gettext(locale, "Content hidden"),
+            crate::theme::regular(13.5),
+            app.palette.secondary,
+            width,
+            2,
+        );
+        text.paint(
+            &preview_ui,
+            region.center() - text.size() / 2.0,
+            app.palette.secondary,
+        );
     } else {
-        ui.label(gettext(locale, "Waiting for the other person's video…"));
-    }
-    if let Some(texture) = &textures.local {
-        ui.label(gettext(locale, "Your camera"));
-        ui.add(egui::Image::new(texture).max_size(egui::vec2(160.0, preview_height * 0.25)));
+        if let Some(texture) = &textures.peer {
+            preview_ui.add(
+                egui::Image::new(texture)
+                    .max_size(egui::vec2(width.min(480.0), preview_height * 0.75)),
+            );
+        } else {
+            preview_ui.label(waiting);
+        }
+        if let Some(texture) = &textures.local {
+            preview_ui.label(gettext(locale, "Your camera"));
+            preview_ui.add(
+                egui::Image::new(texture)
+                    .max_size(egui::vec2(width.min(160.0), preview_height * 0.25)),
+            );
+        }
     }
     if let Some(error) = view.error() {
         ui.label(error);
@@ -302,15 +379,17 @@ pub(super) fn devices(app: &mut App, ui: &mut egui::Ui) {
             DeviceKind::Microphone => app.call_devices.microphones.clone(),
             DeviceKind::Speaker => app.call_devices.speakers.clone(),
         };
-        ui.label(match kind {
+        let field_label = match kind {
             DeviceKind::Microphone => gettext(locale, "Microphone"),
             DeviceKind::Speaker => gettext(locale, "Speaker"),
-        });
+        };
+        ui.label(field_label.as_ref());
         let label = entries
             .iter()
             .find(|entry| chosen.as_deref() == Some(entry.id.as_str()))
             .map(|entry| entry.label.as_str())
             .unwrap_or_else(|| chosen.as_deref().unwrap_or("System default"));
+        let accessible_value = label.to_owned();
         let selector = egui::ComboBox::from_id_salt((
             "call-device",
             app.account().id.as_str(),
@@ -320,11 +399,17 @@ pub(super) fn devices(app: &mut App, ui: &mut egui::Ui) {
         .width(ui.available_width().min(320.0))
         .truncate()
         .show_ui(ui, |ui| {
+            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
             ui.selectable_value(&mut chosen, None, gettext(locale, "System default"));
             for entry in entries {
                 ui.selectable_value(&mut chosen, Some(entry.id), entry.label);
             }
         });
+        ui.ctx()
+            .accesskit_node_builder(selector.response.id, |node| {
+                node.set_label(field_label.as_ref());
+                node.set_value(accessible_value);
+            });
         #[cfg(test)]
         ui.ctx().data_mut(|data| {
             data.insert_temp(
@@ -360,17 +445,24 @@ pub(super) fn devices(app: &mut App, ui: &mut egui::Ui) {
                 gettext(locale, "System default")
             }
         });
+    let accessible_value = label.to_string();
     let camera_selector =
         egui::ComboBox::from_id_salt(("call-camera-device", app.account().id.as_str()))
             .selected_text(label)
             .width(ui.available_width().min(320.0))
             .truncate()
             .show_ui(ui, |ui| {
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
                 ui.selectable_value(&mut camera, None, gettext(locale, "System default"));
                 for entry in &app.call_devices.cameras {
                     ui.selectable_value(&mut camera, Some(entry.id.clone()), &entry.label);
                 }
             });
+    ui.ctx()
+        .accesskit_node_builder(camera_selector.response.id, |node| {
+            node.set_label(gettext(locale, "Camera"));
+            node.set_value(accessible_value);
+        });
     #[cfg(test)]
     ui.ctx().data_mut(|data| {
         data.insert_temp(

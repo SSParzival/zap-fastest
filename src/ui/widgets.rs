@@ -536,7 +536,8 @@ pub fn menu_width(ui: &Ui, labels: &[&str], icons: bool) -> f32 {
         .fold(0.0, f32::max);
     // Text padding, then `menu_frame`'s margin and its 1-point stroke on each
     // side: without the stroke the widest label lost its last letters.
-    widest + if icons { 26.0 } else { 0.0 } + 20.0 + 12.0 + 2.0
+    (widest + if icons { 26.0 } else { 0.0 } + 20.0 + 12.0 + 2.0)
+        .min((ui.ctx().content_rect().width() - 30.0).max(1.0))
 }
 
 /// A context-menu entry that opens a submenu, drawn like the plain entries
@@ -550,7 +551,18 @@ pub fn submenu<R>(
     add_contents: impl FnOnce(&mut Ui) -> R,
 ) -> Option<egui::InnerResponse<R>> {
     let width = ui.available_width();
-    let (rect, response) = ui.allocate_exact_size(vec2(width, 28.0), Sense::click());
+    let label_line = line(
+        ui,
+        label,
+        theme::regular(13.5),
+        palette.text,
+        (width - 62.0).max(1.0),
+        usize::MAX,
+    );
+    let (rect, response) = ui.allocate_exact_size(
+        vec2(width, label_line.size().y.max(16.0) + 12.0),
+        Sense::click(),
+    );
     theme::reveal_focus(&response);
     response.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
@@ -580,30 +592,17 @@ pub fn submenu<R>(
             .image(palette.secondary, 14.0)
             .paint_at(ui, chevron);
         let x = rect.left() + 36.0;
-        let mut job = egui::text::LayoutJob::simple_singleline(
-            label.to_string(),
-            theme::regular(13.5),
-            palette.text,
-        );
-        job.wrap = egui::text::TextWrapping {
-            max_width: (chevron.left() - 6.0 - x).max(0.0),
-            max_rows: 1,
-            break_anywhere: true,
-            overflow_character: Some('\u{2026}'),
-        };
-        let galley = crate::bidi::layout_job(ui, job);
-        ui.painter().galley(
-            pos2(x, rect.center().y - galley.size().y / 2.0),
-            galley,
-            palette.text,
-        );
+        let pos = pos2(x, rect.center().y - label_line.size().y / 2.0);
+        ui.painter()
+            .galley(pos, label_line.galley.clone(), palette.text);
+        emoji::paint(ui, &label_line.galley, pos, &label_line.placements);
     }
     // The submenu supplies its own frame. Leave its margins inside the viewport.
     let width =
         (menu_width(ui, items, true) - 14.0).min((ui.ctx().content_rect().width() - 30.0).max(1.0));
     egui::containers::menu::SubMenu::new().show(ui, &response, |ui| {
         ui.set_width(width);
-        add_contents(ui)
+        menu_scroll(ui, add_contents)
     })
 }
 
@@ -619,8 +618,18 @@ pub fn menu_item_enabled(
     enabled: bool,
 ) -> bool {
     let width = ui.available_width();
+    let color = if enabled { palette.text } else { palette.dim };
+    let inset = if icon.is_some() { 46.0 } else { 20.0 };
+    let label_line = line(
+        ui,
+        label,
+        theme::regular(13.5),
+        color,
+        (width - inset).max(1.0),
+        usize::MAX,
+    );
     let (rect, response) = ui.allocate_exact_size(
-        vec2(width, 28.0),
+        vec2(width, label_line.size().y.max(16.0) + 12.0),
         if enabled {
             Sense::click()
         } else {
@@ -642,7 +651,6 @@ pub fn menu_item_enabled(
             ui.painter()
                 .rect_filled(rect, CornerRadius::same(6), palette.surface_hover);
         }
-        let color = if enabled { palette.text } else { palette.dim };
         let mut x = rect.left() + 10.0;
         if let Some(icon) = icon {
             let icon_rect =
@@ -658,23 +666,9 @@ pub fn menu_item_enabled(
             .paint_at(ui, icon_rect);
             x += 26.0;
         }
-        let mut job = egui::text::LayoutJob::simple_singleline(
-            label.to_string(),
-            theme::regular(13.5),
-            color,
-        );
-        job.wrap = egui::text::TextWrapping {
-            max_width: (rect.right() - 10.0 - x).max(0.0),
-            max_rows: 1,
-            break_anywhere: true,
-            overflow_character: Some('\u{2026}'),
-        };
-        let galley = crate::bidi::layout_job(ui, job);
-        ui.painter().galley(
-            pos2(x, rect.center().y - galley.size().y / 2.0),
-            galley,
-            color,
-        );
+        let pos = pos2(x, rect.center().y - label_line.size().y / 2.0);
+        ui.painter().galley(pos, label_line.galley.clone(), color);
+        emoji::paint(ui, &label_line.galley, pos, &label_line.placements);
     }
     let clicked = enabled && response.clicked();
     if clicked {
@@ -732,6 +726,18 @@ pub fn menu_frame(palette: &Palette) -> egui::Frame {
         .shadow(palette.float_shadow())
 }
 
+/// Keep long action menus reachable in short windows, including larger text.
+pub fn menu_scroll<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    let height = (ui.ctx().content_rect().height() - 32.0).max(1.0);
+    egui::ScrollArea::vertical()
+        .id_salt("menu-actions")
+        .max_height(height)
+        .min_scrolled_height(height)
+        .auto_shrink([false, true])
+        .show(ui, add)
+        .inner
+}
+
 pub fn empty_state(ui: &mut Ui, palette: &Palette, icon: Icon, title: &str, body: &str) {
     ui.add_space(48.0);
     ui.vertical_centered(|ui| {
@@ -760,7 +766,14 @@ pub fn search_field(
     hint: &str,
     width: f32,
 ) -> egui::Response {
-    let height = 34.0;
+    let height = ui
+        .painter()
+        .layout_no_wrap(hint.to_owned(), theme::regular(14.0), palette.text)
+        .size()
+        .y
+        .max(20.0)
+        + 14.0;
+    let width = width.min(ui.available_width()).max(1.0);
     let (rect, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
     let has_focus = ui.memory(|memory| memory.has_focus(id));
     // Over a vibrant window's material, a tint that lets it show through.
@@ -847,6 +860,7 @@ pub fn search_field(
 pub fn switch(ui: &mut Ui, palette: &Palette, on: &mut bool) -> egui::Response {
     let size = vec2(40.0, 22.0);
     let (rect, mut response) = ui.allocate_exact_size(size, Sense::click());
+    theme::reveal_focus(&response);
     if response.clicked() {
         *on = !*on;
         response.mark_changed();
@@ -1595,6 +1609,41 @@ pub fn dotted_chip(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn narrow_menu_actions_keep_their_entire_label_at_large_text_sizes() {
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        let label = "Save the selected attachments to another folder";
+        for scale in [1.0, 1.5] {
+            let _guard = theme::text_scale(&ctx, scale);
+            let mut bounds = Rect::NOTHING;
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                ui.set_width(160.0);
+                menu_item(ui, &Palette::dark(), Some(Icon::Download), label);
+                bounds = ui.min_rect();
+            });
+            output.textures_delta.clear();
+            let text = output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) if text.galley.text() == label => Some(text),
+                    _ => None,
+                })
+                .expect("the full action label is painted rather than replaced by an ellipsis");
+            assert!(text.galley.rows.len() > 1);
+            assert!(
+                bounds
+                    .expand(1.0)
+                    .contains_rect(text.visual_bounding_rect())
+            );
+            assert!(
+                bounds.width() <= 161.0,
+                "the row must wrap instead of widening: {bounds:?}"
+            );
+        }
+    }
 
     #[test]
     fn international_phone_labels_preserve_final_digits_in_narrow_rows() {

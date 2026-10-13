@@ -3149,16 +3149,8 @@ msgstr ""
 "alternatif ve içe aktarılan {pending} bekleyen kayıt ayrı tutuluyor."
 
 #: src/ui/archive_backup.rs:107
-msgid ""
-"Existing messages, session credentials and current pending work are "
-"preserved. Imported pending sends never run. Different edited snapshots "
-"without a revision timestamp keep the current version and retain the "
-"imported alternative in the encrypted archive."
-msgstr ""
-"Mevcut mesajlar, oturum kimlik bilgileri ve mevcut bekleyen işler korunur. "
-"İçe aktarılan bekleyen gönderimler asla çalıştırılmaz. Değişiklik zamanı "
-"olmayan farklı düzenlemelerde mevcut sürüm korunur ve içe aktarılan "
-"alternatif şifreli arşivde saklanır."
+msgid "Session credentials and current pending work are preserved. Confirmed backup deletions listed above are applied. Imported pending sends never run. Different edited snapshots without a revision timestamp keep the current version and retain the imported alternative in the encrypted archive."
+msgstr "Oturum kimlik bilgileri ve mevcut bekleyen işler korunur. Yukarıda listelenen onaylanmış yedek silmeleri uygulanır. İçe aktarılan bekleyen gönderimler asla çalıştırılmaz. Değişiklik zamanı olmayan farklı düzenlemelerde mevcut sürüm korunur ve içe aktarılan alternatif şifreli arşivde saklanır."
 
 #: src/ui/archive_backup.rs:110
 msgid ""
@@ -3408,3 +3400,21 @@ msgstr "Durumu indir"
 #~ msgstr ""
 #~ "Bu oturumda sohbet başına en fazla beş sayfa. Telefonunuz tüm geçmişi "
 #~ "göndermeyebilir. Otomatik medya indirme yapılmaz."
+
+msgid "Loading media…"
+msgstr "Medya yükleniyor…"
+
+msgid "Searching…"
+msgstr "Aranıyor…"
+
+msgid "Checking password…"
+msgstr "Parola kontrol ediliyor…"
+
+msgid "Passphrases do not match."
+msgstr "Parolalar eşleşmiyor."
+
+msgid "Play / pause"
+msgstr "Oynat / duraklat"
+
+msgid "Preparing call…"
+msgstr "Arama hazırlanıyor…"

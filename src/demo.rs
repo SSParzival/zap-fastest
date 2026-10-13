@@ -1,5 +1,9 @@
 //! Offline sample data for screenshots, recorded tours, and headless UI tests.
 
+#[cfg(test)]
+#[path = "demo_ux_tests.rs"]
+mod ux_tests;
+
 pub(crate) mod queued;
 pub mod stock;
 pub mod tour;
@@ -2105,7 +2109,23 @@ pub fn apply_flags(app: &mut App, page: Option<&str>) {
                 app.dialog = Some(Dialog::Statuses);
             }
             "archive-backup" => app.dialog = Some(Dialog::ArchiveBackup { restore: false }),
+            "archive-backup-mismatch" => {
+                app.dialog = Some(Dialog::ArchiveBackup { restore: false });
+                app.backup_draft.passphrase = "Synthetic passphrase one".to_owned().into();
+                app.backup_draft.confirmation = "Synthetic passphrase two".to_owned().into();
+            }
             "archive-restore" => app.dialog = Some(Dialog::ArchiveBackup { restore: true }),
+            "archive-merge" => {
+                app.dialog = Some(Dialog::ConfirmBackupMerge);
+                app.backup_merge_preview = Some(crate::archive::merge::MergePreview {
+                    added: 24,
+                    edited: 2,
+                    conflicts: 1,
+                    protected: 3,
+                    removed: 0,
+                    imported_pending: 1,
+                });
+            }
             "archive-resume" => {
                 app.account_mut().settings.archive_only = true;
                 app.dialog = Some(Dialog::ResumeRestoredAccount(app.account().id.clone()));
@@ -2572,6 +2592,11 @@ pub fn apply_flags(app: &mut App, page: Option<&str>) {
                 app.scroll_to_bottom = true;
             }
             "settings" => app.page = Page::Settings,
+            "large-text" => app.settings.text_scale = 1.5,
+            "screen-private" => {
+                app.settings.screen_privacy.enabled = true;
+                app.settings.screen_privacy.blur_names = true;
+            }
             "custom-emoji" => {
                 app.page = Page::Settings;
                 app.settings_search = "Emoji style".into();
@@ -2958,6 +2983,10 @@ pub fn apply_flags(app: &mut App, page: Option<&str>) {
                     pairing_phone: None,
                 };
             }
+            "login-connecting" => {
+                unlink(app);
+                app.link = LinkStatus::Connecting;
+            }
             "pair" => {
                 unlink(app);
                 app.link = LinkStatus::Unlinked {
@@ -2979,6 +3008,16 @@ pub fn apply_flags(app: &mut App, page: Option<&str>) {
                 app.link = LinkStatus::Disconnected {
                     reason: "stream ended".into(),
                 };
+            }
+            "notification-preview" => {
+                app.account_mut().settings.in_app_notifications = true;
+                app.in_app_notifications.push(crate::ui::notification_overlay::Notification {
+                    id: 1,
+                    target: crate::notify::NotificationTarget { account: app.account().id.clone(), chat: SAMPLES[2].id.into(), message: "synthetic-notification".into() },
+                    title: "Synthetic sender with a deliberately long display name".into(),
+                    body: "An invented notification preview with enough words to check line wrapping and keep the dismiss action available.".into(),
+                    expires: std::time::Instant::now() + std::time::Duration::from_secs(120),
+                });
             }
             "syncing" => app.syncing = true,
             // Ada shares where she is now.

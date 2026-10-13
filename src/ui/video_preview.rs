@@ -45,6 +45,13 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             let video = ui
                 .interact(picture, ui.id().with("picture"), Sense::click())
                 .on_hover_cursor(egui::CursorIcon::PointingHand);
+            video.widget_info(|| {
+                egui::WidgetInfo::labeled(
+                    egui::WidgetType::Button,
+                    ui.is_enabled(),
+                    crate::i18n::gettext(app.locale, "Play / pause"),
+                )
+            });
             match &status.frame {
                 Some(frame) => {
                     ui.painter().image(
@@ -80,13 +87,22 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             ui.painter()
                 .circle_filled(close.center(), 16.0, Color32::from_black_alpha(150));
             theme::paint_icon(ui, Icon::X, close, 18.0, Color32::WHITE);
-            let closed = ui
+            let close_response = ui
                 .interact(close, ui.id().with("close"), Sense::click())
                 .on_hover_cursor(egui::CursorIcon::PointingHand)
                 .on_hover_text(
                     crate::i18n::gettext(app.locale, "Back to the message (Esc)").as_ref(),
+                );
+            close_response.widget_info(|| {
+                egui::WidgetInfo::labeled(
+                    egui::WidgetType::Button,
+                    ui.is_enabled(),
+                    crate::i18n::gettext(app.locale, "Back to the message (Esc)"),
                 )
-                .clicked();
+            });
+            theme::reveal_focus(&close_response);
+            theme::focus_outline(ui, close_response.id, close, 16.0);
+            let closed = close_response.clicked();
             if closed || video.double_clicked() || backdrop.clicked() {
                 actions.push(Action::CollapseVideo);
             } else if video.clicked() {

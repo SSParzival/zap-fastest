@@ -2968,11 +2968,7 @@ msgid ""
 msgstr ""
 
 #: src/ui/archive_backup.rs:107
-msgid ""
-"Existing messages, session credentials and current pending work are "
-"preserved. Imported pending sends never run. Different edited snapshots "
-"without a revision timestamp keep the current version and retain the "
-"imported alternative in the encrypted archive."
+msgid "Session credentials and current pending work are preserved. Confirmed backup deletions listed above are applied. Imported pending sends never run. Different edited snapshots without a revision timestamp keep the current version and retain the imported alternative in the encrypted archive."
 msgstr ""
 
 #: src/ui/archive_backup.rs:110
@@ -3213,4 +3209,22 @@ msgstr ""
 
 #: src/ui/statuses.rs:153
 msgid "Download status"
+msgstr ""
+
+msgid "Loading media…"
+msgstr ""
+
+msgid "Searching…"
+msgstr ""
+
+msgid "Checking password…"
+msgstr ""
+
+msgid "Passphrases do not match."
+msgstr ""
+
+msgid "Play / pause"
+msgstr ""
+
+msgid "Preparing call…"
 msgstr ""

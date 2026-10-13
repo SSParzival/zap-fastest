@@ -6221,6 +6221,18 @@ fn context_menu(
     origin: MenuOrigin,
     actions: &mut Vec<Action>,
 ) {
+    widgets::menu_scroll(ui, |ui| {
+        context_menu_contents(ui, view, message, origin, actions)
+    });
+}
+
+fn context_menu_contents(
+    ui: &mut egui::Ui,
+    view: &View<'_>,
+    message: &Message,
+    origin: MenuOrigin,
+    actions: &mut Vec<Action>,
+) {
     let palette = view.palette;
     let chat = &view.chat.id;
     if matches!(message.content, Content::Call { .. }) {
@@ -10485,40 +10497,43 @@ fn selection_bar(app: &mut App, ui: &mut egui::Ui, chat: &str, selected: &[Strin
             format!("{} selected", selected.len())
         };
         theme::text(ui, &count, theme::medium(14.5), palette.text);
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            // The selection stays open with nothing in it, as its check
-            // boxes do; there is nothing to forward until one is ticked.
-            let forward = ui
-                .add_enabled_ui(!selected.is_empty(), |ui| {
-                    theme::pill_button(ui, &palette, "Forward…", true)
-                })
-                .inner;
-            if forward.clicked() {
-                app.actions.push(Action::ShowDialog(Dialog::Forward {
-                    chat: chat.to_owned(),
-                    messages: selected.to_vec(),
-                }));
-            }
-            let all_starred = !selected.is_empty()
-                && app
-                    .stars
-                    .get(chat)
-                    .is_some_and(|stars| selected.iter().all(|id| stars.contains(id)));
-            let label = if all_starred {
-                crate::i18n::gettext(app.locale, "Unstar")
-            } else {
-                crate::i18n::gettext(app.locale, "Star")
-            };
-            if ui
-                .add_enabled_ui(!selected.is_empty(), |ui| {
-                    theme::soft_button(ui, &palette, Some(Icon::Star), &label, false)
-                })
-                .inner
-                .clicked()
-            {
-                app.actions.push(Action::StarSelection(!all_starred));
-            }
-        });
+        ui.with_layout(
+            Layout::right_to_left(Align::Center).with_main_wrap(true),
+            |ui| {
+                // The selection stays open with nothing in it, as its check
+                // boxes do; there is nothing to forward until one is ticked.
+                let forward = ui
+                    .add_enabled_ui(!selected.is_empty(), |ui| {
+                        theme::pill_button(ui, &palette, "Forward…", true)
+                    })
+                    .inner;
+                if forward.clicked() {
+                    app.actions.push(Action::ShowDialog(Dialog::Forward {
+                        chat: chat.to_owned(),
+                        messages: selected.to_vec(),
+                    }));
+                }
+                let all_starred = !selected.is_empty()
+                    && app
+                        .stars
+                        .get(chat)
+                        .is_some_and(|stars| selected.iter().all(|id| stars.contains(id)));
+                let label = if all_starred {
+                    crate::i18n::gettext(app.locale, "Unstar")
+                } else {
+                    crate::i18n::gettext(app.locale, "Star")
+                };
+                if ui
+                    .add_enabled_ui(!selected.is_empty(), |ui| {
+                        theme::soft_button(ui, &palette, Some(Icon::Star), &label, false)
+                    })
+                    .inner
+                    .clicked()
+                {
+                    app.actions.push(Action::StarSelection(!all_starred));
+                }
+            },
+        );
     });
 }
 

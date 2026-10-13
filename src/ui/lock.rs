@@ -90,7 +90,7 @@ fn password(app: &mut App, ui: &mut egui::Ui) {
     ui.add_space(4.0);
     let ready = app.app_lock.can_try();
     if checking {
-        theme::spinner(ui, 20.0, palette.accent);
+        super::login::busy(ui, palette.accent, &gettext(locale, "Checking password…"));
     } else {
         submit |= ui
             .add_enabled_ui(ready, |ui| {

@@ -29,11 +29,34 @@ pub fn avatar_button(app: &mut App, ui: &mut egui::Ui, size: f32) -> egui::Respo
     let palette = app.palette;
     let me = app.me.clone().unwrap_or_default();
     let name = app.me_name.clone().unwrap_or_else(|| "You".to_owned());
-    let picture = app.avatar(&me);
+    let region = Rect::from_min_size(ui.cursor().min, Vec2::splat(size));
+    let hovered = ui.rect_contains_pointer(region);
+    let hide_avatar = app
+        .settings
+        .screen_privacy
+        .hides(crate::settings::ScreenPrivacyWhat::Avatar, hovered);
+    let hide_name = app
+        .settings
+        .screen_privacy
+        .hides(crate::settings::ScreenPrivacyWhat::Name, hovered);
+    let picture = if hide_avatar { None } else { app.avatar(&me) };
+    let shown_name = if hide_name {
+        gettext(app.locale, "Account {id}").replace("{id}", app.account().id.as_str())
+    } else {
+        name.clone()
+    };
     let label = gettext(app.locale, "Switch account");
     let response = ui
         .push_id(button_id(), |ui| {
-            widgets::clickable_avatar(ui, &palette, &name, &me, size, picture.as_deref(), &label)
+            widgets::clickable_avatar(
+                ui,
+                &palette,
+                &shown_name,
+                &me,
+                size,
+                picture.as_deref(),
+                &label,
+            )
         })
         .inner;
     let elsewhere = app.unread_chat_count_elsewhere();
@@ -106,17 +129,23 @@ fn menu(app: &mut App, button: &egui::Response) {
         egui::Popup::open_id(&button.ctx, popup_id);
     }
     let entries = entries(app);
+    let width = MENU_WIDTH.min((button.ctx.content_rect().width() - 30.0).max(1.0));
     egui::Popup::menu(button)
         .id(popup_id)
-        .width(MENU_WIDTH)
+        .width(width)
         .frame(widgets::menu_frame(&palette))
         .show(|ui| {
-            for entry in &entries {
-                if account_row(app, ui, entry) && !entry.current {
-                    app.actions.push(Action::SwitchAccount(entry.id.clone()));
-                    ui.close();
-                }
-            }
+            egui::ScrollArea::vertical()
+                .max_height((button.ctx.content_rect().height() - 100.0).max(1.0))
+                .min_scrolled_height((button.ctx.content_rect().height() - 100.0).max(1.0))
+                .show(ui, |ui| {
+                    for entry in &entries {
+                        if account_row(app, ui, entry) && !entry.current {
+                            app.actions.push(Action::SwitchAccount(entry.id.clone()));
+                            ui.close();
+                        }
+                    }
+                });
             widgets::menu_separator(ui, &palette);
             if widgets::menu_item(
                 ui,
@@ -134,7 +163,64 @@ fn menu(app: &mut App, button: &egui::Response) {
 fn account_row(app: &App, ui: &mut egui::Ui, entry: &Entry) -> bool {
     let palette = app.palette;
     let width = ui.available_width();
-    let (rect, response) = ui.allocate_exact_size(vec2(width, ROW), Sense::click());
+    let text_height = ui
+        .painter()
+        .layout_no_wrap(entry.name.clone(), theme::semibold(13.5), palette.text)
+        .size()
+        .y
+        + if entry.detail.is_empty() {
+            0.0
+        } else {
+            ui.painter()
+                .layout_no_wrap(
+                    entry.detail.clone(),
+                    theme::regular(12.0),
+                    palette.secondary,
+                )
+                .size()
+                .y
+                + 1.0
+        };
+    let (rect, response) =
+        ui.allocate_exact_size(vec2(width, ROW.max(text_height + 16.0)), Sense::click());
+    let masked;
+    let hide_name = app
+        .settings
+        .screen_privacy
+        .hides(crate::settings::ScreenPrivacyWhat::Name, response.hovered());
+    let hide_avatar = app.settings.screen_privacy.hides(
+        crate::settings::ScreenPrivacyWhat::Avatar,
+        response.hovered(),
+    );
+    let entry = if hide_name || hide_avatar {
+        masked = Entry {
+            id: entry.id.clone(),
+            name: if hide_name {
+                gettext(app.locale, "Account {id}").replace("{id}", entry.id.as_str())
+            } else {
+                entry.name.clone()
+            },
+            detail: if hide_name
+                && entry.detail != gettext(app.locale, "Offline archive")
+                && entry.detail != gettext(app.locale, "Not linked")
+            {
+                String::new()
+            } else {
+                entry.detail.clone()
+            },
+            me: entry.me.clone(),
+            picture: if hide_avatar {
+                None
+            } else {
+                entry.picture.clone()
+            },
+            unread: entry.unread,
+            current: entry.current,
+        };
+        &masked
+    } else {
+        entry
+    };
     theme::reveal_focus(&response);
     response.widget_info(|| {
         egui::WidgetInfo::selected(

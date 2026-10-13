@@ -58,14 +58,22 @@ pub(super) fn card(
                 })
                 .show(&mut card_ui, |ui| {
                     ui.set_width((card_width - 64.0).max(0.0));
-                    ui.spacing_mut().item_spacing.y = 8.0;
-                    let (logo, _) = ui.allocate_exact_size(Vec2::splat(64.0), egui::Sense::hover());
-                    theme::mark(ui, logo.center(), 64.0);
-                    ui.add_space(4.0);
-                    theme::text(ui, "Zap Faster", theme::bold(28.0), palette.text);
-                    theme::text(ui, tagline, theme::regular(14.5), palette.secondary);
-                    ui.add_space(16.0);
-                    body(app, ui);
+                    egui::ScrollArea::vertical()
+                        .id_salt((salt, "card-scroll"))
+                        .max_height((rect.height() - 88.0).max(1.0))
+                        .min_scrolled_height((rect.height() - 88.0).max(1.0))
+                        .auto_shrink([false, true])
+                        .show(ui, |ui| {
+                            ui.spacing_mut().item_spacing.y = 8.0;
+                            let (logo, _) =
+                                ui.allocate_exact_size(Vec2::splat(64.0), egui::Sense::hover());
+                            theme::mark(ui, logo.center(), 64.0);
+                            ui.add_space(4.0);
+                            theme::text(ui, "Zap Faster", theme::bold(28.0), palette.text);
+                            theme::paragraph(ui, tagline, theme::regular(14.5), palette.secondary);
+                            ui.add_space(16.0);
+                            body(app, ui);
+                        });
                 });
             let height = shown.response.rect.height();
             if (height - known_height).abs() > 2.0 {
@@ -208,7 +216,7 @@ pub(super) fn busy(ui: &mut egui::Ui, color: egui::Color32, label: &str) {
                 .x;
         ui.add_space((ui.available_width() - width).max(0.0) / 2.0);
         theme::spinner(ui, 18.0, color);
-        theme::text(ui, label, theme::medium(14.0), ui.visuals().text_color());
+        theme::paragraph(ui, label, theme::medium(14.0), ui.visuals().text_color());
     });
 }
 

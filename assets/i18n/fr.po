@@ -3193,17 +3193,8 @@ msgstr ""
 "attente importées sont conservées séparément."
 
 #: src/ui/archive_backup.rs:107
-msgid ""
-"Existing messages, session credentials and current pending work are "
-"preserved. Imported pending sends never run. Different edited snapshots "
-"without a revision timestamp keep the current version and retain the "
-"imported alternative in the encrypted archive."
-msgstr ""
-"Les messages existants, les identifiants de session et les tâches en attente "
-"actuelles sont conservés. Les envois en attente importés ne sont jamais "
-"exécutés. Pour les versions modifiées différentes sans horodatage de "
-"révision, la version actuelle est conservée et l’alternative importée est "
-"gardée dans l’archive chiffrée."
+msgid "Session credentials and current pending work are preserved. Confirmed backup deletions listed above are applied. Imported pending sends never run. Different edited snapshots without a revision timestamp keep the current version and retain the imported alternative in the encrypted archive."
+msgstr "Les identifiants de session et les opérations en attente sont conservés. Les suppressions confirmées de la sauvegarde indiquées ci-dessus sont appliquées. Les envois en attente importés ne sont jamais exécutés. Pour les versions modifiées différentes sans horodatage de révision, la version actuelle est conservée et l’alternative importée est gardée dans l’archive chiffrée."
 
 #: src/ui/archive_backup.rs:110
 msgid ""
@@ -3462,3 +3453,21 @@ msgstr "Télécharger le statut"
 
 #~ msgid "Pin removed"
 #~ msgstr "Épinglage retiré"
+
+msgid "Loading media…"
+msgstr "Chargement des médias…"
+
+msgid "Searching…"
+msgstr "Recherche…"
+
+msgid "Checking password…"
+msgstr "Vérification du mot de passe…"
+
+msgid "Passphrases do not match."
+msgstr "Les mots de passe ne correspondent pas."
+
+msgid "Play / pause"
+msgstr "Lire / mettre en pause"
+
+msgid "Preparing call…"
+msgstr "Préparation de l’appel…"

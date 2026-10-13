@@ -131,29 +131,51 @@ pub(crate) fn show(app: &mut App, ctx: &egui::Context) {
                     .show(ui, |ui| {
                         ui.set_width(width - 24.0);
                         ui.horizontal(|ui| {
-                            super::widgets::rich_text(ui, title, theme::medium(14.0), palette.text);
-                            let dismiss = crate::i18n::gettext(app.locale, "Dismiss notification");
-                            if theme::icon_button(
-                                ui,
-                                Icon::X,
-                                18.0,
-                                palette.secondary,
-                                palette.text,
-                                &dismiss,
-                            )
-                            .tab_stop(Stop::NotificationDismiss(notification.id))
-                            .clicked()
-                            {
-                                app.actions
-                                    .push(Action::DismissInAppNotification(notification.id));
-                            }
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    let dismiss =
+                                        crate::i18n::gettext(app.locale, "Dismiss notification");
+                                    if theme::icon_button(
+                                        ui,
+                                        Icon::X,
+                                        18.0,
+                                        palette.secondary,
+                                        palette.text,
+                                        &dismiss,
+                                    )
+                                    .tab_stop(Stop::NotificationDismiss(notification.id))
+                                    .clicked()
+                                    {
+                                        app.actions.push(Action::DismissInAppNotification(
+                                            notification.id,
+                                        ));
+                                    }
+                                    ui.with_layout(
+                                        egui::Layout::left_to_right(egui::Align::Center),
+                                        |ui| {
+                                            super::widgets::rich_text(
+                                                ui,
+                                                title,
+                                                theme::medium(14.0),
+                                                palette.text,
+                                            );
+                                        },
+                                    );
+                                },
+                            );
                         });
-                        super::widgets::rich_text(
+                        let preview = super::widgets::line(
                             ui,
                             body,
                             theme::regular(13.0),
                             palette.secondary,
+                            ui.available_width(),
+                            3,
                         );
+                        let (rect, _) =
+                            ui.allocate_exact_size(preview.size(), egui::Sense::hover());
+                        preview.paint(ui, rect.min, palette.secondary);
                         let open = crate::i18n::gettext(app.locale, "Open message");
                         if theme::link(ui, &*open, theme::medium(13.0), palette.link)
                             .tab_stop(Stop::NotificationOpen(notification.id))

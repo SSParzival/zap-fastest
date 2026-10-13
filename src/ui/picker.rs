@@ -53,10 +53,13 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
         return;
     };
     let screen = ctx.content_rect();
-    let x = anchor
-        .left()
-        .clamp(screen.left() + 8.0, (screen.right() - WIDTH - 8.0).max(8.0));
-    let y = (anchor.top() - HEIGHT - 10.0).max(screen.top() + 8.0);
+    let width = WIDTH.min((screen.width() - 40.0).max(1.0));
+    let height = HEIGHT.min((screen.height() - 40.0).max(1.0));
+    let x = anchor.left().clamp(
+        screen.left() + 8.0,
+        (screen.right() - width - 28.0).max(screen.left() + 8.0),
+    );
+    let y = (anchor.top() - height - 30.0).max(screen.top() + 8.0);
     let area = egui::Area::new(egui::Id::new("picker"))
         .fixed_pos(pos2(x, y))
         .order(egui::Order::Foreground)
@@ -68,12 +71,12 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 .inner_margin(Margin::same(10))
                 .shadow(palette.float_shadow())
                 .show(ui, |ui| {
-                    ui.set_width(WIDTH);
-                    ui.set_height(HEIGHT);
+                    ui.set_width(width);
+                    ui.set_height(height);
                     ui.spacing_mut().item_spacing.y = 6.0;
-                    let body_height = HEIGHT - 44.0;
+                    let body_height = (height - 44.0 * (theme::regular(13.5).size / 13.5)).max(1.0);
                     ui.allocate_ui_with_layout(
-                        vec2(WIDTH, body_height),
+                        vec2(width, body_height),
                         egui::Layout::top_down(egui::Align::Min),
                         |ui| match tab {
                             PickerTab::Emoji => emoji_tab(app, ui, &palette),
@@ -105,26 +108,28 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
 }
 
 fn tabs(app: &mut App, ui: &mut egui::Ui, palette: &Palette, current: PickerTab) {
-    ui.horizontal(|ui| {
-        let entries = [
-            (PickerTab::Emoji, Icon::Smile, "Emoji"),
-            (PickerTab::Gifs, Icon::Gif, "GIF"),
-            (PickerTab::Stickers, Icon::Sticker, "Stickers"),
-        ];
-        let spacing = ui.spacing().item_spacing.x;
-        let total = entries
-            .iter()
-            .map(|(_, _, label)| theme::soft_button_width(ui, label, true))
-            .sum::<f32>()
-            + spacing * (entries.len() as f32 - 1.0);
-        ui.add_space((ui.available_width() - total).max(0.0) / 2.0);
-        for (tab, icon, label) in entries {
-            if theme::soft_button(ui, palette, Some(icon), label, tab == current).clicked()
-                && tab != current
-            {
-                app.actions.push(Action::TogglePicker(tab));
+    widgets::chip_scroll_row(ui, "picker-tabs", |ui| {
+        ui.horizontal(|ui| {
+            let entries = [
+                (PickerTab::Emoji, Icon::Smile, "Emoji"),
+                (PickerTab::Gifs, Icon::Gif, "GIF"),
+                (PickerTab::Stickers, Icon::Sticker, "Stickers"),
+            ];
+            let spacing = ui.spacing().item_spacing.x;
+            let total = entries
+                .iter()
+                .map(|(_, _, label)| theme::soft_button_width(ui, label, true))
+                .sum::<f32>()
+                + spacing * (entries.len() as f32 - 1.0);
+            ui.add_space((ui.available_width() - total).max(0.0) / 2.0);
+            for (tab, icon, label) in entries {
+                if theme::soft_button(ui, palette, Some(icon), label, tab == current).clicked()
+                    && tab != current
+                {
+                    app.actions.push(Action::TogglePicker(tab));
+                }
             }
-        }
+        })
     });
 }
 
@@ -391,11 +396,14 @@ fn reaction_picker(app: &mut App, ctx: &egui::Context) {
     } else {
         app.reaction_anchor
     };
-    let width = menu.map_or(WIDTH, |menu| {
-        (screen.right() - menu.right() - 32.0).clamp(260.0, WIDTH)
-    });
+    let width = menu
+        .map_or(WIDTH, |menu| {
+            (screen.right() - menu.right() - 32.0).clamp(260.0, WIDTH)
+        })
+        .min((screen.width() - 40.0).max(1.0));
+    let height = HEIGHT.min((screen.height() - 40.0).max(1.0));
     let outer_width = width + f32::from(FRAME_MARGIN) * 2.0;
-    let outer_height = HEIGHT + f32::from(FRAME_MARGIN) * 2.0;
+    let outer_height = height + f32::from(FRAME_MARGIN) * 2.0;
     let pos = if let Some(menu) = menu
         && menu.right() + outer_width + 16.0 <= screen.right()
     {
@@ -429,7 +437,7 @@ fn reaction_picker(app: &mut App, ctx: &egui::Context) {
                         .shadow(palette.float_shadow())
                         .show(ui, |ui| {
                             ui.set_width(width);
-                            ui.set_height(HEIGHT);
+                            ui.set_height(height);
                             ui.spacing_mut().item_spacing.y = 6.0;
                             ui.horizontal(|ui| {
                                 theme::text(
@@ -468,7 +476,8 @@ fn reaction_picker(app: &mut App, ctx: &egui::Context) {
                                 );
                                 line.paint(ui, rect.min, palette.secondary);
                             }
-                            let body_height = HEIGHT - 100.0;
+                            let body_height =
+                                (height - 100.0 * (theme::regular(13.5).size / 13.5)).max(1.0);
                             ui.allocate_ui_with_layout(
                                 vec2(width, body_height),
                                 Layout::top_down(Align::Min),
@@ -774,7 +783,11 @@ fn emoji_grid(
                                 let line = widgets::line(
                                     ui,
                                     emoji,
-                                    theme::regular(24.0),
+                                    {
+                                        let mut font = theme::regular(24.0);
+                                        font.size = font.size.min(CELL - 12.0);
+                                        font
+                                    },
                                     palette.text,
                                     cell,
                                     1,

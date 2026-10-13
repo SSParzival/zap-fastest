@@ -3183,16 +3183,8 @@ msgstr ""
 "{pending}."
 
 #: src/ui/archive_backup.rs:107
-msgid ""
-"Existing messages, session credentials and current pending work are "
-"preserved. Imported pending sends never run. Different edited snapshots "
-"without a revision timestamp keep the current version and retain the "
-"imported alternative in the encrypted archive."
-msgstr ""
-"Существующие сообщения, данные сеанса и текущие ожидающие задачи "
-"сохраняются. Импортированные ожидающие отправки никогда не выполняются. При "
-"разных правках без времени изменения сохраняется текущая версия, а "
-"импортированный вариант остаётся в зашифрованном архиве."
+msgid "Session credentials and current pending work are preserved. Confirmed backup deletions listed above are applied. Imported pending sends never run. Different edited snapshots without a revision timestamp keep the current version and retain the imported alternative in the encrypted archive."
+msgstr "Учетные данные сеанса и текущие ожидающие операции сохраняются. Подтвержденные удаления из резервной копии, перечисленные выше, применяются. Импортированные ожидающие отправки никогда не выполняются. При разных правках без времени изменения сохраняется текущая версия, а импортированный вариант остаётся в зашифрованном архиве."
 
 #: src/ui/archive_backup.rs:110
 msgid ""
@@ -3451,3 +3443,21 @@ msgstr "Скачать статус"
 
 #~ msgid "Pin removed"
 #~ msgstr "Закрепление снято"
+
+msgid "Loading media…"
+msgstr "Загрузка медиа…"
+
+msgid "Searching…"
+msgstr "Поиск…"
+
+msgid "Checking password…"
+msgstr "Проверка пароля…"
+
+msgid "Passphrases do not match."
+msgstr "Пароли не совпадают."
+
+msgid "Play / pause"
+msgstr "Воспроизвести / пауза"
+
+msgid "Preparing call…"
+msgstr "Подготовка звонка…"

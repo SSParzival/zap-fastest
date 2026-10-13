@@ -98,8 +98,16 @@ pub fn create(app: &mut App, ui: &mut egui::Ui, chat: &str) {
             app.poll_draft.options.push(String::new());
         }
         ui.add_space(8.0);
-        ui.horizontal(|ui| {
-            widgets::switch(ui, &palette, &mut app.poll_draft.multiple);
+        ui.horizontal_wrapped(|ui| {
+            let response = widgets::switch(ui, &palette, &mut app.poll_draft.multiple);
+            response.widget_info(|| {
+                egui::WidgetInfo::selected(
+                    egui::WidgetType::Checkbox,
+                    ui.is_enabled(),
+                    app.poll_draft.multiple,
+                    "Allow multiple answers",
+                )
+            });
             theme::text(
                 ui,
                 "Allow multiple answers",

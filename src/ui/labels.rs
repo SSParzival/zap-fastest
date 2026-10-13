@@ -221,6 +221,7 @@ pub fn chat_menu(app: &mut App, ui: &mut egui::Ui, chat: &Chat, palette: &Palett
 /// The manager: create, rename, recolour and delete labels.
 pub fn manager(app: &mut App, ui: &mut egui::Ui, palette: &Palette) {
     let locale = app.locale;
+    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
     let mut enabled = app.account().settings.focus_enabled;
     if ui
         .add_enabled(
@@ -296,19 +297,18 @@ pub fn manager(app: &mut App, ui: &mut egui::Ui, palette: &Palette) {
             palette.warning,
         );
     } else {
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             let field = ui.add(
                 egui::TextEdit::singleline(&mut app.label_name)
                     .id(name_field_id())
                     .hint_text(gettext(locale, "New label"))
                     .char_limit(crate::archive::NAME_LIMIT)
-                    .desired_width(160.0)
+                    .desired_width((ui.available_width() - 100.0).max(1.0))
                     .font(theme::regular(14.0)),
             );
             if field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)) {
                 create(app);
             }
-            swatches(app, ui, palette);
             if !app.label_name.trim().is_empty()
                 && theme::soft_button(
                     ui,
@@ -322,6 +322,7 @@ pub fn manager(app: &mut App, ui: &mut egui::Ui, palette: &Palette) {
                 create(app);
             }
         });
+        swatches(app, ui, palette);
     }
 
     ui.add_space(8.0);
@@ -390,6 +391,7 @@ pub fn manager(app: &mut App, ui: &mut egui::Ui, palette: &Palette) {
                 .unwrap_or("Custom sound");
             egui::ComboBox::from_id_salt(("label-sound", &label.id))
                 .selected_text(selected)
+                .truncate()
                 .show_ui(ui, |ui| {
                     for (sound, text) in options {
                         if ui.selectable_label(sound == current, text).clicked() {
@@ -582,11 +584,12 @@ fn next_color(hex: &str) -> String {
 
 fn swatches(app: &mut App, ui: &mut egui::Ui, palette: &Palette) {
     let locale = app.locale;
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = vec2(3.0, 3.0);
         for hex in PRESET_COLORS {
             let selected = app.label_color.eq_ignore_ascii_case(hex);
-            let (rect, response) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::click());
+            let (target, response) = ui.allocate_exact_size(vec2(24.0, 24.0), Sense::click());
+            let rect = Rect::from_center_size(target.center(), vec2(18.0, 18.0));
             response.widget_info(|| {
                 egui::WidgetInfo::selected(
                     egui::WidgetType::RadioButton,
