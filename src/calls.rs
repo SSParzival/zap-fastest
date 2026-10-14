@@ -449,6 +449,7 @@ pub struct Call {
     media_ready: bool,
     processing: Option<Arc<crate::call_processing::CallProcessing>>,
     codec: Option<crate::call_codec::Audio>,
+    transport_trace: Option<Arc<crate::call_transport::Trace>>,
     mic: Option<AudioInput>,
     speaker: Option<AudioOutput>,
     microphone: Option<String>,
@@ -537,6 +538,8 @@ impl Call {
 
         let voip = client.voip();
         let codec = crate::call_codec::Audio::open(mic_rx, output_tx)?;
+        let generation = next_generation();
+        let transport_trace = crate::call_transport::Trace::install(client, generation);
         let mut offer = voip.call(&peer).encoded_audio(
             crate::call_codec::FORMAT,
             codec.source.clone(),
@@ -559,7 +562,7 @@ impl Call {
             video_requested: false,
             video,
             video_upgrade: None,
-            generation: next_generation(),
+            generation,
             call_id: handle.call_id().to_owned(),
             chat,
             direction: CallDirection::Outgoing,
@@ -573,6 +576,7 @@ impl Call {
             media_ready: false,
             processing: Some(processing),
             codec: Some(codec),
+            transport_trace: Some(transport_trace),
             mic: Some(mic),
             speaker: Some(output),
             microphone,
@@ -607,6 +611,7 @@ impl Call {
             media_ready: false,
             processing: None,
             codec: None,
+            transport_trace: None,
             mic: None,
             speaker: None,
             microphone: devices.microphone,
@@ -638,6 +643,7 @@ impl Call {
             media_ready: false,
             processing: None,
             codec: None,
+            transport_trace: None,
             mic: None,
             speaker: None,
             microphone: None,
@@ -685,6 +691,7 @@ impl Call {
             media_ready: false,
             processing: None,
             codec: None,
+            transport_trace: None,
             mic: None,
             speaker: None,
             microphone: self.microphone.clone(),
@@ -742,6 +749,7 @@ impl Call {
         }
         let handle = self.handle.clone()?;
         self.video_starting = true;
+        self.log_media_stats_at("video-before");
         Some((handle, self.video_upgrade))
     }
 
@@ -750,6 +758,7 @@ impl Call {
         self.video_starting = false;
         self.video_requested = false;
         self.video_upgrade = None;
+        self.log_media_stats_at("video-after");
     }
 
     pub fn video_preparation_finished(&mut self) {
@@ -757,6 +766,7 @@ impl Call {
     }
 
     pub async fn stop_video(&mut self) -> Result<()> {
+        self.log_media_stats_at("video-before");
         self.video.take();
         self.video_starting = false;
         self.video_requested = false;
@@ -764,6 +774,7 @@ impl Call {
         if let Some(handle) = &self.handle {
             handle.stop_video().await?;
         }
+        self.log_media_stats_at("video-after");
         Ok(())
     }
 
@@ -887,6 +898,7 @@ impl Call {
         if let Some(video) = &video {
             answer = answer.video(video.source(), video.sink());
         }
+        let transport_trace = crate::call_transport::Trace::install(client, self.generation);
         let accepted = answer.start().await;
         let handle = match accepted {
             Ok(handle) => Arc::new(handle),
@@ -899,6 +911,7 @@ impl Call {
         self.video_requested = false;
         self.processing = Some(processing);
         self.codec = Some(codec);
+        self.transport_trace = Some(transport_trace);
         self.mic = Some(mic);
         self.speaker = Some(output);
         self.incoming = None;
@@ -971,6 +984,7 @@ impl Call {
 
     /// Releases every local resource. Safe to call twice.
     pub fn cleanup(&mut self) {
+        self.log_media_stats_at("ended");
         self.codec.take();
         self.video_starting = false;
         self.video.take();
@@ -1212,6 +1226,12 @@ impl Call {
     /// Reads the engine's media counters into the log, so a call that is up but not carrying audio
     /// can be diagnosed from a bug report rather than guessed at. Called from the call heartbeat.
     pub fn log_media_stats(&self) {
+        // Recovery is a heartbeat operation. Transition snapshots below only observe state.
+        if let Some(video) = &self.video
+            && let Some(handle) = &self.handle
+        {
+            video.recover_peer(handle);
+        }
         self.log_media_stats_at("heartbeat");
     }
 
@@ -1222,21 +1242,24 @@ impl Call {
     /// it, so two lines a second apart are a before and an after rather than two samples of a
     /// steady state.
     pub fn log_media_stats_at(&self, marker: &str) {
+        if let Some(trace) = &self.transport_trace {
+            trace.log(marker);
+        }
         if let Some(codec) = &self.codec {
-            codec.log_stats();
+            codec.log_stats(self.generation);
         }
         let Some(handle) = self.handle.as_ref() else {
             self.log_audio_path(marker);
             return;
         };
         if let Some(video) = &self.video {
-            video.recover_peer(handle);
-            video.view.log_stats();
+            video.view.log_stats(self.generation);
         }
         let stats = handle.media_stats();
         log::info!(
-            "[CALL] media stats at={} rtp_received={} unexpected_pt={} srtp_failed={} sframe_failed={} unclassified={} pipe_dropped={} decoded={} delivered={} foreign_decoded={} concealed={} without_decoder={} without_encoder={} mlow_sid={} mlow_dropped={} sink_dropped={} trimmed={} codec_switches={} video_sink_dropped={} peer_keyframes={} forwarding_rejected={}",
+            "[CALL] media stats at={} generation={} rtp_received={} unexpected_pt={} srtp_failed={} sframe_failed={} unclassified={} pipe_dropped={} decoded={} delivered={} foreign_decoded={} concealed={} without_decoder={} without_encoder={} mlow_sid={} mlow_dropped={} sink_dropped={} trimmed={} codec_switches={} video_sink_dropped={} peer_keyframes={} forwarding_rejected={}",
             marker,
+            self.generation,
             stats.rtp_received,
             stats.rtp_payload_type_unexpected,
             stats.srtp_unprotect_failed,
@@ -1283,8 +1306,9 @@ impl Call {
             .as_ref()
             .is_some_and(|processing| processing.failed());
         log::info!(
-            "[CALL] audio path at={} mic_opens={} speaker_opens={} speaker_stalls={} speaker_restarts={} live={} cleanup_capture_blocks={} cleanup_render_blocks={} cleanup_failed={} mic_frames_sent={}",
+            "[CALL] audio path at={} generation={} mic_opens={} speaker_opens={} speaker_stalls={} speaker_restarts={} live={} cleanup_capture_blocks={} cleanup_render_blocks={} cleanup_failed={} mic_frames_sent={}",
             marker,
+            self.generation,
             self.mic
                 .as_ref()
                 .map_or(0, |mic| mic.opens.load(Ordering::Relaxed)),
@@ -1365,6 +1389,7 @@ impl Call {
         self.phase = CallPhase::Active;
         // The timer starts here, when there is really a call, never at the button press.
         self.started = Some(Instant::now());
+        self.log_media_stats_at("active");
         log::info!("call state updated");
         Some(self.update())
     }
@@ -1424,6 +1449,7 @@ impl Call {
         } else {
             log::info!("[CALL] microphone unmuted");
         }
+        self.log_media_stats_at("mute");
         Some(self.update())
     }
 
@@ -1988,6 +2014,7 @@ mod tests {
             processing: None,
             codec: None,
             mic: None,
+            transport_trace: None,
             speaker: None,
             microphone: None,
             speaker_device: None,

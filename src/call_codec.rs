@@ -16,8 +16,10 @@ pub(crate) const FORMAT: AudioFormat = AudioFormat::OPUS_16KHZ_60MS;
 
 #[derive(Default)]
 struct Counters {
+    received: AtomicU32,
     encoded: AtomicU32,
     decoded: AtomicU32,
+    submitted: AtomicU32,
     rejected: AtomicU32,
     dropped: AtomicU32,
     failed: AtomicBool,
@@ -81,6 +83,7 @@ impl Audio {
             .name("call-opus-decode".into())
             .spawn(move || {
                 while let Ok(frame) = incoming.recv_blocking() {
+                    counters.received.fetch_add(1, Ordering::Relaxed);
                     // The library identifies each frame's codec and RTP container.
                     // Native Opus negotiation must never feed an MLOW payload to libopus.
                     if frame.format.rtp_profile != FORMAT.rtp_profile || frame.codec != FORMAT.codec
@@ -97,6 +100,7 @@ impl Audio {
                             if speaker.send_blocking(pcm.to_vec()).is_err() {
                                 break;
                             }
+                            counters.submitted.fetch_add(1, Ordering::Relaxed);
                         }
                         Err(_) => {
                             counters.rejected.fetch_add(1, Ordering::Relaxed);
@@ -136,14 +140,19 @@ impl Audio {
         self.counters.failed.load(Ordering::Relaxed)
             || self.counters.source_failed.load(Ordering::Relaxed)
     }
-    pub fn log_stats(&self) {
+    pub fn log_stats(&self, generation: u64) {
         log::info!(
-            "[CALL] Opus encoded={} decoded={} rejected={} dropped={} failed={}",
+            "[CALL] Opus generation={} received={} encoded={} decoded={} submitted={} rejected={} dropped={} failed={} source_closed={} sink_closed={}",
+            generation,
+            self.counters.received.load(Ordering::Relaxed),
             self.counters.encoded.load(Ordering::Relaxed),
             self.decoded(),
+            self.counters.submitted.load(Ordering::Relaxed),
             self.counters.rejected.load(Ordering::Relaxed),
             self.counters.dropped.load(Ordering::Relaxed),
-            self.failed()
+            self.failed(),
+            self.source.is_closed(),
+            self.sink.is_closed(),
         );
     }
 }
@@ -158,6 +167,160 @@ impl Drop for Audio {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn authenticated_rtp_reaches_the_real_opus_sink_before_and_after_camera_changes() {
+        use whatsapp_rust::wacore::voip::{
+            AudioConfig,
+            engine::{CallConfig, CallEngine, Input, Output, SequentialTxIds},
+            session::{
+                CallDirection, MediaPipeline, MediaPipelineParams, VideoPipeline,
+                VideoPipelineParams,
+            },
+        };
+        let config = CallConfig {
+            call_id: "synthetic-receive-boundary".into(),
+            direction: CallDirection::Incoming,
+            self_lid: "15550000001:0@lid".into(),
+            peer_lid: "15550000002:0@lid".into(),
+            call_key: vec![42; 32],
+            ssrc: 0x5741_0001,
+            audio: AudioConfig::encoded(FORMAT),
+            relay_token: vec![1; 16],
+            auth_token: vec![2; 8],
+            relay_ip: "203.0.113.7".into(),
+            relay_port: 3478,
+            integrity_key: b"synthetic-relay-key".to_vec(),
+            warp_mi_tag_len: 4,
+            enable_media: true,
+            enable_video: false,
+            enable_sframe: false,
+        };
+        let mut engine = CallEngine::new(config.clone(), Box::new(SequentialTxIds::new())).unwrap();
+        let mut peer = MediaPipeline::new(&MediaPipelineParams {
+            call_key: &config.call_key,
+            self_lid: &config.peer_lid,
+            peer_lid: &config.self_lid,
+            ssrc: config.ssrc,
+            samples_per_packet: FORMAT.rtp_timestamp_step,
+            warp_mi_tag_len: config.warp_mi_tag_len,
+        })
+        .unwrap();
+        assert!(peer.set_audio_payload_type(FORMAT.rtp_payload_type));
+        let mut peer_video = VideoPipeline::new(&VideoPipelineParams {
+            call_key: &config.call_key,
+            self_lid: &config.peer_lid,
+            peer_lid: &config.self_lid,
+            ssrc: 0x5741_0002,
+            ts_stride: 6000,
+            warp_mi_tag_len: config.warp_mi_tag_len,
+        })
+        .unwrap();
+        let (mic, input) = async_channel::bounded(1);
+        let (output, speaker) = async_channel::bounded(1);
+        let audio = Audio::open(input, output).unwrap();
+        let mut peer_encoder = WaOpusEncoder::new().unwrap();
+        let voice: Vec<_> = (0..960)
+            .map(|i| ((i as f32 * 0.17).sin() * 5000.0) as i16)
+            .collect();
+
+        for step in 0..4 {
+            match step {
+                1 | 3 => assert!(engine.enable_video()),
+                2 => engine.disable_video(),
+                _ => {}
+            }
+            // Encrypt a peer packet with the dependency's actual SRTP pipeline. The engine must
+            // authenticate it, preserve the negotiated format and deliver it to our actual sink.
+            let packet = peer.protect_audio(&peer_encoder.encode(&voice).unwrap());
+            engine.handle_input(step, Input::RelayPacket(&packet));
+            let mut delivered = false;
+            loop {
+                match engine.poll_output() {
+                    Output::EncodedAudio(frame) => {
+                        assert_eq!(frame.format, FORMAT);
+                        audio.sink.send(frame).await.unwrap();
+                        delivered = true;
+                    }
+                    Output::Timeout(_) => break,
+                    _ => {}
+                }
+            }
+            assert!(
+                delivered,
+                "inbound audio must survive each camera transition"
+            );
+            let pcm = tokio::time::timeout(std::time::Duration::from_secs(2), speaker.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(pcm.len(), 960);
+            assert!(pcm.iter().any(|sample| sample.abs() > 100));
+
+            // The same live source must still reach the peer on the unchanged outbound profile.
+            mic.send(voice.clone()).await.unwrap();
+            let encoded =
+                tokio::time::timeout(std::time::Duration::from_secs(2), audio.source.recv())
+                    .await
+                    .unwrap()
+                    .unwrap();
+            engine.handle_input(step, Input::EncodedAudio(&encoded));
+            let mut sent = false;
+            loop {
+                match engine.poll_output() {
+                    Output::Transmit(packet) => {
+                        if let Some((_, recovered)) = peer.unprotect_audio(&packet) {
+                            assert_eq!(recovered.as_slice(), encoded.as_ref());
+                            sent = true;
+                        }
+                    }
+                    Output::Timeout(_) => break,
+                    _ => {}
+                }
+            }
+            assert!(sent, "outbound audio must survive each camera transition");
+            if step == 1 || step == 3 {
+                // Exercise the app's real receive decoder on each new video endpoint. No
+                // camera, socket, account data or platform speaker is opened by this test.
+                use openh264::formats::{RgbSliceU8, YUVBuffer};
+                let rgb = vec![100; 64 * 48 * 3];
+                let yuv = YUVBuffer::from_rgb8_source(RgbSliceU8::new(&rgb, (64, 48)));
+                let access = openh264::encoder::Encoder::new()
+                    .unwrap()
+                    .encode(&yuv)
+                    .unwrap()
+                    .to_vec();
+                let (sink, view) = crate::camera::test_peer_sink();
+                for packet in peer_video.protect_video(&access) {
+                    engine.handle_input(step, Input::RelayPacket(&packet));
+                    loop {
+                        match engine.poll_output() {
+                            Output::VideoPlayout(frame) => sink.send(frame).await.unwrap(),
+                            Output::Timeout(_) => break,
+                            _ => {}
+                        }
+                    }
+                }
+                let image = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+                    loop {
+                        if let Some(image) = view.take_peer() {
+                            break image;
+                        }
+                        tokio::task::yield_now().await;
+                    }
+                })
+                .await
+                .unwrap();
+                assert_eq!(image.size, [64, 48]);
+                drop(sink);
+            }
+        }
+        assert_eq!(engine.media_stats().rtp_received, 4);
+        assert_eq!(audio.decoded(), 4);
+        assert!(!audio.failed());
+        drop(audio);
+        drop(mic);
+    }
 
     #[test]
     fn native_opus_decodes_voice_and_video_bandwidth_changes() {

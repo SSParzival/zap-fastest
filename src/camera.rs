@@ -182,6 +182,8 @@ struct Frames {
     capture_clock: AtomicU64,
     peer_received: AtomicU64,
     peer_decoded: AtomicU64,
+    peer_decode_failed: AtomicU64,
+    peer_waiting: AtomicU64,
     peer_decode_micros: AtomicU64,
     peer_images_taken: AtomicU64,
     peer_keyframe_needed: AtomicBool,
@@ -229,10 +231,11 @@ impl VideoView {
         }
         image
     }
-    pub fn log_stats(&self) {
+    pub fn log_stats(&self, generation: u64) {
         let frames = &self.0;
         log::info!(
-            "[CALL] video captured={} queue_dropped={} encoded_bytes={} encode_us={} capture_clock={} peer_received={} peer_decoded={} peer_decode_us={} peer_images_taken={}",
+            "[CALL] video generation={} captured={} queue_dropped={} encoded_bytes={} encode_us={} capture_clock={} peer_received={} peer_decoded={} peer_decode_failed={} peer_waiting={} peer_decode_us={} peer_images_taken={}",
+            generation,
             frames.captured.load(Ordering::Relaxed),
             frames.queue_dropped.load(Ordering::Relaxed),
             frames.encoded_bytes.load(Ordering::Relaxed),
@@ -240,6 +243,8 @@ impl VideoView {
             frames.capture_clock.load(Ordering::Relaxed),
             frames.peer_received.load(Ordering::Relaxed),
             frames.peer_decoded.load(Ordering::Relaxed),
+            frames.peer_decode_failed.load(Ordering::Relaxed),
+            frames.peer_waiting.load(Ordering::Relaxed),
             frames.peer_decode_micros.load(Ordering::Relaxed),
             frames.peer_images_taken.load(Ordering::Relaxed)
         );
@@ -413,53 +418,7 @@ impl VideoSession {
                     let _ = process.wait();
                 }
             })?;
-        let decode_stop = session.stop.clone();
-        let decode_view = session.view.clone();
-        std::thread::Builder::new()
-            .name("call-video-decoder".into())
-            .spawn(move || {
-                let Ok(mut decoder) = openh264::decoder::Decoder::new() else {
-                    decode_view.fail("Video decoding is unavailable.");
-                    return;
-                };
-                while let Ok(frame) = peer.recv_blocking() {
-                    if decode_stop.load(Ordering::Acquire) {
-                        return;
-                    }
-                    if frame.data.len() > MAX_AU {
-                        decode_view
-                            .0
-                            .peer_keyframe_needed
-                            .store(true, Ordering::Release);
-                        continue;
-                    }
-                    decode_view.0.peer_received.fetch_add(1, Ordering::Relaxed);
-                    let start = Instant::now();
-                    let decoded = decoder.decode(&frame.data);
-                    decode_view
-                        .0
-                        .peer_decode_micros
-                        .fetch_add(start.elapsed().as_micros() as u64, Ordering::Relaxed);
-                    match decoded {
-                        Ok(Some(yuv)) => {
-                            decode_view.0.peer_decoded.fetch_add(1, Ordering::Relaxed);
-                            if let Some(image) = crate::video::picture(&yuv, frame.orientation, 720)
-                                && !decode_stop.load(Ordering::Acquire)
-                            {
-                                decode_view.publish(false, image);
-                            }
-                        }
-                        Ok(None) => {}
-                        Err(_) => {
-                            decode_view
-                                .0
-                                .peer_keyframe_needed
-                                .store(true, Ordering::Release);
-                            decode_view.fail("Some incoming video frames could not be decoded.");
-                        }
-                    }
-                }
-            })?;
+        spawn_peer_decoder(peer, session.stop.clone(), session.view.clone())?;
         match tokio::time::timeout(Duration::from_secs(20), opened.recv()).await {
             Ok(Ok(Ok(()))) => Ok(session),
             Ok(Ok(Err(message))) => Err(anyhow!(message)),
@@ -510,6 +469,73 @@ impl VideoSession {
             .take();
     }
 }
+fn spawn_peer_decoder(
+    peer: async_channel::Receiver<VideoFrame>,
+    decode_stop: Arc<AtomicBool>,
+    decode_view: VideoView,
+) -> Result<()> {
+    std::thread::Builder::new()
+        .name("call-video-decoder".into())
+        .spawn(move || {
+            let Ok(mut decoder) = openh264::decoder::Decoder::new() else {
+                decode_view.fail("Video decoding is unavailable.");
+                return;
+            };
+            while let Ok(frame) = peer.recv_blocking() {
+                if decode_stop.load(Ordering::Acquire) {
+                    return;
+                }
+                if frame.data.len() > MAX_AU {
+                    decode_view
+                        .0
+                        .peer_keyframe_needed
+                        .store(true, Ordering::Release);
+                    continue;
+                }
+                decode_view.0.peer_received.fetch_add(1, Ordering::Relaxed);
+                let start = Instant::now();
+                let decoded = decoder.decode(&frame.data);
+                decode_view
+                    .0
+                    .peer_decode_micros
+                    .fetch_add(start.elapsed().as_micros() as u64, Ordering::Relaxed);
+                match decoded {
+                    Ok(Some(yuv)) => {
+                        decode_view.0.peer_decoded.fetch_add(1, Ordering::Relaxed);
+                        if let Some(image) = crate::video::picture(&yuv, frame.orientation, 720)
+                            && !decode_stop.load(Ordering::Acquire)
+                        {
+                            decode_view.publish(false, image);
+                        }
+                    }
+                    Ok(None) => {
+                        decode_view.0.peer_waiting.fetch_add(1, Ordering::Relaxed);
+                    }
+                    Err(_) => {
+                        decode_view
+                            .0
+                            .peer_decode_failed
+                            .fetch_add(1, Ordering::Relaxed);
+                        decode_view
+                            .0
+                            .peer_keyframe_needed
+                            .store(true, Ordering::Release);
+                        decode_view.fail("Some incoming video frames could not be decoded.");
+                    }
+                }
+            }
+        })?;
+    Ok(())
+}
+
+#[cfg(test)]
+pub(crate) fn test_peer_sink() -> (async_channel::Sender<VideoFrame>, VideoView) {
+    let (sink, peer) = async_channel::bounded(2);
+    let view = VideoView::default();
+    spawn_peer_decoder(peer, Arc::new(AtomicBool::new(false)), view.clone()).unwrap();
+    (sink, view)
+}
+
 impl std::fmt::Debug for VideoSession {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("VideoSession")

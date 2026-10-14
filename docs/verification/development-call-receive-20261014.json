@@ -1,0 +1,177 @@
+{
+  "generated_at_utc": "2026-10-14T18:22:39.462863+00:00",
+  "source_parent": "f26265d4e3ce6e9239a522df0413129fd3e3f8cd",
+  "frozen_inputs": {
+    "count": 328,
+    "sha256": "63f0a24a0bb25a460763df8aea8d3de9690d253766209fa4564437a85c48fa6b",
+    "unchanged": true
+  },
+  "dependency": {
+    "revision": "94c53e833805c58c9f5966b08d08c990650a651e",
+    "modified": false
+  },
+  "windows_gates": [
+    {
+      "name": "fmt",
+      "command": [
+        "H:\\Packages\\rustup-legacy\\toolchains\\1.98.0-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+        "fmt",
+        "--all",
+        "--check"
+      ],
+      "exit_code": 0,
+      "started": "2026-10-14T18:04:56.824851+00:00",
+      "finished": "2026-10-14T18:04:59.560063+00:00"
+    },
+    {
+      "name": "clippy",
+      "command": [
+        "H:\\Packages\\rustup-legacy\\toolchains\\1.98.0-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+        "clippy",
+        "--locked",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "started": "2026-10-14T18:04:59.571396+00:00",
+      "finished": "2026-10-14T18:05:01.860343+00:00"
+    },
+    {
+      "name": "clippy-all",
+      "command": [
+        "H:\\Packages\\rustup-legacy\\toolchains\\1.98.0-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+        "clippy",
+        "--locked",
+        "--all-targets",
+        "--all-features",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "started": "2026-10-14T18:05:01.860756+00:00",
+      "finished": "2026-10-14T18:05:02.632707+00:00"
+    },
+    {
+      "name": "test",
+      "command": [
+        "H:\\Packages\\rustup-legacy\\toolchains\\1.98.0-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+        "test",
+        "--locked",
+        "--all-targets",
+        "--",
+        "--test-threads=2"
+      ],
+      "exit_code": 0,
+      "started": "2026-10-14T18:05:02.633119+00:00",
+      "finished": "2026-10-14T18:12:03.704059+00:00"
+    },
+    {
+      "name": "test-all",
+      "command": [
+        "H:\\Packages\\rustup-legacy\\toolchains\\1.98.0-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+        "test",
+        "--locked",
+        "--all-targets",
+        "--all-features",
+        "--",
+        "--test-threads=2"
+      ],
+      "exit_code": 0,
+      "started": "2026-10-14T18:12:03.705452+00:00",
+      "finished": "2026-10-14T18:20:59.991717+00:00"
+    },
+    {
+      "name": "doc",
+      "command": [
+        "H:\\Packages\\rustup-legacy\\toolchains\\1.98.0-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+        "doc",
+        "--locked",
+        "--all-features",
+        "--no-deps"
+      ],
+      "exit_code": 0,
+      "started": "2026-10-14T18:20:59.993733+00:00",
+      "finished": "2026-10-14T18:21:41.396219+00:00"
+    }
+  ],
+  "test_counts": {
+    "test": [
+      {
+        "passed": 1857,
+        "failed": 0,
+        "ignored": 13
+      },
+      {
+        "passed": 10,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "passed": 2,
+        "failed": 0,
+        "ignored": 0
+      }
+    ],
+    "test-all": [
+      {
+        "passed": 1857,
+        "failed": 0,
+        "ignored": 13
+      },
+      {
+        "passed": 12,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "passed": 2,
+        "failed": 0,
+        "ignored": 0
+      }
+    ]
+  },
+  "counter_exporter_tests": {
+    "passed": 3,
+    "command": "python -B packaging/test-call-diagnostics.py"
+  },
+  "attended_before": {
+    "user_confirmed_interval": true,
+    "interval_utc": [
+      "2026-10-14T17:28:25Z",
+      "2026-10-14T17:29:40Z"
+    ],
+    "counter_records": 57,
+    "authenticated_audio_rtp": 0,
+    "opus_decoded": 0,
+    "opus_rejected": 0,
+    "peer_video_access_units": 0,
+    "peer_video_transmitting_independently_confirmed": false,
+    "root_cause_established": false
+  },
+  "attended_after": {
+    "status": "not_yet_run",
+    "acceptance": [
+      "bidirectional_voice_before_camera",
+      "bidirectional_voice_after_camera",
+      "both_transmitting_and_receiving_video",
+      "camera_off_audio",
+      "minimize_restore_audio",
+      "mute",
+      "end_call"
+    ]
+  },
+  "installed_baseline": {
+    "version": "0.30.0",
+    "sha256": "C3F3A0609AD631AD149DED2C9738BDE4B01897226FACC6CC37759C5750F17A09"
+  },
+  "delivery_receipts": {
+    "ci": "H:\\Scratch\\Codex\\zap-inbound-20261014\\ci-receipt.json",
+    "build": "H:\\Scratch\\Codex\\zap-inbound-20261014\\release-receipt.json",
+    "installed": "H:\\Scratch\\Codex\\zap-inbound-20261014\\installed-readback.json"
+  },
+  "status": "diagnostic_build_requires_attended_receive_evidence",
+  "release_published": false
+}

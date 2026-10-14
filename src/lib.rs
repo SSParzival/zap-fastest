@@ -14,6 +14,7 @@ pub mod bidi;
 pub mod call_audio;
 mod call_codec;
 mod call_processing;
+mod call_transport;
 pub mod calls;
 pub mod camera;
 pub mod chat_link;
