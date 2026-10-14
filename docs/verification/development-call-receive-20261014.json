@@ -1,9 +1,9 @@
 {
-  "generated_at_utc": "2026-10-14T18:22:39.462863+00:00",
-  "source_parent": "f26265d4e3ce6e9239a522df0413129fd3e3f8cd",
+  "generated_at_utc": "2026-10-14T18:36:50.982684+00:00",
+  "source_parent": "0834937c725741dda9bbbe74b472509e769b17e2",
   "frozen_inputs": {
     "count": 328,
-    "sha256": "63f0a24a0bb25a460763df8aea8d3de9690d253766209fa4564437a85c48fa6b",
+    "sha256": "21c3b51b9741cca69c9c4a61b779d3917102eadd85e8ef7042ff82d01bc41d6c",
     "unchanged": true
   },
   "dependency": {
@@ -20,8 +20,8 @@
         "--check"
       ],
       "exit_code": 0,
-      "started": "2026-10-14T18:04:56.824851+00:00",
-      "finished": "2026-10-14T18:04:59.560063+00:00"
+      "started": "2026-10-14T18:35:40.880633+00:00",
+      "finished": "2026-10-14T18:35:43.282408+00:00"
     },
     {
       "name": "clippy",
@@ -35,8 +35,8 @@
         "warnings"
       ],
       "exit_code": 0,
-      "started": "2026-10-14T18:04:59.571396+00:00",
-      "finished": "2026-10-14T18:05:01.860343+00:00"
+      "started": "2026-10-14T18:35:43.282870+00:00",
+      "finished": "2026-10-14T18:36:21.601421+00:00"
     },
     {
       "name": "clippy-all",
@@ -51,37 +51,8 @@
         "warnings"
       ],
       "exit_code": 0,
-      "started": "2026-10-14T18:05:01.860756+00:00",
-      "finished": "2026-10-14T18:05:02.632707+00:00"
-    },
-    {
-      "name": "test",
-      "command": [
-        "H:\\Packages\\rustup-legacy\\toolchains\\1.98.0-x86_64-pc-windows-msvc\\bin\\cargo.exe",
-        "test",
-        "--locked",
-        "--all-targets",
-        "--",
-        "--test-threads=2"
-      ],
-      "exit_code": 0,
-      "started": "2026-10-14T18:05:02.633119+00:00",
-      "finished": "2026-10-14T18:12:03.704059+00:00"
-    },
-    {
-      "name": "test-all",
-      "command": [
-        "H:\\Packages\\rustup-legacy\\toolchains\\1.98.0-x86_64-pc-windows-msvc\\bin\\cargo.exe",
-        "test",
-        "--locked",
-        "--all-targets",
-        "--all-features",
-        "--",
-        "--test-threads=2"
-      ],
-      "exit_code": 0,
-      "started": "2026-10-14T18:12:03.705452+00:00",
-      "finished": "2026-10-14T18:20:59.991717+00:00"
+      "started": "2026-10-14T18:36:21.601875+00:00",
+      "finished": "2026-10-14T18:36:22.389016+00:00"
     },
     {
       "name": "doc",
@@ -93,46 +64,10 @@
         "--no-deps"
       ],
       "exit_code": 0,
-      "started": "2026-10-14T18:20:59.993733+00:00",
-      "finished": "2026-10-14T18:21:41.396219+00:00"
+      "started": "2026-10-14T18:36:22.389533+00:00",
+      "finished": "2026-10-14T18:36:23.243851+00:00"
     }
   ],
-  "test_counts": {
-    "test": [
-      {
-        "passed": 1857,
-        "failed": 0,
-        "ignored": 13
-      },
-      {
-        "passed": 10,
-        "failed": 0,
-        "ignored": 0
-      },
-      {
-        "passed": 2,
-        "failed": 0,
-        "ignored": 0
-      }
-    ],
-    "test-all": [
-      {
-        "passed": 1857,
-        "failed": 0,
-        "ignored": 13
-      },
-      {
-        "passed": 12,
-        "failed": 0,
-        "ignored": 0
-      },
-      {
-        "passed": 2,
-        "failed": 0,
-        "ignored": 0
-      }
-    ]
-  },
   "counter_exporter_tests": {
     "passed": 3,
     "command": "python -B packaging/test-call-diagnostics.py"
@@ -173,5 +108,72 @@
     "installed": "H:\\Scratch\\Codex\\zap-inbound-20261014\\installed-readback.json"
   },
   "status": "diagnostic_build_requires_attended_receive_evidence",
-  "release_published": false
+  "release_published": false,
+  "previous_validation": {
+    "source_commit": "0834937c725741dda9bbbe74b472509e769b17e2",
+    "frozen_inputs": {
+      "count": 328,
+      "sha256": "63f0a24a0bb25a460763df8aea8d3de9690d253766209fa4564437a85c48fa6b",
+      "unchanged": true
+    },
+    "test_counts": {
+      "test": [
+        {
+          "passed": 1857,
+          "failed": 0,
+          "ignored": 13
+        },
+        {
+          "passed": 10,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "passed": 2,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "test-all": [
+        {
+          "passed": 1857,
+          "failed": 0,
+          "ignored": 13
+        },
+        {
+          "passed": 12,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "passed": 2,
+          "failed": 0,
+          "ignored": 0
+        }
+      ]
+    },
+    "full_receipt": "https://github.com/eternalwaitt/zap-faster/blob/0834937c725741dda9bbbe74b472509e769b17e2/docs/verification/development-call-receive-20261014.json"
+  },
+  "test_coverage": {
+    "provider": "matching Windows CI job",
+    "commands": [
+      "mbx test --locked --all-targets",
+      "mbx test --locked --all-targets --all-features"
+    ],
+    "receipt": "H:\\Scratch\\Codex\\zap-inbound-20261014\\ci-receipt.json",
+    "required_source": "commit containing the Rustls 0.23.46 lockfile update"
+  },
+  "security_followup": {
+    "package": "rustls",
+    "from": "0.23.45",
+    "to": "0.23.46",
+    "advisories": [
+      "RUSTSEC-2026-0346",
+      "RUSTSEC-2026-0347",
+      "RUSTSEC-2026-0348",
+      "RUSTSEC-2026-0349"
+    ],
+    "prior_failing_run": "https://github.com/eternalwaitt/zap-faster/actions/runs/38614738552",
+    "inbound_media_cause_established": false
+  }
 }

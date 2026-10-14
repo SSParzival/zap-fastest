@@ -96,12 +96,32 @@ Windows gates, source manifest, CI, installation/backup receipts and subsequent
 attended results are tracked in the companion verification record. A build or CI
 pass does not resolve this incident.
 
-All six Windows gates passed for the final 328 frozen inputs (manifest SHA-256
+Before the separate TLS patch below, all six Windows gates passed for 328 frozen inputs (manifest SHA-256
 `63f0a24a0bb25a460763df8aea8d3de9690d253766209fa4564437a85c48fa6b`).
 Default and all-feature library suites each passed 1,857 tests with 13 hardware
 tests ignored. Binary suites passed 10/12 tests respectively; update-helper
 suites passed two each. All three exporter privacy tests passed. Existing
 OpenSSL missing-PDB linker warnings remain separate from these successful gates.
+
+## CI security follow-up
+
+The first CI run for `0834937c` failed its advisory gate on the existing Rustls
+0.23.45 dependency. RustSec published four advisories dated 14 October 2026:
+[0346](https://github.com/RustSec/advisory-db/blob/main/crates/rustls/RUSTSEC-2026-0346.md),
+[0347](https://github.com/RustSec/advisory-db/blob/main/crates/rustls/RUSTSEC-2026-0347.md),
+[0348](https://github.com/RustSec/advisory-db/blob/main/crates/rustls/RUSTSEC-2026-0348.md)
+and [0349](https://github.com/RustSec/advisory-db/blob/main/crates/rustls/RUSTSEC-2026-0349.md).
+Their official database entries all identify 0.23.46 as patched. The lockfile
+follow-up changes only that package's version and checksum. This resolves a
+separate dependency finding; it does not establish the inbound-media cause.
+
+The follow-up's 328 frozen inputs have manifest SHA-256
+`21c3b51b9741cca69c9c4a61b779d3917102eadd85e8ef7042ff82d01bc41d6c`.
+Local Windows formatting, strict default/all-feature Clippy and strict rustdoc
+cover the patched dependency. The matching Windows CI job supplies both full
+all-target test suites, as permitted by the verification guide. The companion
+record points to the exact CI and installed-build receipts. Those receipts must
+be checked independently of the successful pre-patch test checkpoint above.
 
 The next attended call must first test bidirectional voice without cameras. If
 either direction fails, record that before camera-on. Then test cameras with
