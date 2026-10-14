@@ -53,6 +53,7 @@ pub enum ControlCommand {
     Ping,
     /// Opens a recipient with an optional unsent draft on the active account.
     OpenChatLink(crate::chat_link::ChatLink),
+    OpenGroupInvite(crate::chat_link::GroupInviteLink),
 }
 
 type Queue = Arc<Mutex<Vec<ControlCommand>>>;
@@ -143,12 +144,21 @@ fn parse(verb: &str) -> Option<ControlCommand> {
         _ => verb
             .strip_prefix("open-link ")
             .and_then(|link| crate::chat_link::ChatLink::parse(link).ok())
-            .map(ControlCommand::OpenChatLink),
+            .map(ControlCommand::OpenChatLink)
+            .or_else(|| {
+                verb.strip_prefix("invite ")
+                    .and_then(|code| {
+                        crate::chat_link::GroupInviteLink::parse(&format!(
+                            "https://chat.whatsapp.com/{code}"
+                        ))
+                    })
+                    .map(ControlCommand::OpenGroupInvite)
+            }),
     }
 }
 
 fn legacy_probe(verb: &str) -> &str {
-    if verb.starts_with("open-link ") {
+    if verb.starts_with("open-link ") || verb.starts_with("invite ") {
         "show"
     } else {
         verb
@@ -406,5 +416,26 @@ mod tests {
         );
         assert!(send(&dir, "open-link whatsapp://send?phone=invalid").is_err());
         drop(guard);
+    }
+}
+
+#[cfg(test)]
+mod invite_tests {
+    use super::*;
+    #[test]
+    fn invites_use_the_authenticated_slot_and_redact_their_code() {
+        let code = "AbCdEf1234567890XyZ";
+        let verb = format!("invite {code}");
+        let command = parse(&verb).unwrap();
+        assert!(matches!(command, ControlCommand::OpenGroupInvite(_)));
+        assert!(!format!("{command:?}").contains(code));
+        assert_eq!(legacy_probe(&verb), "show");
+        for rejected in [
+            "invite ../evil",
+            "invite short",
+            "invite AbCdEf1234567890XyZ/other",
+        ] {
+            assert!(parse(rejected).is_none());
+        }
     }
 }

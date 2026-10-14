@@ -722,6 +722,7 @@ pub struct App {
     control_commands: Option<std::sync::Arc<std::sync::Mutex<Vec<ControlCommand>>>>,
     /// Browser links wait for this account's archive and the app's unlock.
     pending_chat_links: Vec<(AccountId, crate::chat_link::ChatLink)>,
+    pending_group_invites: Vec<(AccountId, crate::chat_link::GroupInviteLink)>,
     /// Chats and messages from clicked notifications.
     notification_opens: std::sync::Arc<std::sync::Mutex<Vec<crate::notify::NotificationTarget>>>,
     notifications: crate::notify::Notifications,
@@ -1340,6 +1341,7 @@ impl App {
             automation: None,
             control_commands: None,
             pending_chat_links: Vec::new(),
+            pending_group_invites: Vec::new(),
             notification_opens: Default::default(),
             notifications: Default::default(),
             in_app_notifications: Vec::new(),
@@ -2054,6 +2056,7 @@ impl App {
                 ControlCommand::Quit => self.actions.push(Action::Quit),
                 ControlCommand::Ping => {}
                 ControlCommand::OpenChatLink(link) => self.open_chat_link(link),
+                ControlCommand::OpenGroupInvite(link) => self.open_group_invite(link),
             }
         }
     }
@@ -2065,9 +2068,30 @@ impl App {
         self.actions.push(Action::ShowWindow);
     }
 
+    pub fn open_group_invite(&mut self, link: crate::chat_link::GroupInviteLink) {
+        self.pending_group_invites
+            .push((self.account().id.clone(), link));
+        self.actions.push(Action::ShowWindow);
+    }
+
     fn handle_chat_links(&mut self, ctx: &egui::Context) {
         if self.app_lock.is_locked() {
             return;
+        }
+        for (account, link) in std::mem::take(&mut self.pending_group_invites) {
+            let Some(target) = self
+                .accounts
+                .iter()
+                .find(|candidate| candidate.id == account)
+            else {
+                continue;
+            };
+            if !target.chats_loaded || !matches!(target.link, LinkStatus::Connected) {
+                self.pending_group_invites.push((account, link));
+                continue;
+            }
+            self.switch_account(&account);
+            self.apply(Action::OpenUrl(link.url()), ctx);
         }
         let pending = std::mem::take(&mut self.pending_chat_links);
         for (account, link) in pending {
@@ -16414,6 +16438,41 @@ mod tests {
         assert!(app.unread_divider.is_some());
         app.open_chat("2@s.whatsapp.net".into());
         assert!(app.unread_divider.is_none());
+    }
+
+    #[test]
+    fn launched_invite_waits_for_unlock_and_connection_without_joining() {
+        let mut app = app();
+        let (backend, mut commands) = Backend::recording();
+        app.backend = backend;
+        app.chats_loaded = true;
+        app.link = LinkStatus::Connecting;
+        let ctx = egui::Context::default();
+        app.open_group_invite(
+            crate::chat_link::GroupInviteLink::parse(
+                "https://chat.whatsapp.com/AbCdEf1234567890XyZ",
+            )
+            .unwrap(),
+        );
+        app.handle_chat_links(&ctx);
+        assert_eq!(app.pending_group_invites.len(), 1);
+        assert!(commands.try_recv().is_err());
+        app.link = LinkStatus::Connected;
+        app.app_lock.lock();
+        app.handle_chat_links(&ctx);
+        assert_eq!(app.pending_group_invites.len(), 1);
+        assert!(commands.try_recv().is_err());
+        app.app_lock.unlocked(true);
+        app.handle_chat_links(&ctx);
+        assert!(app.pending_group_invites.is_empty());
+        assert_eq!(app.dialog, Some(Dialog::JoinGroup));
+        assert!(
+            matches!(commands.try_recv(), Ok(Command::PreviewInvite(code)) if code == "AbCdEf1234567890XyZ")
+        );
+        assert!(
+            commands.try_recv().is_err(),
+            "joining still requires the user's action"
+        );
     }
 
     #[test]

@@ -225,3 +225,23 @@ mod tests {
         }
     }
 }
+
+/// A validated group invite. Debug output never includes its access code.
+#[derive(Clone, PartialEq, Eq)]
+pub struct GroupInviteLink(String);
+impl std::fmt::Debug for GroupInviteLink {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("GroupInviteLink { code redacted }")
+    }
+}
+impl GroupInviteLink {
+    pub fn parse(value: &str) -> Option<Self> {
+        crate::safety::group_invite_code(value).map(Self)
+    }
+    pub fn request(&self) -> String {
+        format!("invite {}", self.0)
+    }
+    pub fn url(&self) -> String {
+        format!("https://chat.whatsapp.com/{}", self.0)
+    }
+}

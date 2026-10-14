@@ -667,9 +667,14 @@ fn run() -> eframe::Result<()> {
         return Ok(());
     }
     let cli = Cli::parse_from(&launch.arguments);
+    let group_invite = cli
+        .whatsapp_url
+        .as_deref()
+        .and_then(zapfast::chat_link::GroupInviteLink::parse);
     let chat_link = cli
         .whatsapp_url
         .as_deref()
+        .filter(|_| group_invite.is_none())
         .map(zapfast::chat_link::ChatLink::parse)
         .transpose()
         .map_err(|error| {
@@ -724,7 +729,12 @@ fn run() -> eframe::Result<()> {
         // A hidden start must not surface a copy that is already running.
         let request = chat_link
             .as_ref()
-            .map(zapfast::chat_link::ChatLink::request);
+            .map(zapfast::chat_link::ChatLink::request)
+            .or_else(|| {
+                group_invite
+                    .as_ref()
+                    .map(zapfast::chat_link::GroupInviteLink::request)
+            });
         let verb = request
             .as_deref()
             .unwrap_or(if cli.start_hidden { "ping" } else { "show" });
@@ -739,7 +749,7 @@ fn run() -> eframe::Result<()> {
                 return Ok(());
             }
             single_instance::Outcome::Unanswered => {
-                if chat_link.is_some() {
+                if chat_link.is_some() || group_invite.is_some() {
                     eprintln!(
                         "The running Zap Faster cannot open this link. Quit it and open the link again."
                     );
@@ -816,6 +826,9 @@ fn run() -> eframe::Result<()> {
     }
     if let Some(link) = chat_link {
         app.open_chat_link(link);
+    }
+    if let Some(link) = group_invite {
+        app.open_group_invite(link);
     }
     #[cfg(feature = "demo")]
     if demo {
