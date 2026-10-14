@@ -3293,3 +3293,11 @@ msgstr "正在準備通話…"
 #: src/ui/call.rs
 msgid "Microphone cleanup is unavailable. Audio is being sent without echo cancellation."
 msgstr "麥克風音訊處理無法使用。正在傳送未經回音消除的音訊。"
+
+#: src/ui/call.rs
+msgid "Minimize call"
+msgstr "最小化通話"
+
+#: src/ui/call.rs
+msgid "Restore call"
+msgstr "還原通話"

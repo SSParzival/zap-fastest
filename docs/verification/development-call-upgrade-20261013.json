@@ -1,0 +1,344 @@
+{
+  "generated_at_utc": "2026-10-14T00:30:35.050272+00:00",
+  "source_parent": "792881fc769536d50b94bd01324176ebea626c83",
+  "frozen_inputs": {
+    "count": 325,
+    "sha256": "a18b8d99c591e59bc4b5213443c87fc580209b655e484b6f9f5c238cb84c1891"
+  },
+  "windows_gates": [
+    {
+      "name": "fmt",
+      "command": [
+        "H:\\Packages\\rustup-legacy\\toolchains\\1.98.0-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+        "fmt",
+        "--all",
+        "--check"
+      ],
+      "exit_code": 0,
+      "started": "2026-10-14T00:10:42.895762+00:00",
+      "finished": "2026-10-14T00:10:45.099618+00:00"
+    },
+    {
+      "name": "clippy",
+      "command": [
+        "H:\\Packages\\rustup-legacy\\toolchains\\1.98.0-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+        "clippy",
+        "--locked",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "started": "2026-10-14T00:10:45.100137+00:00",
+      "finished": "2026-10-14T00:11:12.662376+00:00"
+    },
+    {
+      "name": "clippy-all",
+      "command": [
+        "H:\\Packages\\rustup-legacy\\toolchains\\1.98.0-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+        "clippy",
+        "--locked",
+        "--all-targets",
+        "--all-features",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "started": "2026-10-14T00:11:12.662832+00:00",
+      "finished": "2026-10-14T00:11:31.399588+00:00"
+    },
+    {
+      "name": "test",
+      "command": [
+        "H:\\Packages\\rustup-legacy\\toolchains\\1.98.0-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+        "test",
+        "--locked",
+        "--all-targets",
+        "--",
+        "--test-threads=2"
+      ],
+      "exit_code": 0,
+      "started": "2026-10-14T00:11:31.399983+00:00",
+      "finished": "2026-10-14T00:19:50.282731+00:00"
+    },
+    {
+      "name": "test-all",
+      "command": [
+        "H:\\Packages\\rustup-legacy\\toolchains\\1.98.0-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+        "test",
+        "--locked",
+        "--all-targets",
+        "--all-features",
+        "--",
+        "--test-threads=2"
+      ],
+      "exit_code": 0,
+      "started": "2026-10-14T00:19:50.283267+00:00",
+      "finished": "2026-10-14T00:28:13.975753+00:00"
+    },
+    {
+      "name": "doc",
+      "command": [
+        "H:\\Packages\\rustup-legacy\\toolchains\\1.98.0-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+        "doc",
+        "--locked",
+        "--all-features",
+        "--no-deps"
+      ],
+      "exit_code": 0,
+      "started": "2026-10-14T00:28:13.976264+00:00",
+      "finished": "2026-10-14T00:28:39.183638+00:00"
+    }
+  ],
+  "test_counts": {
+    "test": [
+      [
+        "1854",
+        "0",
+        "13"
+      ],
+      [
+        "10",
+        "0",
+        "0"
+      ],
+      [
+        "2",
+        "0",
+        "0"
+      ]
+    ],
+    "test-all": [
+      [
+        "1854",
+        "0",
+        "13"
+      ],
+      [
+        "12",
+        "0",
+        "0"
+      ],
+      [
+        "2",
+        "0",
+        "0"
+      ]
+    ]
+  },
+  "synthetic_visuals": {
+    "round_1": [
+      {
+        "name": "voice-00",
+        "page": "call-active",
+        "size": "1180x780",
+        "exit_code": 0,
+        "seconds": 1.61,
+        "capture_took_focus": false
+      },
+      {
+        "name": "voice-01",
+        "page": "call-active,call-minimized",
+        "size": "1180x780",
+        "exit_code": 0,
+        "seconds": 1.51,
+        "capture_took_focus": false
+      },
+      {
+        "name": "voice-02",
+        "page": "call-stalled,call-minimized",
+        "size": "1180x780",
+        "exit_code": 0,
+        "seconds": 1.51,
+        "capture_took_focus": false
+      },
+      {
+        "name": "voice-03",
+        "page": "call-active,call-devices",
+        "size": "1180x780",
+        "exit_code": 0,
+        "seconds": 1.51,
+        "capture_took_focus": false
+      },
+      {
+        "name": "video-00",
+        "page": "call-video",
+        "size": "1180x780",
+        "exit_code": 0,
+        "seconds": 1.51,
+        "capture_took_focus": false
+      },
+      {
+        "name": "video-01",
+        "page": "call-video,call-minimized",
+        "size": "1180x780",
+        "exit_code": 0,
+        "seconds": 1.51,
+        "capture_took_focus": false
+      },
+      {
+        "name": "video-02",
+        "page": "call-video-requested,call-minimized",
+        "size": "1180x780",
+        "exit_code": 0,
+        "seconds": 1.51,
+        "capture_took_focus": false
+      },
+      {
+        "name": "video-03",
+        "page": "call-video,call-minimized,screen-private,light",
+        "size": "1180x780",
+        "exit_code": 0,
+        "seconds": 1.51,
+        "capture_took_focus": false
+      },
+      {
+        "name": "narrow-00",
+        "page": "call-incoming-video,large-text,call-localized",
+        "size": "400x440",
+        "exit_code": 0,
+        "seconds": 1.51,
+        "capture_took_focus": false
+      },
+      {
+        "name": "narrow-01",
+        "page": "call-video,large-text",
+        "size": "400x440",
+        "exit_code": 0,
+        "seconds": 1.41,
+        "capture_took_focus": false
+      },
+      {
+        "name": "narrow-02",
+        "page": "call-active,call-minimized,large-text,call-localized",
+        "size": "400x440",
+        "exit_code": 0,
+        "seconds": 1.51,
+        "capture_took_focus": false
+      },
+      {
+        "name": "narrow-03",
+        "page": "call-video,call-minimized,large-text,light",
+        "size": "400x440",
+        "exit_code": 0,
+        "seconds": 1.41,
+        "capture_took_focus": false
+      }
+    ],
+    "confirmation": [
+      {
+        "name": "voice-00",
+        "page": "call-active",
+        "size": "1180x780",
+        "exit_code": 0,
+        "seconds": 1.61,
+        "capture_took_focus": false
+      },
+      {
+        "name": "voice-01",
+        "page": "call-active,call-minimized",
+        "size": "1180x780",
+        "exit_code": 0,
+        "seconds": 1.51,
+        "capture_took_focus": false
+      },
+      {
+        "name": "voice-02",
+        "page": "call-stalled,call-minimized",
+        "size": "1180x780",
+        "exit_code": 0,
+        "seconds": 1.51,
+        "capture_took_focus": false
+      },
+      {
+        "name": "voice-03",
+        "page": "call-active,call-devices",
+        "size": "1180x780",
+        "exit_code": 0,
+        "seconds": 1.51,
+        "capture_took_focus": false
+      },
+      {
+        "name": "video-00",
+        "page": "call-video",
+        "size": "1180x780",
+        "exit_code": 0,
+        "seconds": 1.51,
+        "capture_took_focus": false
+      },
+      {
+        "name": "video-01",
+        "page": "call-video,call-minimized",
+        "size": "1180x780",
+        "exit_code": 0,
+        "seconds": 1.51,
+        "capture_took_focus": false
+      },
+      {
+        "name": "video-02",
+        "page": "call-video-requested,call-minimized",
+        "size": "1180x780",
+        "exit_code": 0,
+        "seconds": 1.51,
+        "capture_took_focus": false
+      },
+      {
+        "name": "video-03",
+        "page": "call-video,call-minimized,screen-private,light",
+        "size": "1180x780",
+        "exit_code": 0,
+        "seconds": 1.51,
+        "capture_took_focus": false
+      },
+      {
+        "name": "narrow-00",
+        "page": "call-incoming-video,large-text,call-localized",
+        "size": "400x440",
+        "exit_code": 0,
+        "seconds": 1.51,
+        "capture_took_focus": false
+      },
+      {
+        "name": "narrow-01",
+        "page": "call-video,large-text",
+        "size": "400x440",
+        "exit_code": 0,
+        "seconds": 1.41,
+        "capture_took_focus": false
+      },
+      {
+        "name": "narrow-02",
+        "page": "call-active,call-minimized,large-text,call-localized",
+        "size": "400x440",
+        "exit_code": 0,
+        "seconds": 1.51,
+        "capture_took_focus": false
+      },
+      {
+        "name": "narrow-03",
+        "page": "call-video,call-minimized,large-text,light",
+        "size": "400x440",
+        "exit_code": 0,
+        "seconds": 1.41,
+        "capture_took_focus": false
+      }
+    ],
+    "all_sheets_inspected": true,
+    "further_polish_rounds": false
+  },
+  "upstream_snapshot": "ef284d40cca87bbf7d771155042cf33b00b45dab",
+  "upstream_reviewed_commits": 111,
+  "upstream_new_adaptations": [
+    468,
+    479
+  ],
+  "protocol_pin": "94c53e833805c58c9f5966b08d08c990650a651e",
+  "attended_audio_after_camera_on": false,
+  "attended_peer_video_smoothness": false,
+  "installation": "pending verified optimized build and idle confirmation",
+  "ci": "inspect matching fork/main run after push; prior run 38477502877 cancelled",
+  "version": "0.30.0",
+  "release_published": false
+}

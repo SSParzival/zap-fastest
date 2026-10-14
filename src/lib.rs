@@ -12,6 +12,7 @@ pub mod backdrop;
 pub mod backend;
 pub mod bidi;
 pub mod call_audio;
+mod call_codec;
 mod call_processing;
 pub mod calls;
 pub mod camera;

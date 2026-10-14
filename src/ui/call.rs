@@ -57,7 +57,14 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
         if app.chat(&call.chat).is_some_and(|chat| chat.locked) {
             return;
         }
-        egui::Window::new(if call.video_active || call.video_requested {
+        let minimized_id = minimized_id(app.account().id.as_str(), call.generation);
+        let minimized = ctx
+            .data(|data| data.get_temp::<bool>(minimized_id))
+            .unwrap_or(false);
+        if minimized {
+            minimized_call(app, ctx, &call, minimized_id);
+        } else {
+            egui::Window::new(if call.video_active || call.video_requested {
             gettext(locale, "Video call")
         } else {
             gettext(locale, "Voice call")
@@ -92,8 +99,9 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 .min_scrolled_height(height)
                 .auto_shrink([false, true])
                 .show(ui, |ui| {
-            if ctx.content_rect().height() < 500.0 {
-                ui.label(gettext(locale, if call.video_active || call.video_requested { "Video call" } else { "Voice call" }));
+            let short = ctx.content_rect().height() < 500.0;
+            if short {
+                minimize_row(app, ui, ctx, minimized_id, &gettext(locale, if call.video_active || call.video_requested { "Video call" } else { "Voice call" }));
             }
             ui.add_space(if compact { 0.0 } else { 12.0 });
             ui.vertical_centered(|ui| {
@@ -116,8 +124,11 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                     }
                     ui.add_space(8.0);
                 }
-                let name = display_name(app, ui, &call.chat, egui::TextStyle::Heading);
-                if compact {
+                let name_width = if short { ui.available_width() } else { (ui.available_width() - theme::soft_button_width(ui, &gettext(locale, "Minimize call"), true) - ui.spacing().item_spacing.x).max(1.0) };
+                let name = display_name_width(app, ui, &call.chat, egui::TextStyle::Heading, name_width);
+                if !short {
+                    minimize_row(app, ui, ctx, minimized_id, &name);
+                } else if compact {
                     ui.label(egui::RichText::new(name).strong());
                 } else {
                     ui.heading(name);
@@ -171,7 +182,8 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 }
             }
             if let Some(view) = &call.video_view {
-                video(app, ui, ctx, call.generation, view);
+                let max_video_height = video_height_limit(ui, height);
+                video(app, ui, ctx, call.generation, view, max_video_height);
             }
             ui.add_space(8.0);
             ui.separator();
@@ -209,6 +221,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             }
             ui.add_space(if compact { 4.0 } else { 8.0 });
         });
+        }
     }
     if app.call_log_open {
         let mut open = true;
@@ -319,8 +332,21 @@ fn control_row(app: &mut App, ui: &mut egui::Ui, width: f32, controls: Vec<CallC
             ((ui.available_width() - (width * count + (count - 1.0) * 8.0)) / 2.0).max(0.0),
         );
         ui.spacing_mut().item_spacing.x = 8.0;
+        let height = controls
+            .iter()
+            .map(|(_, label, _, _)| control_height(ui, width, label))
+            .fold(44.0_f32, f32::max);
         for (icon, label, tone, action) in controls {
-            if control(ui, &app.palette, width, icon, &label, tone).clicked() {
+            if control_sized(
+                ui,
+                &app.palette,
+                egui::vec2(width, height),
+                icon,
+                &label,
+                tone,
+            )
+            .clicked()
+            {
                 app.actions.push(action);
             }
         }
@@ -409,6 +435,33 @@ fn control(
     label: &str,
     tone: ControlTone,
 ) -> egui::Response {
+    let height = control_height(ui, width, label);
+    control_sized(ui, palette, egui::vec2(width, height), icon, label, tone)
+}
+
+fn control_height(ui: &egui::Ui, width: f32, label: &str) -> f32 {
+    ui.painter()
+        .layout(
+            label.to_owned(),
+            egui::TextStyle::Body.resolve(ui.style()),
+            egui::Color32::WHITE,
+            (width - 32.0).max(1.0),
+        )
+        .size()
+        .y
+        .max(28.0)
+        + 16.0
+}
+
+fn control_sized(
+    ui: &mut egui::Ui,
+    palette: &theme::Palette,
+    size: egui::Vec2,
+    icon: Icon,
+    label: &str,
+    tone: ControlTone,
+) -> egui::Response {
+    let width = size.x;
     let font = egui::TextStyle::Body.resolve(ui.style());
     let compact = true;
     let galley = ui.painter().layout(
@@ -417,17 +470,7 @@ fn control(
         palette.text,
         (width - if compact { 32.0 } else { 0.0 }).max(1.0),
     );
-    let (rect, response) = ui.allocate_exact_size(
-        egui::vec2(
-            width,
-            if compact {
-                16.0 + galley.size().y.max(28.0)
-            } else {
-                56.0 + galley.size().y
-            },
-        ),
-        egui::Sense::click(),
-    );
+    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
     theme::reveal_focus(&response);
     #[cfg(test)]
     ui.ctx().data_mut(|data| {
@@ -515,9 +558,19 @@ fn control(
 }
 
 fn display_name(app: &App, ui: &egui::Ui, chat: &str, style: egui::TextStyle) -> String {
+    display_name_width(app, ui, chat, style, ui.available_width())
+}
+
+fn display_name_width(
+    app: &App,
+    ui: &egui::Ui,
+    chat: &str,
+    style: egui::TextStyle,
+    width: f32,
+) -> String {
     let region = egui::Rect::from_min_size(
         ui.cursor().min,
-        egui::vec2(ui.available_width(), ui.text_style_height(&style)),
+        egui::vec2(width, ui.text_style_height(&style)),
     );
     if app.settings.screen_privacy.hides(
         crate::settings::ScreenPrivacyWhat::Name,
@@ -536,6 +589,7 @@ fn video(
     ctx: &egui::Context,
     generation: u64,
     view: &crate::camera::VideoView,
+    max_height: f32,
 ) {
     let locale = app.locale;
     view.attach(ctx);
@@ -563,15 +617,24 @@ fn video(
     }
     let width = ui.available_width();
     let height = if textures.peer.is_none() && textures.local.is_none() {
-        56.0
+        56.0_f32.min(max_height)
     } else {
-        (width * 9.0 / 16.0).min(ctx.content_rect().height() * 0.22)
+        (width * 9.0 / 16.0)
+            .min(ctx.content_rect().height() * 0.22)
+            .min(max_height)
     };
     let (region, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
     let hidden = app.settings.screen_privacy.hides(
         crate::settings::ScreenPrivacyWhat::Media,
         ui.rect_contains_pointer(region),
     );
+    #[cfg(test)]
+    ctx.data_mut(|data| {
+        data.insert_temp(
+            video_bounds_id(app.account().id.as_str()),
+            (region, ui.clip_rect()),
+        )
+    });
     ui.painter().rect_filled(region, 8.0, app.palette.surface);
     let paint_frame = |ui: &egui::Ui, texture: &egui::TextureHandle, bounds: egui::Rect| {
         let size = texture.size_vec2();
@@ -798,4 +861,122 @@ fn peer_audio_label(locale: Locale, audio: PeerAudio) -> std::borrow::Cow<'stati
             "Incoming audio cannot be played. Try reconnecting the call.",
         ),
     }
+}
+
+pub fn minimized_id(account: &str, generation: u64) -> egui::Id {
+    egui::Id::new(("minimized-call", account, generation))
+}
+
+fn minimized_call(
+    app: &mut App,
+    ctx: &egui::Context,
+    call: &crate::calls::CallUpdate,
+    state: egui::Id,
+) {
+    let body_height = (ctx.content_rect().height() - 120.0).clamp(16.0, 180.0);
+    egui::Window::new(gettext(app.locale, "Call"))
+        .id(state.with("window"))
+        .title_bar(false)
+        .collapsible(false)
+        .resizable(false)
+        .auto_sized()
+        .default_width(240.0)
+        .default_pos(egui::pos2(
+            ctx.content_rect().right() - 272.0,
+            ctx.content_rect().top() + 80.0,
+        ))
+        .constrain_to(ctx.content_rect().shrink(16.0))
+        .max_size(ctx.content_rect().shrink(16.0).size())
+        .show(ctx, |ui| {
+            egui::ScrollArea::vertical()
+                .id_salt(state.with("body"))
+                .max_height(body_height)
+                .auto_shrink([false, true])
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        let name = display_name(app, ui, &call.chat, egui::TextStyle::Body);
+                        ui.add(egui::Label::new(name).truncate());
+                    });
+                    if let Some(view) = &call.video_view {
+                        let max_video_height = video_height_limit(ui, body_height);
+                        video(app, ui, ctx, call.generation, view, max_video_height);
+                    }
+                    if let Some(audio) = call.peer_audio {
+                        ui.label(peer_audio_label(app.locale, audio));
+                    }
+                    if call.video_requested && !call.video_active {
+                        ui.label(gettext(app.locale, "The other person requested video."));
+                    }
+                });
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 8.0;
+                for (icon, label, tone, action) in call_controls(app.locale, call) {
+                    let color = if matches!(tone, ControlTone::Danger) {
+                        app.palette.danger
+                    } else if matches!(tone, ControlTone::Selected) {
+                        app.palette.accent
+                    } else {
+                        app.palette.text
+                    };
+                    let response =
+                        theme::icon_button(ui, icon, 32.0, color, app.palette.accent_hover, &label);
+                    #[cfg(test)]
+                    ctx.data_mut(|data| {
+                        data.insert_temp(
+                            egui::Id::new(("call-control-test", label.as_ref())),
+                            (response.id, response.rect),
+                        )
+                    });
+                    if response.clicked() {
+                        app.actions.push(action);
+                    }
+                }
+                let restore = theme::icon_button(
+                    ui,
+                    Icon::Maximize,
+                    32.0,
+                    app.palette.text,
+                    app.palette.accent_hover,
+                    &gettext(app.locale, "Restore call"),
+                );
+                #[cfg(test)]
+                ctx.data_mut(|data| data.insert_temp(state.with("toggle"), restore.rect));
+                if restore.clicked() {
+                    ctx.data_mut(|data| data.insert_temp(state, false));
+                }
+            });
+        });
+}
+
+fn minimize_row(app: &App, ui: &mut egui::Ui, ctx: &egui::Context, state: egui::Id, title: &str) {
+    let label = gettext(app.locale, "Minimize call");
+    let width = theme::soft_button_width(ui, &label, true);
+    ui.horizontal(|ui| {
+        let room = (ui.available_width() - width - ui.spacing().item_spacing.x).max(1.0);
+        ui.add_sized(
+            egui::vec2(room, 24.0),
+            egui::Label::new(egui::RichText::new(title).strong()).truncate(),
+        );
+        let minimize = theme::soft_button(ui, &app.palette, Some(Icon::Minus), &label, false);
+        #[cfg(test)]
+        ctx.data_mut(|data| data.insert_temp(state.with("toggle"), minimize.rect));
+        if minimize.clicked() {
+            ctx.data_mut(|data| data.insert_temp(state, true));
+        }
+    });
+}
+
+fn video_height_limit(ui: &egui::Ui, body_height: f32) -> f32 {
+    let above = (ui.cursor().top() - ui.min_rect().top()).max(0.0);
+    (body_height
+        - above
+        - ui.text_style_height(&egui::TextStyle::Body)
+        - ui.spacing().item_spacing.y
+        - 4.0)
+        .max(32.0)
+}
+
+#[cfg(test)]
+pub(crate) fn video_bounds_id(account: &str) -> egui::Id {
+    egui::Id::new(("call-video-bounds", account))
 }

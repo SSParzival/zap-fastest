@@ -871,3 +871,27 @@ Screen privacy also hides account-switcher identities and call names/video
 previews according to its selected options. Hovering reveals them as it does
 elsewhere in the app. Call preparation remains cancellable; its status does not
 mean that the other device has started ringing.
+
+
+### Development call controls and launch links
+
+In development builds, **Minimize call** collapses the call panel to a movable
+video overlay, or a compact voice bar. Mute, camera, end-call and restore controls
+remain available. Minimizing keeps the call and its media devices running.
+Screen privacy and locked-chat protections also apply to the overlay.
+
+Voice and video calls negotiate standard Opus through whatsapp-rust. Camera
+frames retain capture timing; excess native samples are drained and a dropped
+encoded frame requests a fresh keyframe. These changes have synthetic source
+checks; bidirectional audio after camera-on and smooth peer video still need an
+attended call on the installed build.
+
+A `https://chat.whatsapp.com/…` link passed to the executable opens the existing
+invite preview. It waits for unlock and a connection on the account that received
+the launch. Joining requires confirmation in the preview. Older running copies
+that cannot accept the link must be quit before launching it again.
+
+The sticker picker shares two background download slots across recent and chat
+stickers, resumes after rate limits, and refreshes its shelves in small batches.
+An explicit click during a picker fetch is remembered and can request a re-upload
+if that background fetch fails.

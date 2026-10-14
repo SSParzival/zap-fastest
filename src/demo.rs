@@ -3841,6 +3841,169 @@ mod tests {
     }
 
     #[test]
+    fn hovering_minimize_does_not_reveal_a_private_caller_name() {
+        let mut app = app();
+        apply_flags(&mut app, Some("call-active"));
+        app.settings.screen_privacy.enabled = true;
+        app.settings.screen_privacy.blur_names = true;
+        let ctx = egui::Context::default();
+        app.attach(&ctx);
+        ctx.enable_accesskit();
+        let generation = app.call.as_ref().unwrap().generation;
+        let id = crate::ui::call::minimized_id(app.account().id.as_str(), generation);
+        let frame = |app: &mut App, events| {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1180.0, 780.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| crate::ui::call::show(app, ui.ctx()),
+            );
+            output.textures_delta.clear();
+            output.platform_output.accesskit_update
+        };
+        for _ in 0..3 {
+            frame(&mut app, Vec::new());
+        }
+        let position = ctx
+            .data(|data| data.get_temp::<egui::Rect>(id.with("toggle")))
+            .unwrap()
+            .center();
+        for _ in 0..3 {
+            if let Some(tree) = frame(&mut app, vec![egui::Event::PointerMoved(position)]) {
+                assert!(
+                    !tree
+                        .nodes
+                        .iter()
+                        .any(|(_, node)| node.label().or_else(|| node.value())
+                            == Some("Ada Lovelace")),
+                    "the minimize button must not reveal its neighboring identity"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn minimizing_and_restoring_call_preserves_media_and_controls() {
+        for scenario in ["call-active", "call-video"] {
+            let mut app = app();
+            apply_flags(&mut app, Some(scenario));
+            app.settings.text_scale = 1.5;
+            let ctx = egui::Context::default();
+            app.attach(&ctx);
+            let call = app.call.as_ref().unwrap();
+            let generation = call.generation;
+            let media = call.video_view.is_some();
+            let id = crate::ui::call::minimized_id(app.account().id.as_str(), generation);
+            for minimized in [false, true, false] {
+                assert_eq!(
+                    ctx.data(|data| data.get_temp::<bool>(id)).unwrap_or(false),
+                    minimized
+                );
+                for _ in 0..3 {
+                    let mut output = ctx.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(400.0, 440.0),
+                            )),
+                            ..Default::default()
+                        },
+                        |ui| crate::ui::call::show(&mut app, ui.ctx()),
+                    );
+                    output.textures_delta.clear();
+                }
+                if media {
+                    let (region, clip) = ctx
+                        .data(|data| {
+                            data.get_temp::<(egui::Rect, egui::Rect)>(
+                                crate::ui::call::video_bounds_id(app.account().id.as_str()),
+                            )
+                        })
+                        .unwrap();
+                    assert!(
+                        clip.contains_rect(region),
+                        "the entire preview must fit at enlarged text: {region:?} in {clip:?}"
+                    );
+                }
+                assert_eq!(app.call.as_ref().unwrap().generation, generation);
+                assert_eq!(app.call.as_ref().unwrap().video_view.is_some(), media);
+                assert!(
+                    app.actions.is_empty(),
+                    "minimize must not change devices or end the call"
+                );
+                for label in ["Mute", "End call"] {
+                    let (_, rect) = ctx
+                        .data(|data| {
+                            data.get_temp::<(egui::Id, egui::Rect)>(egui::Id::new((
+                                "call-control-test",
+                                label,
+                            )))
+                        })
+                        .unwrap();
+                    assert!(rect.height() >= 44.0);
+                    assert!(
+                        egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 440.0))
+                            .contains_rect(rect)
+                    );
+                }
+                if !minimized && scenario == "call-video" {
+                    let bounds = |label| {
+                        ctx.data(|data| {
+                            data.get_temp::<(egui::Id, egui::Rect)>(egui::Id::new((
+                                "call-control-test",
+                                label,
+                            )))
+                        })
+                        .unwrap()
+                        .1
+                    };
+                    let mute = bounds("Mute");
+                    let camera = bounds("Turn camera off");
+                    let end = bounds("End call");
+                    assert_eq!(mute.height(), camera.height());
+                    assert_eq!(camera.height(), end.height());
+                    assert!((camera.left() - mute.right() - 8.0).abs() < 0.1);
+                    assert!((end.left() - camera.right() - 8.0).abs() < 0.1);
+                }
+                if !minimized || ctx.data(|data| data.get_temp::<bool>(id)).unwrap_or(false) {
+                    let position = ctx
+                        .data(|data| data.get_temp::<egui::Rect>(id.with("toggle")))
+                        .unwrap()
+                        .center();
+                    for pressed in [true, false] {
+                        let mut output = ctx.run_ui(
+                            egui::RawInput {
+                                screen_rect: Some(egui::Rect::from_min_size(
+                                    egui::Pos2::ZERO,
+                                    egui::vec2(400.0, 440.0),
+                                )),
+                                events: vec![
+                                    egui::Event::PointerMoved(position),
+                                    egui::Event::PointerButton {
+                                        pos: position,
+                                        button: egui::PointerButton::Primary,
+                                        pressed,
+                                        modifiers: egui::Modifiers::NONE,
+                                    },
+                                ],
+                                ..Default::default()
+                            },
+                            |ui| crate::ui::call::show(&mut app, ui.ctx()),
+                        );
+                        output.textures_delta.clear();
+                    }
+                    assert_eq!(ctx.data(|data| data.get_temp::<bool>(id)), Some(!minimized));
+                }
+            }
+        }
+    }
+
+    #[test]
     fn international_sender_demo_shows_a_formatted_number_in_the_group() {
         fn contains_number(shape: &egui::Shape) -> bool {
             match shape {

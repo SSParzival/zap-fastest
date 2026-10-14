@@ -911,12 +911,29 @@ fn run() -> eframe::Result<()> {
             } else {
                 options
             };
+            #[cfg(feature = "demo")]
+            let demo_minimized = cli
+                .demo_page
+                .as_deref()
+                .is_some_and(|page| page.split(',').any(|part| part == "call-minimized"));
             eframe::run_native(
                 "Zap Faster",
                 options,
                 Box::new(move |cc| {
                     let mut app = lease.take(&cc.egui_ctx);
                     app.attach(&cc.egui_ctx);
+                    #[cfg(feature = "demo")]
+                    if demo_minimized && let Some(call) = &app.call {
+                        cc.egui_ctx.data_mut(|data| {
+                            data.insert_temp(
+                                zapfast::ui::call::minimized_id(
+                                    app.account().id.as_str(),
+                                    call.generation,
+                                ),
+                                true,
+                            )
+                        });
+                    }
                     #[cfg(feature = "demo")]
                     if cli.demo_macos {
                         zapfast::theme::preview_macos(&cc.egui_ctx);

@@ -3475,3 +3475,11 @@ msgstr "Anruf wird vorbereitet…"
 #: src/ui/call.rs
 msgid "Microphone cleanup is unavailable. Audio is being sent without echo cancellation."
 msgstr "Die Mikrofonaufbereitung ist nicht verfügbar. Audio wird ohne Echounterdrückung gesendet."
+
+#: src/ui/call.rs
+msgid "Minimize call"
+msgstr "Anruf minimieren"
+
+#: src/ui/call.rs
+msgid "Restore call"
+msgstr "Anruf wiederherstellen"

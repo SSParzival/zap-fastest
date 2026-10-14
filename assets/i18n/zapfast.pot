@@ -3232,3 +3232,11 @@ msgstr ""
 #: src/ui/call.rs
 msgid "Microphone cleanup is unavailable. Audio is being sent without echo cancellation."
 msgstr ""
+
+#: src/ui/call.rs
+msgid "Minimize call"
+msgstr ""
+
+#: src/ui/call.rs
+msgid "Restore call"
+msgstr ""

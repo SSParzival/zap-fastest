@@ -12,10 +12,10 @@ use openh264::encoder::{BitRate, Encoder, EncoderConfig, FrameRate, Profile};
 use openh264::formats::{RgbSliceU8, YUVBuffer};
 use std::io::{Read, Write};
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use whatsapp_rust::voip::{CallHandle, KeyframeUrgency, VideoFrame};
+use whatsapp_rust::voip::{CallHandle, KeyframeUrgency, TimedVideoFrame, VideoFrame, VideoSource};
 
 const WIDTH: u32 = 640;
 const HEIGHT: u32 = 480;
@@ -175,6 +175,15 @@ pub fn run_list_helper() {
 
 #[derive(Default)]
 struct Frames {
+    captured: AtomicU64,
+    queue_dropped: AtomicU64,
+    encoded_bytes: AtomicU64,
+    encode_micros: AtomicU64,
+    capture_clock: AtomicU64,
+    peer_received: AtomicU64,
+    peer_decoded: AtomicU64,
+    peer_decode_micros: AtomicU64,
+    peer_images_taken: AtomicU64,
     peer_keyframe_needed: AtomicBool,
     local: Mutex<Option<egui::ColorImage>>,
     peer: Mutex<Option<egui::ColorImage>>,
@@ -214,7 +223,26 @@ impl VideoView {
             .take()
     }
     pub fn take_peer(&self) -> Option<egui::ColorImage> {
-        self.0.peer.lock().unwrap_or_else(|e| e.into_inner()).take()
+        let image = self.0.peer.lock().unwrap_or_else(|e| e.into_inner()).take();
+        if image.is_some() {
+            self.0.peer_images_taken.fetch_add(1, Ordering::Relaxed);
+        }
+        image
+    }
+    pub fn log_stats(&self) {
+        let frames = &self.0;
+        log::info!(
+            "[CALL] video captured={} queue_dropped={} encoded_bytes={} encode_us={} capture_clock={} peer_received={} peer_decoded={} peer_decode_us={} peer_images_taken={}",
+            frames.captured.load(Ordering::Relaxed),
+            frames.queue_dropped.load(Ordering::Relaxed),
+            frames.encoded_bytes.load(Ordering::Relaxed),
+            frames.encode_micros.load(Ordering::Relaxed),
+            frames.capture_clock.load(Ordering::Relaxed),
+            frames.peer_received.load(Ordering::Relaxed),
+            frames.peer_decoded.load(Ordering::Relaxed),
+            frames.peer_decode_micros.load(Ordering::Relaxed),
+            frames.peer_images_taken.load(Ordering::Relaxed)
+        );
     }
     pub fn error(&self) -> Option<&'static str> {
         *self.0.error.lock().unwrap_or_else(|e| e.into_inner())
@@ -241,13 +269,29 @@ impl VideoView {
     }
 }
 
+/// Timestamped source. The library consumes capture time rather than inventing a
+/// frame for each dequeued item, so loss does not compress the peer's media clock.
+#[derive(Clone)]
+pub struct CameraSource {
+    timed: async_channel::Receiver<TimedVideoFrame>,
+    unused: async_channel::Receiver<Vec<u8>>,
+}
+impl VideoSource for CameraSource {
+    fn frames(&self) -> async_channel::Receiver<Vec<u8>> {
+        self.unused.clone()
+    }
+    fn timed_frames(&self) -> Option<async_channel::Receiver<TimedVideoFrame>> {
+        Some(self.timed.clone())
+    }
+}
+
 /// Owns both camera and decoder lifetimes. Dropping closes every outgoing media queue immediately.
 pub struct VideoSession {
     pub handle: Option<Arc<CallHandle>>,
     stop: Arc<AtomicBool>,
     child: Arc<Mutex<Option<Child>>>,
     control: async_channel::Sender<()>,
-    source: async_channel::Receiver<Vec<u8>>,
+    source: CameraSource,
     sink: async_channel::Sender<VideoFrame>,
     pub view: VideoView,
 }
@@ -257,7 +301,9 @@ impl VideoSession {
     pub async fn open(selected: Option<String>) -> Result<Self> {
         let stop = Arc::new(AtomicBool::new(false));
         let view = VideoView::default();
-        let (encoded, source) = async_channel::bounded(2);
+        let (encoded, timed) = async_channel::bounded(2);
+        let (_, unused) = async_channel::bounded(1);
+        let source = CameraSource { timed, unused };
         let (sink, peer) = async_channel::bounded::<VideoFrame>(2);
         let (ready, opened) = async_channel::bounded(1);
         let mut command = helper_command("--camera-helper")?;
@@ -309,6 +355,7 @@ impl VideoSession {
                 let Ok(mut decoder) = openh264::decoder::Decoder::new() else {
                     return;
                 };
+                let mut needs_keyframe = false;
                 while !stop.load(Ordering::Acquire) {
                     let Ok((kind, payload)) = read_packet(&mut output) else {
                         break;
@@ -321,13 +368,24 @@ impl VideoSession {
                             let _ = ready.try_send(Ok(()));
                         }
                         1 => {
-                            if let Ok(Some(frame)) = decoder.decode(&payload)
+                            let Some((timestamp, encode_us, payload)) = timed_payload(&payload) else { break; };
+                            view.0.captured.fetch_add(1, Ordering::Relaxed);
+                            view.0.encoded_bytes.fetch_add(payload.len() as u64, Ordering::Relaxed);
+                            view.0.encode_micros.fetch_add(u64::from(encode_us), Ordering::Relaxed);
+                            view.0.capture_clock.store(u64::from(timestamp), Ordering::Relaxed);
+                            if let Ok(Some(frame)) = decoder.decode(payload)
                                 && let Some(image) = crate::video::picture(&frame, 0, 640)
                             {
                                 view.publish(true, image);
                             }
-                            if encoded.try_send(payload).is_err() {
-                                request_keyframe(&control);
+                            if needs_keyframe && !is_idr(payload) { continue; }
+                            let frame = TimedVideoFrame::builder().data(payload.to_vec()).timestamp(timestamp).build();
+                            if encoded.try_send(frame).is_err() {
+                                view.0.queue_dropped.fetch_add(1, Ordering::Relaxed);
+                                if !needs_keyframe || is_idr(payload) { request_keyframe(&control); }
+                                needs_keyframe = true;
+                            } else {
+                                needs_keyframe = false;
                             }
                         }
                         3..=10 => {
@@ -375,8 +433,16 @@ impl VideoSession {
                             .store(true, Ordering::Release);
                         continue;
                     }
-                    match decoder.decode(&frame.data) {
+                    decode_view.0.peer_received.fetch_add(1, Ordering::Relaxed);
+                    let start = Instant::now();
+                    let decoded = decoder.decode(&frame.data);
+                    decode_view
+                        .0
+                        .peer_decode_micros
+                        .fetch_add(start.elapsed().as_micros() as u64, Ordering::Relaxed);
+                    match decoded {
                         Ok(Some(yuv)) => {
+                            decode_view.0.peer_decoded.fetch_add(1, Ordering::Relaxed);
                             if let Some(image) = crate::video::picture(&yuv, frame.orientation, 720)
                                 && !decode_stop.load(Ordering::Acquire)
                             {
@@ -402,7 +468,7 @@ impl VideoSession {
             )),
         }
     }
-    pub fn source(&self) -> async_channel::Receiver<Vec<u8>> {
+    pub fn source(&self) -> CameraSource {
         self.source.clone()
     }
     pub fn sink(&self) -> async_channel::Sender<VideoFrame> {
@@ -423,7 +489,7 @@ impl VideoSession {
     }
     pub fn stop(&self) {
         self.stop.store(true, Ordering::Release);
-        self.source.close();
+        self.source.timed.close();
         self.sink.close();
         if let Some(mut process) = self.child.lock().unwrap_or_else(|e| e.into_inner()).take() {
             let _ = process.kill();
@@ -608,13 +674,21 @@ fn capture(
         return Ok(());
     }
     let mut encoder = encoder().map_err(|_| CaptureFailure(7))?;
-    let mut next = Instant::now();
+    let origin = Instant::now();
+    let mut next = origin;
     let mut number = 0_u64;
     while !stop.load(Ordering::Acquire) {
         let frame = camera.frame().map_err(capture_read_failure)?;
         if stop.load(Ordering::Acquire) {
             break;
         }
+        let captured = Instant::now();
+        // Read every native sample, even if the closest camera mode is faster
+        // than 15 fps. Sleeping here lets native driver queues accumulate lag.
+        if !capture_due(captured, &mut next) {
+            continue;
+        }
+        let timestamp = capture_timestamp(captured.duration_since(origin));
         let resolution = frame.resolution();
         if resolution.width() == 0
             || resolution.height() == 0
@@ -623,6 +697,7 @@ fn capture(
         {
             return Err(CaptureFailure(8).into());
         }
+        let encode_started = Instant::now();
         let rgb = decode_camera_frame(&frame).map_err(|_| CaptureFailure(6))?;
         if rgb.width() == 0 || rgb.height() == 0 || rgb.width() > 4096 || rgb.height() > 4096 {
             return Err(CaptureFailure(8).into());
@@ -647,15 +722,19 @@ fn capture(
                 // Readiness means an actual frame can be encoded, not just an open stream.
                 write_packet(output, 0, &[])?;
             }
-            write_packet(output, 1, &access)?;
+            let mut payload = Vec::with_capacity(access.len() + 8);
+            payload.extend_from_slice(&timestamp.to_le_bytes());
+            payload.extend_from_slice(
+                &(encode_started
+                    .elapsed()
+                    .as_micros()
+                    .min(u128::from(u32::MAX)) as u32)
+                    .to_le_bytes(),
+            );
+            payload.extend_from_slice(&access);
+            write_packet(output, 1, &payload)?;
         }
         number += 1;
-        next += Duration::from_secs_f64(1.0 / f64::from(FPS));
-        if let Some(delay) = next.checked_duration_since(Instant::now()) {
-            std::thread::sleep(delay);
-        } else {
-            next = Instant::now();
-        }
     }
     let _ = camera.stop_stream();
     Ok(())
@@ -847,5 +926,82 @@ mod tests {
         let mut oversized = vec![1];
         oversized.extend_from_slice(&((MAX_AU + 1) as u32).to_le_bytes());
         assert!(read_packet(&mut oversized.as_slice()).is_err());
+    }
+}
+
+fn capture_due(captured: Instant, next: &mut Instant) -> bool {
+    // Keep the cadence anchored. Tiny native scheduling jitter must not turn
+    // a nominal 15 fps source into 7.5 fps by skipping every second sample.
+    let tolerance = Duration::from_millis(2);
+    if captured + tolerance < *next {
+        return false;
+    }
+    let interval = Duration::from_secs_f64(1.0 / f64::from(FPS));
+    *next += interval;
+    while *next <= captured + tolerance {
+        *next += interval;
+    }
+    true
+}
+
+fn capture_timestamp(elapsed: Duration) -> u32 {
+    // 90 kHz RTP clock, wrapping at the wire's u32 boundary.
+    (elapsed.as_micros() * 90 / 1000) as u32
+}
+
+fn timed_payload(payload: &[u8]) -> Option<(u32, u32, &[u8])> {
+    let header: [u8; 4] = payload.get(..4)?.try_into().ok()?;
+    let encode_us: [u8; 4] = payload.get(4..8)?.try_into().ok()?;
+    let data = payload.get(8..).filter(|data| !data.is_empty())?;
+    Some((
+        u32::from_le_bytes(header),
+        u32::from_le_bytes(encode_us),
+        data,
+    ))
+}
+
+fn is_idr(data: &[u8]) -> bool {
+    data.windows(4)
+        .any(|bytes| bytes[..3] == [0, 0, 1] && bytes[3] & 0x1f == 5)
+}
+
+#[cfg(test)]
+mod timing_tests {
+    use super::*;
+    #[test]
+    fn native_cadence_jitter_does_not_skip_every_second_frame() {
+        let origin = Instant::now();
+        let mut next = origin;
+        for millis in [0, 65, 134, 199, 267, 333] {
+            assert!(capture_due(
+                origin + Duration::from_millis(millis),
+                &mut next
+            ));
+        }
+        let mut next = origin;
+        assert!(capture_due(origin, &mut next));
+        assert!(!capture_due(origin + Duration::from_millis(33), &mut next));
+        assert!(capture_due(origin + Duration::from_millis(67), &mut next));
+    }
+
+    #[test]
+    fn capture_clock_preserves_elapsed_time_and_wraps() {
+        assert_eq!(capture_timestamp(Duration::from_millis(200)), 18_000);
+        assert_eq!(
+            capture_timestamp(Duration::from_secs(48_000)),
+            4_320_000_000u64 as u32
+        );
+        assert_eq!(timed_payload(&[1, 2, 3]), None);
+        assert_eq!(timed_payload(&[1, 2, 3, 4]), None);
+        assert_eq!(
+            timed_payload(&[0x50, 0x46, 0, 0, 100, 0, 0, 0, 0x65]),
+            Some((18_000, 100, &[0x65][..]))
+        );
+    }
+    #[test]
+    fn recovery_requires_an_actual_idr_not_only_parameter_sets() {
+        assert!(is_idr(&[0, 0, 0, 1, 0x65, 1]));
+        assert!(is_idr(&[0, 0, 1, 0x65, 1]));
+        assert!(!is_idr(&[0, 0, 1, 0x67, 0, 0, 1, 0x61]));
     }
 }

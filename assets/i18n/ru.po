@@ -3465,3 +3465,11 @@ msgstr "Подготовка звонка…"
 #: src/ui/call.rs
 msgid "Microphone cleanup is unavailable. Audio is being sent without echo cancellation."
 msgstr "Обработка микрофона недоступна. Звук передаётся без эхоподавления."
+
+#: src/ui/call.rs
+msgid "Minimize call"
+msgstr "Свернуть звонок"
+
+#: src/ui/call.rs
+msgid "Restore call"
+msgstr "Развернуть звонок"

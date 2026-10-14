@@ -3446,3 +3446,11 @@ msgstr "Preparando llamada…"
 #: src/ui/call.rs
 msgid "Microphone cleanup is unavailable. Audio is being sent without echo cancellation."
 msgstr "La mejora del micrófono no está disponible. El audio se envía sin cancelación de eco."
+
+#: src/ui/call.rs
+msgid "Minimize call"
+msgstr "Minimizar llamada"
+
+#: src/ui/call.rs
+msgid "Restore call"
+msgstr "Restaurar llamada"

@@ -19,6 +19,7 @@ name = "zap-faster"
 path = "src/main.rs"
 
 [dependencies]
+bytes = "1"
 anyhow = "1"
 # Native call audio queues, already used by the official protocol library.
 async-channel = "2.5"

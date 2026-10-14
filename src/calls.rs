@@ -448,6 +448,7 @@ pub struct Call {
     /// Active only once the peer has answered *and* there is a media path to talk over.
     media_ready: bool,
     processing: Option<Arc<crate::call_processing::CallProcessing>>,
+    codec: Option<crate::call_codec::Audio>,
     mic: Option<AudioInput>,
     speaker: Option<AudioOutput>,
     microphone: Option<String>,
@@ -535,7 +536,12 @@ impl Call {
             AudioOutput::spawn_processed(speaker.clone(), Some(Arc::clone(&processing)));
 
         let voip = client.voip();
-        let mut offer = voip.call(&peer).audio(mic_rx, output_tx);
+        let codec = crate::call_codec::Audio::open(mic_rx, output_tx)?;
+        let mut offer = voip.call(&peer).encoded_audio(
+            crate::call_codec::FORMAT,
+            codec.source.clone(),
+            codec.sink.clone(),
+        );
         if let Some(video) = &video {
             offer = offer.video(video.source(), video.sink());
         }
@@ -566,6 +572,7 @@ impl Call {
             handle: Some(handle),
             media_ready: false,
             processing: Some(processing),
+            codec: Some(codec),
             mic: Some(mic),
             speaker: Some(output),
             microphone,
@@ -599,6 +606,7 @@ impl Call {
             handle: None,
             media_ready: false,
             processing: None,
+            codec: None,
             mic: None,
             speaker: None,
             microphone: devices.microphone,
@@ -629,6 +637,7 @@ impl Call {
             handle: None,
             media_ready: false,
             processing: None,
+            codec: None,
             mic: None,
             speaker: None,
             microphone: None,
@@ -675,6 +684,7 @@ impl Call {
             handle: None,
             media_ready: false,
             processing: None,
+            codec: None,
             mic: None,
             speaker: None,
             microphone: self.microphone.clone(),
@@ -700,7 +710,10 @@ impl Call {
             direction: self.direction,
             phase: self.phase,
             started: self.started,
-            muted: self.handle.as_ref().is_some_and(|handle| handle.is_muted()),
+            muted: self.codec.as_ref().map_or_else(
+                || self.handle.as_ref().is_some_and(|handle| handle.is_muted()),
+                |codec| codec.is_muted(),
+            ),
             outcome: self.outcome,
             peer_audio: self.peer_audio,
             audio_processing_failed: self
@@ -865,7 +878,12 @@ impl Call {
             AudioOutput::spawn_processed(speaker.clone(), Some(Arc::clone(&processing)));
 
         let voip = client.voip();
-        let mut answer = voip.accept(&incoming).audio(mic_rx, output_tx);
+        let codec = crate::call_codec::Audio::open(mic_rx, output_tx)?;
+        let mut answer = voip.accept(&incoming).encoded_audio(
+            crate::call_codec::FORMAT,
+            codec.source.clone(),
+            codec.sink.clone(),
+        );
         if let Some(video) = &video {
             answer = answer.video(video.source(), video.sink());
         }
@@ -880,6 +898,7 @@ impl Call {
         self.video = video;
         self.video_requested = false;
         self.processing = Some(processing);
+        self.codec = Some(codec);
         self.mic = Some(mic);
         self.speaker = Some(output);
         self.incoming = None;
@@ -952,6 +971,7 @@ impl Call {
 
     /// Releases every local resource. Safe to call twice.
     pub fn cleanup(&mut self) {
+        self.codec.take();
         self.video_starting = false;
         self.video.take();
         self.video_upgrade = None;
@@ -1141,7 +1161,12 @@ impl Call {
                 log::warn!(
                     "[CALL] this call sends {sending:?} while the peer expects {peer_expects:?} source={source:?}"
                 );
-                None
+                if let Some(codec) = &self.codec {
+                    codec.refuse_source();
+                }
+                self.peer_audio = Some(PeerAudio::Silent(SilenceReason::CodecRejectingFrames));
+                self.audio_warning_progress = self.audio_progress();
+                Some(self.update())
             }
             _ => None,
         }
@@ -1152,13 +1177,22 @@ impl Call {
             let stats = handle.media_stats();
             (
                 stats.rtp_received,
-                stats.audio_frames_decoded,
+                self.codec
+                    .as_ref()
+                    .map_or(stats.audio_frames_decoded, |codec| codec.decoded()),
                 stats.audio_frames_delivered,
             )
         })
     }
 
     pub(crate) fn refresh_audio_health(&mut self) -> bool {
+        if self.codec.as_ref().is_some_and(|codec| codec.failed()) {
+            let warning = Some(PeerAudio::Silent(SilenceReason::CodecRejectingFrames));
+            let changed = self.peer_audio != warning;
+            self.peer_audio = warning;
+            self.audio_warning_progress = self.audio_progress();
+            return changed;
+        }
         self.clear_recovered_audio(self.audio_progress())
     }
 
@@ -1188,12 +1222,16 @@ impl Call {
     /// it, so two lines a second apart are a before and an after rather than two samples of a
     /// steady state.
     pub fn log_media_stats_at(&self, marker: &str) {
+        if let Some(codec) = &self.codec {
+            codec.log_stats();
+        }
         let Some(handle) = self.handle.as_ref() else {
             self.log_audio_path(marker);
             return;
         };
         if let Some(video) = &self.video {
             video.recover_peer(handle);
+            video.view.log_stats();
         }
         let stats = handle.media_stats();
         log::info!(
@@ -1362,18 +1400,22 @@ impl Call {
         Some(self.update())
     }
 
-    /// Mutes or unmutes through the engine, which is what stops outgoing audio.
-    ///
-    /// The engine zeroes the frames it already has while this is set, so the microphone stream
-    /// stays fed and the peer never re-negotiates the transport.
+    /// Mute locally before signaling. Unmute only after the library confirms it.
+    /// The encoded endpoint owns its PCM gate; the microphone and transport stay fed.
     pub async fn set_muted(&mut self, muted: bool) -> Option<CallUpdate> {
         let handle = self.handle.clone()?;
+        if muted && let Some(codec) = &self.codec {
+            codec.set_muted(true);
+        }
         match handle.set_muted(muted).await {
             Ok(()) => {}
             Err(_error) if muted => log::warn!("call device or transport operation failed"),
             Err(_error) => log::warn!("call device or transport operation failed"),
         }
         let now = handle.is_muted();
+        if !muted && let Some(codec) = &self.codec {
+            codec.set_muted(now);
+        }
         if now != muted {
             log::warn!("[CALL] mute state is {now} after asking for {muted}");
         }
@@ -1944,6 +1986,7 @@ mod tests {
             handle: None,
             media_ready: false,
             processing: None,
+            codec: None,
             mic: None,
             speaker: None,
             microphone: None,
