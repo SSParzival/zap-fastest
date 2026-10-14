@@ -83,6 +83,12 @@ correction for this failure.
 
 ## Verification and next attended step
 
+The subsequent attended repeat received audio before camera-on and video from
+both cameras, but the user reported crackling audio and laggy video. It failed
+quality acceptance. See the [quality follow-up](development-call-quality-20261014.md)
+for its separate counters, playback defect and decoder investigation. The
+original no-delivery incident's cause remains unproven.
+
 Synthetic verification exercises real library SRTP authentication and encoded
 audio delivery into the application's Opus bridge and speaker queue. It checks
 outbound recovery through the peer pipeline as video is enabled, disabled and

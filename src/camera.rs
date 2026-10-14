@@ -477,7 +477,13 @@ fn spawn_peer_decoder(
     std::thread::Builder::new()
         .name("call-video-decoder".into())
         .spawn(move || {
-            let Ok(mut decoder) = openh264::decoder::Decoder::new() else {
+            // Flushing each access unit discards reference state for reordered
+            // frames. Keep it between packets, as the file video player does.
+            let Ok(mut decoder) = openh264::decoder::Decoder::with_api_config(
+                openh264::OpenH264API::from_source(),
+                openh264::decoder::DecoderConfig::new()
+                    .flush_after_decode(openh264::decoder::Flush::NoFlush),
+            ) else {
                 decode_view.fail("Video decoding is unavailable.");
                 return;
             };
@@ -924,6 +930,55 @@ mod tests {
             let decoded = decoder.decode(&access).unwrap().unwrap();
             assert_eq!(decoded.dimensions(), (width, height));
         }
+    }
+
+    #[test]
+    fn call_quality_peer_decoder_accepts_a_stream_with_reordered_frames() {
+        let file = std::fs::File::open(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/video/sample.mp4"
+        ))
+        .unwrap();
+        let size = file.metadata().unwrap().len();
+        let mut video = mp4::Mp4Reader::read_header(std::io::BufReader::new(file), size).unwrap();
+        let track = video
+            .tracks()
+            .values()
+            .find(|track| track.track_type().ok() == Some(mp4::TrackType::Video))
+            .unwrap();
+        let id = track.track_id();
+        let count = track.sample_count();
+        let mut parameters = Vec::new();
+        crate::animation::push_annex_b(&mut parameters, track.sequence_parameter_set().unwrap());
+        crate::animation::push_annex_b(&mut parameters, track.picture_parameter_set().unwrap());
+        let (sink, view) = test_peer_sink();
+        sink.send_blocking(VideoFrame::new(parameters)).unwrap();
+        for index in 1..=count {
+            let sample = video.read_sample(id, index).unwrap().unwrap();
+            let mut access = Vec::new();
+            crate::animation::avcc_to_annex_b(&mut access, &sample.bytes);
+            sink.send_blocking(VideoFrame::new(access)).unwrap();
+        }
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while view.0.peer_received.load(Ordering::Relaxed) < u64::from(count) + 1
+            && Instant::now() < deadline
+        {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        // Wait for the last decode, not just receipt of the last access unit.
+        drop(sink);
+        while view.0.peer_decoded.load(Ordering::Relaxed)
+            + view.0.peer_waiting.load(Ordering::Relaxed)
+            + view.0.peer_decode_failed.load(Ordering::Relaxed)
+            < u64::from(count) + 1
+            && Instant::now() < deadline
+        {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(view.0.peer_decode_failed.load(Ordering::Relaxed), 0);
+        // The live stream retains its small reorder tail, rather than flushing on each packet.
+        assert!(view.0.peer_decoded.load(Ordering::Relaxed) >= u64::from(count) - 3);
+        assert_eq!(view.take_peer().unwrap().size, [320, 180]);
     }
     #[test]
     fn preview_retains_only_the_latest_picture() {

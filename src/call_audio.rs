@@ -14,7 +14,7 @@
 
 use std::num::NonZero;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use rodio::Source;
@@ -495,12 +495,54 @@ fn open_microphone(device: Option<&str>) -> Result<Mic, String> {
 enum Sink {
     Real {
         _device: rodio::MixerDeviceSink,
-        player: rodio::Player,
+        playback: Playback,
         layout: Layout,
     },
     /// Installed only by a test, and only while its guard lives.
     #[cfg(test)]
     Fake(fake::Speaker),
+}
+
+/// The same playback path can be driven by an offline mixer in regression tests.
+struct Playback {
+    player: rodio::Player,
+    consumed_nanos: Arc<AtomicU64>,
+}
+
+impl Playback {
+    fn new(mixer: &rodio::mixer::Mixer) -> Self {
+        Self {
+            player: rodio::Player::connect_new(mixer),
+            consumed_nanos: Arc::new(AtomicU64::new(0)),
+        }
+    }
+
+    fn append(&self, layout: Layout, samples: Vec<f32>) {
+        let progress = self.consumed_nanos.clone();
+        let mut previous = Duration::ZERO;
+        let source = SamplesBuffer::new(
+            NonZero::new(layout.channels).unwrap_or(NonZero::<u16>::MIN),
+            NonZero::new(layout.rate).unwrap_or(NonZero::new(48_000).expect("48 kHz is not zero")),
+            samples,
+        )
+        .track_position()
+        .periodic_access(Duration::from_millis(5), move |source| {
+            // Player::get_pos() resets for every appended block. Accumulate only
+            // actual consumption, so healthy block boundaries never look stuck.
+            let position = source.get_pos();
+            progress.fetch_add(
+                position.saturating_sub(previous).as_nanos() as u64,
+                Ordering::Relaxed,
+            );
+            previous = position;
+        });
+        self.player.append(source);
+        self.player.play();
+    }
+
+    fn position(&self) -> Duration {
+        Duration::from_nanos(self.consumed_nanos.load(Ordering::Relaxed))
+    }
 }
 
 fn open_sink(device: Option<&str>) -> Result<Sink, String> {
@@ -532,10 +574,10 @@ fn open_sink(device: Option<&str>) -> Result<Sink, String> {
         rate: sink.config().sample_rate().get(),
         channels: sink.config().channel_count().get(),
     };
-    let player = rodio::Player::connect_new(sink.mixer());
+    let playback = Playback::new(sink.mixer());
     Ok(Sink::Real {
         _device: sink,
-        player,
+        playback,
         layout,
     })
 }
@@ -552,15 +594,9 @@ impl Sink {
 
     fn append(&self, samples: Vec<f32>) {
         match self {
-            Sink::Real { player, layout, .. } => {
-                player.append(SamplesBuffer::new(
-                    NonZero::new(layout.channels).unwrap_or(NonZero::<u16>::MIN),
-                    NonZero::new(layout.rate)
-                        .unwrap_or(NonZero::new(48_000).expect("48 kHz is not zero")),
-                    samples,
-                ));
-                player.play();
-            }
+            Sink::Real {
+                playback, layout, ..
+            } => playback.append(*layout, samples),
             #[cfg(test)]
             Sink::Fake(speaker) => speaker.append(samples),
         }
@@ -569,7 +605,7 @@ impl Sink {
     /// How far the stream has played, which is how a stuck device is told from a busy one.
     fn position(&self) -> Duration {
         match self {
-            Sink::Real { player, .. } => player.get_pos(),
+            Sink::Real { playback, .. } => playback.position(),
             #[cfg(test)]
             Sink::Fake(speaker) => speaker.position(),
         }
@@ -578,7 +614,7 @@ impl Sink {
     /// Whether everything handed to the sink has been played.
     fn empty(&self) -> bool {
         match self {
-            Sink::Real { player, .. } => player.empty(),
+            Sink::Real { playback, .. } => playback.player.empty(),
             #[cfg(test)]
             Sink::Fake(speaker) => speaker.empty(),
         }
@@ -1738,6 +1774,49 @@ mod tests {
             odd.len(),
             (FRAME_SAMPLES as f64 * 44_100.0 / RATE as f64).floor() as usize
         );
+    }
+
+    #[test]
+    fn call_quality_playback_progress_survives_source_boundaries() {
+        let (mixer, mut rendered) =
+            rodio::mixer::mixer(NonZero::new(1).unwrap(), NonZero::new(RATE).unwrap());
+        let playback = Playback::new(&mixer);
+        let layout = Layout {
+            rate: RATE,
+            channels: 1,
+        };
+        let mut previous = Duration::ZERO;
+        // Render through the real rodio player and mixer, without opening a device.
+        // Each received packet becomes a separate source, including variable durations.
+        for size in [960, 320, 960, 640, 960, 320, 960] {
+            playback.append(layout, vec![0.25; size]);
+            // Rodio may insert a short keep-alive silence between sources.
+            // Pull until this source completes, as a continuously running device does.
+            for _ in 0..RATE {
+                if playback.player.empty() {
+                    break;
+                }
+                rendered.next().unwrap();
+            }
+            assert!(
+                playback.player.empty(),
+                "the offline device drained this source"
+            );
+            let position = playback.position();
+            assert!(
+                position > previous,
+                "playback did not advance: {previous:?} -> {position:?}"
+            );
+            previous = position;
+        }
+        assert!(previous > Duration::from_millis(250));
+        assert!(
+            playback.player.get_pos() < previous,
+            "rodio's per-source clock resets"
+        );
+        // A mixer not pulled by a device must not fabricate playback progress.
+        playback.append(layout, vec![0.25; 960]);
+        assert_eq!(playback.position(), previous);
     }
 
     #[test]

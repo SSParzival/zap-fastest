@@ -1,0 +1,204 @@
+{
+  "generated_at_utc": "2026-10-14T19:37:33.846218+00:00",
+  "source_parent": "e66761f5a9bc9d8edb1414a8451e1531d2b58df6",
+  "frozen_inputs": {
+    "count": 328,
+    "sha256": "98f18e7119852f13f360152ef1ea45dd6fb94f2bb7fc50367552e9237f33fa4a",
+    "unchanged": true
+  },
+  "dependency_revision": "94c53e833805c58c9f5966b08d08c990650a651e",
+  "dependency_modified": false,
+  "attended_before_quality_correction": {
+    "source_commit": "e66761f5a9bc9d8edb1414a8451e1531d2b58df6",
+    "executable_sha256": "792555874f001c2112026b38793b6f77ccc791660bd025a7a027dec81fe0db1c",
+    "interval_utc": [
+      "2026-10-14T18:56:41Z",
+      "2026-10-14T18:57:20Z"
+    ],
+    "call_generation": 1,
+    "voice_received_before_camera": true,
+    "both_cameras_transmitting_user_confirmed": true,
+    "user_reported_crackling_before_camera": true,
+    "user_reported_laggy_video": true,
+    "relay": {
+      "received": 599,
+      "handed": 599,
+      "dropped": 0,
+      "send_failed": 0
+    },
+    "audio": {
+      "authenticated_delivered": 278,
+      "decoded": 278,
+      "submitted": 278,
+      "codec_rejected": 0,
+      "srtp_failed": 10
+    },
+    "speaker": {
+      "opens": 10,
+      "stalls": 9,
+      "restarts": 9,
+      "restarts_before_camera": 4
+    },
+    "video": {
+      "received": 165,
+      "decoded": 93,
+      "decode_failed": 72,
+      "pictures_taken": 93,
+      "decode_total_us": 23322
+    },
+    "quality_acceptance": "failed",
+    "original_zero_delivery_cause_established": false
+  },
+  "baseline_regressions": {
+    "command": "cargo test --locked --lib call_quality_ -- --nocapture",
+    "exit_code": 101,
+    "video_decode_failures": 34,
+    "playback_observed_plateau_ms": [
+      60,
+      60
+    ],
+    "speaker_harness_follow_up": "Drain each source through rodio keep-alive silence before sampling; assert raw per-source position resets while production clock accumulates."
+  },
+  "focused_corrected": {
+    "command": "cargo test --locked --lib call_ -- --test-threads=2",
+    "exit_code": 0,
+    "passed": 69,
+    "ignored": 1
+  },
+  "windows_gates": [
+    {
+      "name": "fmt",
+      "command": [
+        "H:\\Packages\\rustup-legacy\\toolchains\\1.98.0-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+        "fmt",
+        "--all",
+        "--check"
+      ],
+      "exit_code": 0,
+      "started": "2026-10-14T19:19:42.753728+00:00",
+      "finished": "2026-10-14T19:19:45.848924+00:00"
+    },
+    {
+      "name": "clippy",
+      "command": [
+        "H:\\Packages\\rustup-legacy\\toolchains\\1.98.0-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+        "clippy",
+        "--locked",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "started": "2026-10-14T19:19:45.849365+00:00",
+      "finished": "2026-10-14T19:20:30.358456+00:00"
+    },
+    {
+      "name": "clippy-all",
+      "command": [
+        "H:\\Packages\\rustup-legacy\\toolchains\\1.98.0-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+        "clippy",
+        "--locked",
+        "--all-targets",
+        "--all-features",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "started": "2026-10-14T19:20:30.358915+00:00",
+      "finished": "2026-10-14T19:21:04.196818+00:00"
+    },
+    {
+      "name": "test",
+      "command": [
+        "H:\\Packages\\rustup-legacy\\toolchains\\1.98.0-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+        "test",
+        "--locked",
+        "--all-targets",
+        "--",
+        "--test-threads=2"
+      ],
+      "exit_code": 0,
+      "started": "2026-10-14T19:21:04.197240+00:00",
+      "finished": "2026-10-14T19:26:37.864783+00:00"
+    },
+    {
+      "name": "test-all",
+      "command": [
+        "H:\\Packages\\rustup-legacy\\toolchains\\1.98.0-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+        "test",
+        "--locked",
+        "--all-targets",
+        "--all-features",
+        "--",
+        "--test-threads=2"
+      ],
+      "exit_code": 0,
+      "started": "2026-10-14T19:26:37.865272+00:00",
+      "finished": "2026-10-14T19:36:27.491936+00:00"
+    },
+    {
+      "name": "doc",
+      "command": [
+        "H:\\Packages\\rustup-legacy\\toolchains\\1.98.0-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+        "doc",
+        "--locked",
+        "--all-features",
+        "--no-deps"
+      ],
+      "exit_code": 0,
+      "started": "2026-10-14T19:36:27.495821+00:00",
+      "finished": "2026-10-14T19:36:59.475657+00:00"
+    }
+  ],
+  "test_counts": {
+    "test": [
+      {
+        "passed": 1859,
+        "failed": 0,
+        "ignored": 13
+      },
+      {
+        "passed": 10,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "passed": 2,
+        "failed": 0,
+        "ignored": 0
+      }
+    ],
+    "test-all": [
+      {
+        "passed": 1859,
+        "failed": 0,
+        "ignored": 13
+      },
+      {
+        "passed": 12,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "passed": 2,
+        "failed": 0,
+        "ignored": 0
+      }
+    ]
+  },
+  "privacy_exporter_tests": {
+    "command": "python -B packaging/test-call-diagnostics.py",
+    "exit_code": 0,
+    "passed": 3
+  },
+  "delivery_receipts": {
+    "ci": "H:\\Scratch\\Codex\\zap-call-quality-20261014\\ci-receipt.json",
+    "build": "H:\\Scratch\\Codex\\zap-call-quality-20261014\\release-receipt.json",
+    "installed": "H:\\Scratch\\Codex\\zap-call-quality-20261014\\installed-readback.json"
+  },
+  "attended_after_quality_correction": "pending",
+  "status": "source_verified_live_quality_acceptance_pending",
+  "release_published": false
+}

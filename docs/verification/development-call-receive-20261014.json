@@ -87,16 +87,24 @@
     "root_cause_established": false
   },
   "attended_after": {
-    "status": "not_yet_run",
-    "acceptance": [
-      "bidirectional_voice_before_camera",
-      "bidirectional_voice_after_camera",
-      "both_transmitting_and_receiving_video",
-      "camera_off_audio",
-      "minimize_restore_audio",
-      "mute",
-      "end_call"
-    ]
+    "status": "received_media_quality_failed",
+    "installed_sha256": "792555874f001c2112026b38793b6f77ccc791660bd025a7a027dec81fe0db1c",
+    "source_commit": "e66761f5a9bc9d8edb1414a8451e1531d2b58df6",
+    "utc_interval": [
+      "2026-10-14T18:56:41Z",
+      "2026-10-14T18:57:20Z"
+    ],
+    "user_report": {
+      "inbound_audio_before_camera": true,
+      "both_cameras_worked": true,
+      "audio_quality": "crackling",
+      "video_quality": "laggy",
+      "remaining_transition_checks": "not individually confirmed",
+      "crackling_before_video": true
+    },
+    "call_ended_counter_observed": true,
+    "interpretation": "Inbound media reached this repeat call. Quality acceptance failed. Original no-delivery cause remains unproven.",
+    "follow_up": "docs/development-call-quality-20261014.md"
   },
   "installed_baseline": {
     "version": "0.30.0",
@@ -107,7 +115,7 @@
     "build": "H:\\Scratch\\Codex\\zap-inbound-20261014\\release-receipt.json",
     "installed": "H:\\Scratch\\Codex\\zap-inbound-20261014\\installed-readback.json"
   },
-  "status": "diagnostic_build_requires_attended_receive_evidence",
+  "status": "attended_media_received_quality_failure_under_investigation",
   "release_published": false,
   "previous_validation": {
     "source_commit": "0834937c725741dda9bbbe74b472509e769b17e2",
