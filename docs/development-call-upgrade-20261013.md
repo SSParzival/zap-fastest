@@ -118,3 +118,28 @@ Their final delivery receipts are task-owned artifacts under
 GitHub Actions run for current remote results. Source/visual checks do not replace
 an attended camera transition with working duplex audio and smooth peer video.
 Version stays 0.30.0 and no release is requested or published.
+
+## Installation and CI follow-up
+
+After the user confirmed that no call or recording was active, the client quit
+cleanly. A fresh backup at `H:/Backups/ZapFasterRollback/20261013-220104`
+verified 5,918 files (5,933,489,790 bytes) by SHA-256. The executable rollback
+script was rehearsed successfully before replacement. Session, archive and
+the existing Windows keyring were preserved. The installed executable reports
+0.30.0 and matches the optimized candidate's SHA-256:
+`c3f3a0609ad631ad149ded2c9738bde4b01897226facc6cc37759c5750f17a09`.
+
+[The initial matching CI run](https://github.com/eternalwaitt/zap-faster/actions/runs/38490733094)
+exposed a race in the pre-existing synthetic microphone test on Ubuntu with all
+features. Receiving a frame can precede the pump's subsequent diagnostic-counter
+increment. The test now waits for that accounting within its existing five-second
+deadline, retaining the counter, frame-size and non-silence assertions. This
+follow-up changes only test code; the installed runtime remains the verified
+`b366bcfe` build. The focused microphone test and all six required Windows
+gates pass again after this correction. Default and all-feature library suites
+each pass 1,854 tests, with the same 13 hardware tests ignored.
+
+[The matching Flatpak build](https://github.com/eternalwaitt/zap-faster/actions/runs/38490733247)
+passed. Final CI status must be checked against the pushed follow-up commit.
+Audio continuity after camera-on and smooth peer video remain attended-test
+requirements, rather than claims established by installation or synthetic tests.

@@ -1771,6 +1771,13 @@ mod tests {
                 Err(_) => {}
             }
         }
+        // Sending wakes the receiver before the pump increments its diagnostic counter.
+        // Let that completed send finish accounting before checking it on another worker.
+        while input.frames_sent.load(Ordering::Relaxed) < got.len()
+            && started.elapsed() < Duration::from_secs(5)
+        {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
         assert!(input.frames_sent.load(Ordering::Relaxed) >= got.len());
         drop(input);
         assert!(got.len() >= 5, "the engine got {} frames", got.len());
