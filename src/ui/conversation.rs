@@ -2294,6 +2294,8 @@ struct View<'a> {
     /// The motion photo of this chat whose clip plays.
     motion_playing: Option<&'a str>,
     player: &'a crate::audio::Player,
+    /// The speed this chat's voice messages play at.
+    voice_speed: f32,
     video: &'a crate::video::Player,
     transcripts: &'a HashMap<String, String>,
     transcribing: &'a HashSet<String>,
@@ -2565,6 +2567,7 @@ fn messages(app: &mut App, ui: &mut egui::Ui, chat: &Chat, under: f32) {
             .filter(|(playing, _)| *playing == chat.id)
             .map(|(_, message)| message.as_str()),
         player: &app.player,
+        voice_speed: app.voice_speed_in(Some(&chat.id)),
         video: &app.video,
         // Whole-message exports are already formatted. Do not let the
         // text-selection annotator reinterpret them as drawn body text.
@@ -4527,6 +4530,19 @@ fn speed_pill(
 
 /// The message menu's row of every playback speed for a playable voice or video
 /// message, so 1.25x and 1.75x are reachable without cycling.
+/// Choosing `speed` for a voice message of `chat`: a chat with its own speed
+/// changes that, and any other changes the speed in Settings.
+fn speed_action(chat: &Chat, speed: f32) -> Action {
+    if chat.voice_speed.is_some() {
+        Action::SetChatVoiceSpeed {
+            chat: chat.id.clone(),
+            speed: Some(speed),
+        }
+    } else {
+        Action::SetVoiceSpeed(speed)
+    }
+}
+
 fn speed_menu_row(
     ui: &mut egui::Ui,
     view: &View<'_>,
@@ -4537,7 +4553,7 @@ fn speed_menu_row(
     let speed = if video {
         view.video.speed()
     } else {
-        view.player.speed()
+        view.voice_speed
     };
     let preparing = !video && view.player.preparing_speed(&message.id);
     widgets::menu_separator(ui, &view.palette);
@@ -4567,7 +4583,7 @@ fn speed_menu_row(
                     actions.push(if video {
                         Action::SetVideoSpeed(option)
                     } else {
-                        Action::SetVoiceSpeed(option)
+                        speed_action(view.chat, option)
                     });
                     ui.close();
                 }
@@ -6132,6 +6148,7 @@ pub(crate) fn list_menu(
         // A row drawn outside the conversation holds still.
         animate: false,
         player: &app.player,
+        voice_speed: app.voice_speed_in(Some(&chat.id)),
         video: &app.video,
         copy_rows: Some(app.copy_rows.as_ref()),
         starred: marks.starred.then_some(&stars),
@@ -10312,7 +10329,7 @@ fn voice_player(
             // Speed chip, cycling 1x, 1.5x, and 2x like the phone. The
             // message menu lists every speed, including 1.25x and 1.75x.
             if shows_chip {
-                let speed = view.player.speed();
+                let speed = view.voice_speed;
                 // The label follows the click at once, faded until this
                 // clip actually plays at that speed.
                 let preparing = view.player.preparing_speed(&message.id);
@@ -10333,9 +10350,10 @@ fn voice_player(
                     data.insert_temp(speed_chip_id(&view.chat.id, &message.id), response.rect);
                 });
                 if response.clicked() {
-                    actions.push(Action::SetVoiceSpeed(crate::audio::next_cycled_speed(
-                        speed,
-                    )));
+                    actions.push(speed_action(
+                        view.chat,
+                        crate::audio::next_cycled_speed(speed),
+                    ));
                 }
                 response.on_hover_text(if preparing {
                     "Preparing playback speed"

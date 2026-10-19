@@ -240,6 +240,8 @@ pub struct Chat {
     pub labels: Vec<String>,
     /// This chat's own notification sound; `None` follows Settings.
     pub notification_sound: Option<crate::settings::NotificationSound>,
+    /// This chat's own voice message speed; `None` follows Settings.
+    pub voice_speed: Option<f32>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -296,6 +298,7 @@ impl Chat {
             ephemeral_expiration: None,
             labels: Vec::new(),
             notification_sound: None,
+            voice_speed: None,
         }
     }
 
@@ -2563,6 +2566,11 @@ pub enum Action {
     },
     /// Asks for an audio file for one chat's notifications.
     PickChatSound(ChatId),
+    /// Sets a chat's own voice message speed; `None` follows Settings.
+    SetChatVoiceSpeed {
+        chat: ChatId,
+        speed: Option<f32>,
+    },
     /// Asks for a folder for new downloads.
     PickDownloadFolder,
     /// Changes our display name and About text; `None` keeps the current one.
