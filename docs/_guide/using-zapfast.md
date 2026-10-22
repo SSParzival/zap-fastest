@@ -674,8 +674,9 @@ its regular taskbar icon size for overlays to appear. The count
 does not count toasts remaining in Windows notification history. On Linux and
 Windows, notifications show the chat picture and open the chat at the message
 they announced when clicked. On Linux, a notification that arrives while the
-window is open behind others also highlights Zap Faster in the taskbar until you
-switch to it. Muted chats do not send notifications, and
+window is open behind others also highlights ZapFastest in the taskbar until you
+switch to it. GNOME and Hyprland get no highlight: GNOME would show a second
+notice, and Hyprland can bring the window to the front instead. Muted chats do not send notifications, and
 archived chats stay quiet while they remain archived. You can change both settings.
 On macOS, the Dock icon also shows the unread count and clears it while the app
 is locked. In **Settings > Notifications**, **Show notification sender** controls
