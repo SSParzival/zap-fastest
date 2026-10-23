@@ -694,9 +694,9 @@ fn run() -> eframe::Result<()> {
         let (verb, not_running) = match command {
             Control::ReloadThemes => (
                 "reload-themes",
-                "Zap Faster is not running, so there are no themes to reload.",
+                "ZapFastest is not running, so there are no themes to reload.",
             ),
-            Control::Quit => ("quit", "Zap Faster is not running."),
+            Control::Quit => ("quit", "ZapFastest is not running."),
             Control::Automation { .. } | Control::Access(_) => unreachable!("handled above"),
         };
         if let Err(error) = single_instance::send(&discovered.runtime, verb) {
@@ -711,7 +711,7 @@ fn run() -> eframe::Result<()> {
                     return Ok(());
                 }
             } else {
-                eprintln!("Could not reach the running Zap Faster: {error}");
+                eprintln!("Could not reach the running ZapFastest: {error}");
             }
             std::process::exit(1);
         }
@@ -1334,6 +1334,29 @@ mod chat_link_cli_tests {
                 Some(Control::Access(_))
             ));
         }
+    }
+
+    #[test]
+    fn an_invite_argument_is_recognised() {
+        for argument in [
+            "https://chat.whatsapp.com/KqTP1zA4tFJLolS2usUzpA",
+            "chat.whatsapp.com/KqTP1zA4tFJLolS2usUzpA",
+            "whatsapp://chat/?code=KqTP1zA4tFJLolS2usUzpA",
+            "whatsapp://chat?code=KqTP1zA4tFJLolS2usUzpA",
+        ] {
+            let cli = Cli::try_parse_from(["zap-fastest", argument]).unwrap();
+            assert_eq!(
+                cli.whatsapp_url
+                    .as_deref()
+                    .and_then(zapfast::safety::group_invite_code),
+                Some("KqTP1zA4tFJLolS2usUzpA".into()),
+                "{argument}"
+            );
+        }
+    }
+
+    #[test]
+    fn automation_cli_send_requires_a_file_and_request_id() {
         let cli = Cli::try_parse_from([
             "zap-faster",
             "send",
