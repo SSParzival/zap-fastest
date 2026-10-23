@@ -11,7 +11,7 @@ use std::process::{Command, Output};
 
 /// Runs the built executable with every per-user location inside `home`.
 fn zapfast(home: &Path, arguments: &[&str]) -> Output {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_zap-faster"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_zap-fastest"));
     command.args(arguments).env_remove("RUST_LOG");
     #[cfg(windows)]
     {
