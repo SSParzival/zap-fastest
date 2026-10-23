@@ -66,9 +66,18 @@ impl Worker {
         let Some(jid) = Self::jid_of(&chat) else {
             return;
         };
+        let last = match self.newest_on_phone(&chat) {
+            Ok(last) => last,
+            Err(error) => {
+                log::warn!("archive sync: could not read a chat to archive it on the phone: {error}");
+                let _ = self.archive.finish_archive_change(&chat, at);
+                return;
+            }
+        };
         if !self.read_sync.start_archive(&chat, at, Instant::now()) {
             return;
         }
+        let range = Some(super::archive_range(&jid, last.as_ref()));
         let commands = self.commands.clone();
         let generation = self.privacy_generation;
         tokio::spawn(async move {
@@ -79,9 +88,9 @@ impl Worker {
                 >,
             > = Box::pin(async {
                 if archived {
-                    client.chat_actions().archive_chat(&jid, None).await
+                    client.chat_actions().archive_chat(&jid, range).await
                 } else {
-                    client.chat_actions().unarchive_chat(&jid, None).await
+                    client.chat_actions().unarchive_chat(&jid, range).await
                 }
             });
             let accepted = matches!(

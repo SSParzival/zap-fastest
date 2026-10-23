@@ -529,6 +529,9 @@ pub struct ChatLink {
 /// list can be told apart from a cut one.
 pub const MEDIA_LIST_LIMIT: usize = 500;
 
+/// Identifier prefix for synthetic call rows stored locally.
+pub const CALL_ENTRY_PREFIX: &str = "zapfast-call-";
+
 /// What the info panel lists for one chat: its pictures and videos, its
 /// documents, and the web links in its text, each newest first.
 #[derive(Clone, Debug, Default, PartialEq)]
