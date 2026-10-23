@@ -785,11 +785,13 @@ fn run() -> eframe::Result<()> {
         .panic_log(dirs.panic_log())
         .redact(redact_protocol);
     // Write desktop-session logs to disk. Demo runs use stderr so they do not
-    // replace a live session's log.
+    // replace a live session's log. The previous run's log is moved aside.
     let logging = if demo {
         logging
     } else {
-        logging.file(dirs.log_file())
+        let log_file = dirs.log_file();
+        let _ = std::fs::rename(&log_file, dirs.previous_log());
+        logging.file(log_file)
     };
     logging
         .init()

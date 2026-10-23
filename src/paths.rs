@@ -263,6 +263,11 @@ impl AppDirs {
         self.state.join("zapfast.log")
     }
 
+    /// The run before's log, moved aside at startup.
+    pub fn previous_log(&self) -> PathBuf {
+        self.state.join("zapfast.previous.log")
+    }
+
     /// Panic log written before process exit.
     pub fn panic_log(&self) -> PathBuf {
         self.state.join("panic.log")
@@ -512,6 +517,14 @@ mod tests {
             assert_eq!(std::fs::read(path.join("fixture")).unwrap(), b"preserved");
         }
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn previous_log_is_beside_the_current_log() {
+        let root = root("previous-log");
+        let dirs = AppDirs::under(&root);
+        assert_eq!(dirs.previous_log(), dirs.state.join("zapfast.previous.log"));
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
