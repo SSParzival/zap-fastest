@@ -120,9 +120,11 @@ beside their labels.
   download automatically. Explicit downloads allow up to 2 GiB, with progress
   and cancellation. Images above 64 MiB can be saved and opened externally;
   in-app previews and clipboard decoding remain bounded.
-- **Keep chats archived**: on by default. When off, a new
-  message, received or sent, brings an archived chat back to the list. Applies
-  to all accounts here; it does not read or change the phone's own setting.
+- **Keep chats archived**: on by default. When off, a new message, received or
+  sent, brings an archived chat back to the list. Applies to all accounts here
+  whose phone has not sent its own **Keep chats archived**; once a phone has,
+  ZapFastest follows the phone for that account. It does not change the phone's
+  setting.
 - **Pause other media while recording or playing**: pause music and videos in
   other apps while you record, or while a voice message, audio, or video plays
   with sound, and resume them afterwards. Linux and Windows only.
