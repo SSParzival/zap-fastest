@@ -49,7 +49,7 @@ modules:
     build-commands:
       - cargo --offline fetch --manifest-path Cargo.toml --verbose
       - cargo --offline build --release --locked
-      - install -Dm755 target/release/zap-faster /app/bin/zap-faster
+      - bin="target/release/zap-fastest"; [ -f "$bin" ] || bin="target/release/zap-faster"; install -Dm755 "$bin" /app/bin/zap-faster; ln -sf zap-faster /app/bin/zap-fastest
       - install -Dm644 packaging/applications/*.desktop /app/share/applications/io.github.eternalwaitt.ZapFaster.desktop
       - sed -i 's/^Icon=.*$/Icon=io.github.eternalwaitt.ZapFaster/;s/^StartupWMClass=zap-faster$/StartupWMClass=io.github.eternalwaitt.ZapFaster/' /app/share/applications/io.github.eternalwaitt.ZapFaster.desktop
       - install -Dm644 packaging/icons/zap-faster.svg /app/share/icons/hicolor/scalable/apps/io.github.eternalwaitt.ZapFaster.svg

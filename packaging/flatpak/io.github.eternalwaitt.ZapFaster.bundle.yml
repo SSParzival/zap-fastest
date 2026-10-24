@@ -21,7 +21,7 @@ modules:
   - name: zap-faster
     buildsystem: simple
     build-commands:
-      - install -Dm755 zap-faster /app/bin/zap-faster
+      - bin="zap-fastest"; [ -f "$bin" ] || bin="zap-faster"; install -Dm755 "$bin" /app/bin/zap-faster; ln -sf zap-faster /app/bin/zap-fastest
       - install -Dm644 packaging/applications/*.desktop /app/share/applications/io.github.eternalwaitt.ZapFaster.desktop
       - sed -i 's/^Icon=.*$/Icon=io.github.eternalwaitt.ZapFaster/;s/^StartupWMClass=zap-faster$/StartupWMClass=io.github.eternalwaitt.ZapFaster/' /app/share/applications/io.github.eternalwaitt.ZapFaster.desktop
       - install -Dm644 packaging/icons/zap-faster.svg /app/share/icons/hicolor/scalable/apps/io.github.eternalwaitt.ZapFaster.svg
