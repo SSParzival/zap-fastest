@@ -28,10 +28,10 @@ fn launcher_uri(desktop_file: &str) -> String {
 
 /// The desktop file name for this installation, which is also the app id the
 /// window uses (see `main.rs`) and the `desktop-entry` of its notifications. A
-/// Flatpak install ships `io.github.eternalwaitt.ZapFaster.desktop` and sets the same id in
+/// Flatpak install ships `io.github.eternalwaitt.ZapFastest.desktop` and sets the same id in
 /// `FLATPAK_ID`.
 pub(super) fn desktop_file() -> String {
-    fastframe_desktop::desktop_entry("zap-faster")
+    fastframe_desktop::desktop_entry("zap-fastest")
 }
 
 /// Counts unread messages on the taskbar icon through the Unity Launcher API.

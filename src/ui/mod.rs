@@ -471,7 +471,7 @@ fn banner(app: &mut App, ui: &mut egui::Ui) {
             let update = update.as_ref().expect("checked above");
             (
                 Icon::Info,
-                gettext(locale, "Zap Faster {version} is available")
+                gettext(locale, "ZapFastest {version} is available")
                     .replace("{version}", &update.version.to_string()),
                 palette.accent,
                 false,

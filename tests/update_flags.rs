@@ -76,7 +76,7 @@ fn update_receipt_and_error_are_taken_off_the_command_line() {
     assert!(output.status.success(), "stderr: {stderr}");
     assert_eq!(
         stdout.trim(),
-        format!("zap-faster {}", env!("CARGO_PKG_VERSION")),
+        format!("zap-fastest {}", env!("CARGO_PKG_VERSION")),
         "stderr: {stderr}"
     );
     assert_eq!(entries(home.path()), Vec::<String>::new());

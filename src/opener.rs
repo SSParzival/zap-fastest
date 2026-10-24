@@ -30,7 +30,7 @@ pub struct BrowserLauncher;
 #[cfg(target_os = "linux")]
 impl egui::plugin::Plugin for BrowserLauncher {
     fn debug_name(&self) -> &'static str {
-        "zap-faster-browser-launcher"
+        "zap-fastest-browser-launcher"
     }
     fn output_hook(&mut self, _ctx: &egui::Context, output: &mut egui::FullOutput) {
         output.platform_output.commands.retain(|command| {

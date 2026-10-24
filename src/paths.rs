@@ -23,7 +23,10 @@ pub struct AppDirs {
 /// A separate preferences marker is required; the updater's installation marker is insufficient.
 fn portable_settings_beside(executable: &Path) -> Option<PathBuf> {
     let parent = executable.parent()?;
-    let marker = parent.join("zap-faster-portable-settings.txt");
+    let marker = ["zap-fastest-portable-settings.txt", "zap-faster-portable-settings.txt"]
+        .into_iter()
+        .map(|name| parent.join(name))
+        .find(|path| path.exists())?;
     let metadata = std::fs::symlink_metadata(&marker).ok()?;
     if !metadata.is_file() || metadata.file_type().is_symlink() || metadata.len() > 128 {
         return None;
@@ -35,7 +38,9 @@ fn portable_settings_beside(executable: &Path) -> Option<PathBuf> {
             return None;
         }
     }
-    (std::fs::read_to_string(marker).ok()?.trim() == "zap-faster-portable-settings-v1")
+    let content = std::fs::read_to_string(marker).ok()?;
+    let trimmed = content.trim();
+    (trimmed == "zap-fastest-portable-settings-v1" || trimmed == "zap-faster-portable-settings-v1")
         .then(|| parent.join("settings.json"))
 }
 
@@ -222,7 +227,7 @@ impl AppDirs {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::AlreadyExists,
                 format!(
-                    "{} holds a single-account setup, but {} already exists. Nothing was moved; move one of them away and start Zap Faster again",
+                    "{} holds a single-account setup, but {} already exists. Nothing was moved; move one of them away and start ZapFastest again",
                     self.state.display(),
                     blocked[0].display()
                 ),

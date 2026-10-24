@@ -31,7 +31,7 @@ pub(super) fn key_for(path: &Path) -> Result<Zeroizing<[u8; 32]>> {
     let entry = store
         .build("rocks.zapfast.ZapFast", &identity_for(parent)?, None)
         .map_err(keyring_error)
-        .context("The OS keyring could not open Zap Faster's archive key")?;
+        .context("The OS keyring could not open ZapFastest's archive key")?;
     key_from_entry(path, &entry)
 }
 
@@ -173,7 +173,7 @@ fn copy_archive_key_in(
     let old_entry = store
         .build("rocks.zapfast.ZapFast", &identity_for(old_parent)?, None)
         .map_err(keyring_error)
-        .context("The OS keyring could not open Zap Faster's archive key")?;
+        .context("The OS keyring could not open ZapFastest's archive key")?;
     let key = match old_entry.get_secret() {
         Ok(secret) => decoded_key(secret)?,
         Err(keyring_core::Error::NoEntry) => {
@@ -190,7 +190,7 @@ fn copy_archive_key_in(
     let new_entry = store
         .build("rocks.zapfast.ZapFast", &identity_for(new_parent)?, None)
         .map_err(keyring_error)
-        .context("The OS keyring could not open Zap Faster's archive key")?;
+        .context("The OS keyring could not open ZapFastest's archive key")?;
     new_entry
         .set_secret(&stored_key(&key))
         .map_err(keyring_error)
@@ -284,7 +284,7 @@ fn decoded_key(secret: Vec<u8>) -> Result<Zeroizing<[u8; 32]>> {
 fn keyring_recovery() -> &'static str {
     #[cfg(target_os = "linux")]
     {
-        "Start a Secret Service provider in your desktop session (GNOME Keyring, or KWallet with Secret Service support), unlock its login collection, then choose Try again. Zap Faster needs the session D-Bus service org.freedesktop.secrets; the archive has not been replaced"
+        "Start a Secret Service provider in your desktop session (GNOME Keyring, or KWallet with Secret Service support), unlock its login collection, then choose Try again. ZapFastest needs the session D-Bus service org.freedesktop.secrets; the archive has not been replaced"
     }
     #[cfg(not(target_os = "linux"))]
     {

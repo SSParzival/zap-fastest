@@ -5597,7 +5597,7 @@ mod tests {
             .filter_map(|(_, node)| node.label().or_else(|| node.value()))
             .collect();
         assert!(
-            labels.contains(&"Locked chats are read-only in Zap Faster"),
+            labels.contains(&"Locked chats are read-only in ZapFastest"),
             "{labels:?}"
         );
         assert!(!labels.contains(&"admins"));
@@ -15417,7 +15417,7 @@ mod tests {
         }
         assert_eq!(
             opened,
-            ["https://github.com/eternalwaitt/zap-faster/blob/main/docs/_reference/themes.md"]
+            ["https://github.com/SSParzival/zap-fastest/blob/main/docs/_reference/themes.md"]
         );
     }
 

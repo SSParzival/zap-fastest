@@ -8,7 +8,7 @@ use clap::Parser;
 
 /// A fast, native WhatsApp client.
 #[derive(Debug, Parser)]
-#[command(name = "zap-faster", version, about)]
+#[command(name = "zap-fastest", version, about)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Control>,
@@ -16,7 +16,7 @@ struct Cli {
     #[arg(short, long)]
     verbose: bool,
     /// Start in the tray without opening a window, when the tray is available
-    /// and Zap Faster keeps running in the background. For login autostart.
+    /// and ZapFastest keeps running in the background. For login autostart.
     #[arg(long)]
     start_hidden: bool,
 
@@ -113,9 +113,9 @@ enum Control {
         #[command(subcommand)]
         operation: Automation,
     },
-    /// Reload palettes in an already-running Zap Faster without showing its window.
+    /// Reload palettes in an already-running ZapFastest without showing its window.
     ReloadThemes,
-    /// Quit an already-running Zap Faster, which closing its window leaves in the tray.
+    /// Quit an already-running ZapFastest, which closing its window leaves in the tray.
     Quit,
 }
 
@@ -741,20 +741,20 @@ fn run() -> eframe::Result<()> {
         match single_instance::acquire(&discovered.runtime, &waker, verb) {
             single_instance::Outcome::Only(guard) => Some(guard),
             single_instance::Outcome::Surfaced if cli.start_hidden => {
-                eprintln!("Zap Faster is already running");
+                eprintln!("ZapFastest is already running");
                 return Ok(());
             }
             single_instance::Outcome::Surfaced => {
-                eprintln!("Zap Faster or FastsApp is already running; asked it to show its window");
+                eprintln!("ZapFastest or FastsApp is already running; asked it to show its window");
                 return Ok(());
             }
             single_instance::Outcome::Unanswered => {
                 if chat_link.is_some() || group_invite.is_some() {
                     eprintln!(
-                        "The running Zap Faster cannot open this link. Quit it and open the link again."
+                        "The running ZapFastest cannot open this link. Quit it and open the link again."
                     );
                 } else {
-                    eprintln!("Zap Faster is already running but did not answer");
+                    eprintln!("ZapFastest is already running but did not answer");
                 }
                 return Ok(());
             }
@@ -919,7 +919,7 @@ fn run() -> eframe::Result<()> {
                 .as_deref()
                 .is_some_and(|page| page.split(',').any(|part| part == "call-minimized"));
             eframe::run_native(
-                "Zap Faster",
+                "ZapFastest",
                 options,
                 Box::new(move |cc| {
                     let mut app = lease.take(&cc.egui_ctx);
@@ -981,14 +981,14 @@ fn is_graphics_failure(error: &eframe::Error) -> bool {
 #[cfg(any(windows, test))]
 fn startup_failure_text(graphics: bool, details: &str, log: &std::path::Path) -> String {
     let summary = if graphics {
-        "Zap Faster could not start because the graphics driver does not offer \
-         OpenGL 2.1 or newer, which Zap Faster needs to draw its window.\n\n\
+        "ZapFastest could not start because the graphics driver does not offer \
+         OpenGL 2.1 or newer, which ZapFastest needs to draw its window.\n\n\
          Install the current driver from the maker of the graphics chip \
          (Intel, AMD or NVIDIA). The Microsoft Basic Display Adapter, some \
          virtual machines and some remote desktop sessions offer no usable \
          OpenGL."
     } else {
-        "Zap Faster could not start."
+        "ZapFastest could not start."
     };
     format!(
         "{summary}\n\nDetails: {details}\n\nThe log may say more: {}",
@@ -1011,7 +1011,7 @@ fn startup_failure_dialog(error: &eframe::Error) {
         &paths::AppDirs::discover().log_file(),
     );
     let wide = |text: &str| text.encode_utf16().chain([0]).collect::<Vec<u16>>();
-    let (text, caption) = (wide(&text), wide("Zap Faster"));
+    let (text, caption) = (wide(&text), wide("ZapFastest"));
     // SAFETY: both strings are NUL-terminated and outlive the call.
     unsafe {
         MessageBoxW(
@@ -1059,14 +1059,14 @@ fn native_options(
     let demo = demo_persistence.is_some();
     let viewport = egui::ViewportBuilder::default()
         .with_title(if demo {
-            "Zap Faster Demo"
+            "ZapFastest Demo"
         } else {
-            "Zap Faster"
+            "ZapFastest"
         })
         .with_app_id(if demo {
-            "zap-faster-demo".to_owned()
+            "zap-fastest-demo".to_owned()
         } else {
-            fastframe_desktop::desktop_entry("zap-faster")
+            fastframe_desktop::desktop_entry("zap-fastest")
         });
     // The remembered size and position, from the settings, over the default
     // size. Demo runs keep their fixed screenshot size.
@@ -1328,7 +1328,7 @@ mod chat_link_cli_tests {
             vec!["search", "synthetic phrase"],
             vec!["watch", "--since", "100", "--interval", "2"],
         ] {
-            let mut command = vec!["zap-faster"];
+            let mut command = vec!["zap-fastest"];
             command.extend(args);
             command.extend(["--account", "2"]);
             assert!(matches!(
@@ -1360,7 +1360,7 @@ mod chat_link_cli_tests {
     #[test]
     fn automation_cli_send_requires_a_file_and_request_id() {
         let cli = Cli::try_parse_from([
-            "zap-faster",
+            "zap-fastest",
             "send",
             "fixture",
             "-",
@@ -1382,7 +1382,7 @@ mod chat_link_cli_tests {
     #[test]
     fn automation_cli_is_explicit_and_send_requires_a_file_and_request_id() {
         let cli = Cli::try_parse_from([
-            "zap-faster",
+            "zap-fastest",
             "automation",
             "read",
             "--account",
@@ -1399,7 +1399,7 @@ mod chat_link_cli_tests {
         ));
         assert!(
             Cli::try_parse_from([
-                "zap-faster",
+                "zap-fastest",
                 "automation",
                 "send",
                 "--account",
@@ -1411,7 +1411,7 @@ mod chat_link_cli_tests {
         );
         assert!(
             Cli::try_parse_from([
-                "zap-faster",
+                "zap-fastest",
                 "automation",
                 "read",
                 "--account",
@@ -1440,7 +1440,7 @@ mod chat_link_cli_tests {
             "+1 (555) 010-0123",
             "https://wa.me/15550100123",
         ] {
-            let cli = Cli::try_parse_from(["zap-faster", target]).unwrap();
+            let cli = Cli::try_parse_from(["zap-fastest", target]).unwrap();
             assert!(cli.command.is_none());
             assert!(
                 zapfast::chat_link::ChatLink::parse(cli.whatsapp_url.as_deref().unwrap()).is_ok()
@@ -1536,7 +1536,7 @@ mod startup_failure_tests {
             "The directory is not writable",
             std::path::Path::new("zapfast.log"),
         );
-        assert!(text.starts_with("Zap Faster could not start."));
+        assert!(text.starts_with("ZapFastest could not start."));
         assert!(!text.contains("OpenGL"));
         assert!(text.contains("The directory is not writable"));
     }

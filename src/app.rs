@@ -960,7 +960,7 @@ fn tray_config(lockable: bool) -> fastframe_tray::Config {
     use fastframe_tray::MenuItem;
     fastframe_tray::Config {
         id: "zapfast",
-        title: "Zap Faster".into(),
+        title: "ZapFastest".into(),
         icon: crate::util::app_icon_rgba,
         template_icon: Some(crate::util::tray_template_rgba),
         // Use the app's pixel icon consistently so optional unread indicators can
@@ -970,8 +970,8 @@ fn tray_config(lockable: bool) -> fastframe_tray::Config {
         // A left click on macOS toggles the window, as on Linux.
         menu_on_click: false,
         menu: vec![
-            MenuItem::action(TRAY_SHOW, "Show or hide Zap Faster"),
-            MenuItem::action(TRAY_LOCK, "Lock Zap Faster").visible(lockable),
+            MenuItem::action(TRAY_SHOW, "Show or hide ZapFastest"),
+            MenuItem::action(TRAY_LOCK, "Lock ZapFastest").visible(lockable),
             MenuItem::Separator,
             MenuItem::action(TRAY_QUIT, "Quit"),
         ],
@@ -1580,7 +1580,7 @@ impl App {
         let spawned = std::thread::Builder::new().name("archive-restore".into()).spawn(move || {
             let result = (|| -> anyhow::Result<Option<crate::archive::backup::BackupSummary>> {
                 let Some(source) = rfd::FileDialog::new()
-                    .add_filter("Encrypted Zap Faster archive", &["zfbackup"])
+                    .add_filter("Encrypted ZapFastest archive", &["zfbackup"])
                     .pick_file() else { return Ok(None); };
                 let prepared = crate::archive::backup::prepare_restore(&source, passphrase.expose(), &staging)?;
                 let has_session = prepared.has_session();
@@ -3493,9 +3493,9 @@ impl App {
                     let title = if self.account().settings.notification_sender {
                         self.chat(&chat)
                             .map(|chat| self.chat_title(chat))
-                            .unwrap_or_else(|| "Zap Faster".into())
+                            .unwrap_or_else(|| "ZapFastest".into())
                     } else {
-                        "Zap Faster".into()
+                        "ZapFastest".into()
                     };
                     let account = self.account().id.clone();
                     let waker = self.waker.clone();
@@ -4506,7 +4506,7 @@ impl App {
             Event::UpdateAvailable { version, url } => {
                 let notice = crate::updates::Release { version, url };
                 if self.update.as_ref() != Some(&notice) {
-                    self.toast(format!("Zap Faster {} is available", notice.version));
+                    self.toast(format!("ZapFastest {} is available", notice.version));
                 }
                 self.update = Some(notice);
             }
@@ -5246,7 +5246,7 @@ impl App {
         let message = match reason {
             Refusal::Offline => crate::i18n::gettext(
                 self.locale,
-                "Not sent: Zap Faster is not connected to WhatsApp.",
+                "Not sent: ZapFastest is not connected to WhatsApp.",
             ),
             Refusal::QuoteUnavailable => crate::i18n::gettext(
                 self.locale,
@@ -7357,7 +7357,7 @@ impl App {
                 } else if let Some(url) = crate::safety::external_url(&url) {
                     ctx.open_url(egui::OpenUrl::new_tab(url));
                 } else {
-                    self.toast_error("This link type cannot be opened from Zap Faster");
+                    self.toast_error("This link type cannot be opened from ZapFastest");
                 }
             }
             Action::CopyText(text) => {
@@ -8690,7 +8690,7 @@ impl App {
                     self.toast_error(
                         crate::i18n::gettext(
                             self.locale,
-                            "You have {limit} labels, the most Zap Faster keeps.",
+                            "You have {limit} labels, the most ZapFastest keeps.",
                         )
                         .replace("{limit}", &crate::archive::LABEL_LIMIT.to_string()),
                     );
@@ -10589,10 +10589,10 @@ impl App {
                 .hides(crate::settings::ScreenPrivacyWhat::Name, false)
             || self.page != Page::Chats
         {
-            return "Zap Faster".into();
+            return "ZapFastest".into();
         }
         self.current_chat().filter(|chat| !chat.locked).map_or_else(
-            || "Zap Faster".into(),
+            || "ZapFastest".into(),
             |chat| {
                 let name: String = self
                     .chat_title(chat)
@@ -10600,7 +10600,7 @@ impl App {
                     .filter(|character| !character.is_control())
                     .take(120)
                     .collect();
-                format!("{name}, Zap Faster")
+                format!("{name}, ZapFastest")
             },
         )
     }
@@ -11529,16 +11529,16 @@ mod tests {
         app.chats
             .push(Chat::new(id.clone(), "Synthetic\nname".into()));
         app.open_chat = Some(id);
-        assert_eq!(app.accessible_window_title(), "Syntheticname, Zap Faster");
+        assert_eq!(app.accessible_window_title(), "Syntheticname, ZapFastest");
         app.chats[0].locked = true;
-        assert_eq!(app.accessible_window_title(), "Zap Faster");
+        assert_eq!(app.accessible_window_title(), "ZapFastest");
         app.chats[0].locked = false;
         app.settings.screen_privacy.enabled = true;
         app.settings.screen_privacy.blur_names = true;
-        assert_eq!(app.accessible_window_title(), "Zap Faster");
+        assert_eq!(app.accessible_window_title(), "ZapFastest");
         app.settings.screen_privacy.enabled = false;
         app.page = Page::Settings;
-        assert_eq!(app.accessible_window_title(), "Zap Faster");
+        assert_eq!(app.accessible_window_title(), "ZapFastest");
     }
 
     #[test]
@@ -11670,7 +11670,7 @@ mod tests {
             .unwrap();
         app.handle_events();
         let masked = app.notifications.shown.last().unwrap();
-        assert_eq!(masked.title, "Zap Faster");
+        assert_eq!(masked.title, "ZapFastest");
         assert_eq!(masked.body, "New message");
         assert!(masked.picture.is_none());
         assert_eq!(masked.sound, app.settings.message_sound);
@@ -15874,8 +15874,8 @@ mod tests {
             assert_eq!(
                 super::tray_config(lockable).menu,
                 [
-                    fastframe_tray::MenuItem::action(super::TRAY_SHOW, "Show or hide Zap Faster"),
-                    fastframe_tray::MenuItem::action(super::TRAY_LOCK, "Lock Zap Faster")
+                    fastframe_tray::MenuItem::action(super::TRAY_SHOW, "Show or hide ZapFastest"),
+                    fastframe_tray::MenuItem::action(super::TRAY_LOCK, "Lock ZapFastest")
                         .visible(lockable),
                     fastframe_tray::MenuItem::Separator,
                     fastframe_tray::MenuItem::action(super::TRAY_QUIT, "Quit"),
@@ -21831,7 +21831,7 @@ mod app_lock_tests {
         app.lock_app();
         app.maybe_notify(CHAT, &message);
         let shown = app.notifications.shown.last().unwrap();
-        assert_eq!(shown.title, "Zap Faster");
+        assert_eq!(shown.title, "ZapFastest");
         assert_eq!(shown.body, "New message");
         assert_eq!(shown.picture, None);
         assert_eq!(

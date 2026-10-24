@@ -382,7 +382,7 @@ impl Worker {
         if !self.destination_writable(&job.chat) {
             self.finish_outgoing(&job, Delivery::Failed);
             self.emit(Event::Error(
-                "This conversation is read-only in Zap Faster".into(),
+                "This conversation is read-only in ZapFastest".into(),
             ));
             return self.pump_outgoing_at(now);
         }

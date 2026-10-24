@@ -72,10 +72,10 @@ mod platform {
         format!(
             "[Desktop Entry]\n\
              Type=Application\n\
-             Name=Zap Faster\n\
-             Comment=Start Zap Faster in the tray\n\
+             Name=ZapFastest\n\
+             Comment=Start ZapFastest in the tray\n\
              Exec={} {HIDDEN}\n\
-             Icon=zap-faster\n\
+             Icon=zap-fastest\n\
              Terminal=false\n\
              X-GNOME-Autostart-enabled=true\n",
             exec_quote(&executable.to_string_lossy())
