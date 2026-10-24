@@ -3,8 +3,7 @@
 msgid ""
 msgstr ""
 "Project-Id-Version: ZapFast\n"
-"Report-Msgid-Bugs-To: https://github.com/crmne/zapfast/issues/new?"
-"template=translation.yml\n"
+"Report-Msgid-Bugs-To: https://github.com/crmne/zapfast/issues/new?template=translation.yml\n"
 "POT-Creation-Date: 2026-10-23 15:36+0200\n"
 "PO-Revision-Date: 2026-10-02 18:51+0800\n"
 "Last-Translator: Alang Hsu <alang.hsu@gmail.com>\n"
@@ -479,10 +478,9 @@ msgstr "新增圖說"
 
 #: src/ui/conversation.rs:1861
 msgid ""
-"Enter sends · Shift+Enter for a new line · *bold* _italic_ ~strike~ · Ctrl+V "
-"pastes a picture"
-msgstr ""
-"Enter 送出 · Shift+Enter 換行 · *粗體* _斜體_ ~刪除線~ · Ctrl+V 貼上圖片"
+"Enter sends · Shift+Enter for a new line · *bold* _italic_ ~strike~ · Ctrl+V"
+" pastes a picture"
+msgstr "Enter 送出 · Shift+Enter 換行 · *粗體* _斜體_ ~刪除線~ · Ctrl+V 貼上圖片"
 
 #: src/ui/conversation.rs:1863
 msgid "Ctrl+Enter sends · *bold* _italic_ ~strike~ · Ctrl+V pastes a picture"
@@ -701,7 +699,8 @@ msgid "View once video. For your privacy, it opens only on your phone."
 msgstr "檢視一次的影片。為了保護您的隱私，只會在您的手機上開啟。"
 
 #: src/ui/conversation.rs:6926
-msgid "View once voice message. For your privacy, it opens only on your phone."
+msgid ""
+"View once voice message. For your privacy, it opens only on your phone."
 msgstr "檢視一次的語音訊息。為了保護您的隱私，只會在您的手機上開啟。"
 
 #: src/ui/conversation.rs:6930
@@ -820,11 +819,9 @@ msgstr "對方"
 #: src/ui/dialogs.rs:938
 #, rust-format
 msgid ""
-"This deletes your chat with {name}, including all messages, on this computer "
-"and on your phone. It cannot be undone."
-msgstr ""
-"這會在這部電腦和您的手機上刪除您與 {name} 的對話及其所有訊息。此動作無法復"
-"原。"
+"This deletes your chat with {name}, including all messages, on this computer"
+" and on your phone. It cannot be undone."
+msgstr "這會在這部電腦和您的手機上刪除您與 {name} 的對話及其所有訊息。此動作無法復原。"
 
 #: src/ui/dialogs.rs:944
 msgid "Delete chat?"
@@ -840,9 +837,7 @@ msgid ""
 "This clears every message in your chat with {name}, including downloaded "
 "media, on this computer and on your phone. The chat itself stays. It cannot "
 "be undone."
-msgstr ""
-"這會在這部電腦和您的手機上清除您與 {name} 的對話中的所有訊息，包括已下載的媒"
-"體。對話本身會保留。此動作無法復原。"
+msgstr "這會在這部電腦和您的手機上清除您與 {name} 的對話中的所有訊息，包括已下載的媒體。對話本身會保留。此動作無法復原。"
 
 #: src/ui/dialogs.rs:965
 msgid "Clear chat?"
@@ -897,22 +892,20 @@ msgstr "要重新開始嗎？"
 
 #: src/ui/dialogs.rs:1260
 msgid ""
-"ZapFast keeps your unreadable archive as a separate file, creates a new one, "
-"and asks you to link again. Linking again brings back recent history from "
-"your phone. Afterwards, remove the old ZapFast entry under Linked devices on "
-"your phone."
+"ZapFast keeps your unreadable archive as a separate file, creates a new one,"
+" and asks you to link again. Linking again brings back recent history from "
+"your phone. Afterwards, remove the old ZapFast entry under Linked devices on"
+" your phone."
 msgstr ""
-"ZapFast 會將無法讀取的存檔另存為獨立檔案、建立新的存檔，並請您重新連結。重新"
-"連結後，最近的記錄會從手機取回。之後，請在手機的「已連結的裝置」中移除舊的 "
+"ZapFast "
+"會將無法讀取的存檔另存為獨立檔案、建立新的存檔，並請您重新連結。重新連結後，最近的記錄會從手機取回。之後，請在手機的「已連結的裝置」中移除舊的 "
 "ZapFast 項目。"
 
 #: src/ui/dialogs.rs:1264
 msgid ""
 "If you can restore the original keyring instead, choose Cancel and Try "
 "again: nothing is lost that way."
-msgstr ""
-"如果您能改為還原原本的金鑰圈，請選擇「取消」，再選擇「Try again」：這樣不會遺"
-"失任何內容。"
+msgstr "如果您能改為還原原本的金鑰圈，請選擇「取消」，再選擇「Try again」：這樣不會遺失任何內容。"
 
 #: src/ui/dialogs.rs:1267
 msgid "Start over"
@@ -922,9 +915,7 @@ msgstr "重新開始"
 msgid ""
 "This removes the message from your phone and linked devices. Other people "
 "keep their copy. Connect to WhatsApp to delete it. This cannot be undone."
-msgstr ""
-"這會從你的手機及連結裝置中刪除此訊息。其他人仍保留自己的副本。請連線至 "
-"WhatsApp 以刪除此訊息。此操作無法復原。"
+msgstr "這會從你的手機及連結裝置中刪除此訊息。其他人仍保留自己的副本。請連線至 WhatsApp 以刪除此訊息。此操作無法復原。"
 
 #: src/ui/dialogs.rs:1276
 msgid ""
@@ -934,11 +925,9 @@ msgstr "此對話中的所有人都會看到「此訊息已刪除」，取代原
 
 #: src/ui/dialogs.rs:1277
 msgid ""
-"This removes these messages from your phone and linked devices. Other people "
-"keep their copy. Connect to WhatsApp to delete them. This cannot be undone."
-msgstr ""
-"這會從您的手機和連結裝置中刪除選取的訊息。其他人仍保留自己的副本。連線至 "
-"WhatsApp 後才能刪除。此操作無法復原。"
+"This removes these messages from your phone and linked devices. Other people"
+" keep their copy. Connect to WhatsApp to delete them. This cannot be undone."
+msgstr "這會從您的手機和連結裝置中刪除選取的訊息。其他人仍保留自己的副本。連線至 WhatsApp 後才能刪除。此操作無法復原。"
 
 #: src/ui/dialogs.rs:1278
 #, rust-format
@@ -948,8 +937,7 @@ msgid ""
 msgid_plural ""
 "Everyone in this chat will see \"This message was deleted\" in place of the "
 "selected messages. This cannot be undone."
-msgstr[0] ""
-"此對話中的所有人都會看到「此訊息已刪除」，取代所選的訊息。此操作無法復原。"
+msgstr[0] "此對話中的所有人都會看到「此訊息已刪除」，取代所選的訊息。此操作無法復原。"
 
 #: src/ui/dialogs.rs:1306
 msgid "Delete for everyone?"
@@ -980,11 +968,9 @@ msgstr "要取消連結這部電腦嗎？"
 
 #: src/ui/dialogs.rs:1371
 msgid ""
-"This removes the device from WhatsApp and deletes the chats stored here. You "
-"can link again with a new code."
-msgstr ""
-"這會將此裝置從 WhatsApp 移除，並刪除儲存在此處的對話。之後可以用新代碼重新連"
-"結。"
+"This removes the device from WhatsApp and deletes the chats stored here. You"
+" can link again with a new code."
+msgstr "這會將此裝置從 WhatsApp 移除，並刪除儲存在此處的對話。之後可以用新代碼重新連結。"
 
 #: src/ui/dialogs.rs:1373 src/ui/lock.rs:139
 msgid "Unlink"
@@ -1000,9 +986,7 @@ msgid ""
 "This deletes the photos, videos, stickers and files {account} downloaded to "
 "this computer. Messages stay, and attachments download again when you open "
 "them, while WhatsApp still has them."
-msgstr ""
-"這會刪除 {account} 下載到這部電腦的相片、影片、貼圖和檔案。訊息會保留；只要 "
-"WhatsApp 仍保存著附件，開啟時會重新下載。"
+msgstr "這會刪除 {account} 下載到這部電腦的相片、影片、貼圖和檔案。訊息會保留；只要 WhatsApp 仍保存著附件，開啟時會重新下載。"
 
 #: src/ui/dialogs.rs:1398
 msgid "Files in a download folder you chose are kept."
@@ -1020,8 +1004,7 @@ msgstr "要移除這個帳號嗎？"
 msgid ""
 "This unlinks the number on this computer and deletes its local chats. Other "
 "accounts stay."
-msgstr ""
-"這會在這部電腦上取消連結此號碼，並刪除它在本機的對話。其他帳號不受影響。"
+msgstr "這會在這部電腦上取消連結此號碼，並刪除它在本機的對話。其他帳號不受影響。"
 
 #: src/ui/dialogs.rs:1466
 msgid "Leave this channel?"
@@ -1159,8 +1142,8 @@ msgstr "取得較早的歷史記錄"
 
 #: src/ui/settings.rs:448
 msgid ""
-"Asks your phone in the background for older messages in the open, pinned and "
-"ten most recent chats."
+"Asks your phone in the background for older messages in the open, pinned and"
+" ten most recent chats."
 msgstr "在背景向手機要求目前開啟的對話、釘選的對話和最近十個對話中較舊的訊息。"
 
 #: src/ui/settings.rs:455
@@ -1221,9 +1204,7 @@ msgstr "限制重複通知"
 msgid ""
 "After one notification, a chat stays quiet for 10 minutes. Opening the chat "
 "resets this. In groups, mentions and replies to you still notify."
-msgstr ""
-"通知一次後，該對話會保持安靜 10 分鐘。開啟該對話會重新計時。在群組中，提及您"
-"和回覆您的訊息仍會通知。"
+msgstr "通知一次後，該對話會保持安靜 10 分鐘。開啟該對話會重新計時。在群組中，提及您和回覆您的訊息仍會通知。"
 
 #: src/ui/settings.rs:566 src/ui/settings.rs:2107
 msgid "Play sounds for group messages"
@@ -1306,8 +1287,7 @@ msgstr "自動下載更新"
 msgid ""
 "You still choose when to restart. Package managers and Flatpak update "
 "ZapFast themselves."
-msgstr ""
-"您仍可自行選擇重新啟動的時間。套件管理員與 Flatpak 會自行更新 ZapFast。"
+msgstr "您仍可自行選擇重新啟動的時間。套件管理員與 Flatpak 會自行更新 ZapFast。"
 
 #: src/ui/settings.rs:709
 #, rust-format
@@ -1441,12 +1421,10 @@ msgstr "應用程式鎖"
 
 #: src/ui/settings.rs:902
 msgid ""
-"Asks for a password at start and after a while unused. It keeps people using "
-"this computer out of your chats and encrypts nothing more. A forgotten "
+"Asks for a password at start and after a while unused. It keeps people using"
+" this computer out of your chats and encrypts nothing more. A forgotten "
 "password means unlinking."
-msgstr ""
-"啟動時及一段時間未使用後會要求輸入密碼。它能防止使用這部電腦的人看到您的對"
-"話，此外不會加密任何內容。忘記密碼就只能取消連結。"
+msgstr "啟動時及一段時間未使用後會要求輸入密碼。它能防止使用這部電腦的人看到您的對話，此外不會加密任何內容。忘記密碼就只能取消連結。"
 
 #: src/ui/settings.rs:909
 msgid "Turn off…"
@@ -1468,8 +1446,7 @@ msgstr "自動鎖定"
 msgid ""
 "Time without using ZapFast, also counted while it is in the tray. "
 "Ctrl+Shift+L locks it at once."
-msgstr ""
-"未使用 ZapFast 經過的時間，在系統匣中也會計算。Ctrl+Shift+L 可立即鎖定。"
+msgstr "未使用 ZapFast 經過的時間，在系統匣中也會計算。Ctrl+Shift+L 可立即鎖定。"
 
 #: src/ui/settings.rs:979
 msgid "Set an app lock password"
@@ -1556,9 +1533,7 @@ msgid ""
 "Photos, videos, stickers and files {account} downloaded to this computer. "
 "Clearing them keeps your messages; attachments download again when you open "
 "them."
-msgstr ""
-"{account} 下載到這部電腦的相片、影片、貼圖和檔案。清除後訊息仍會保留；開啟附"
-"件時會重新下載。"
+msgstr "{account} 下載到這部電腦的相片、影片、貼圖和檔案。清除後訊息仍會保留；開啟附件時會重新下載。"
 
 #: src/ui/settings.rs:1657
 msgid "Linked device"
@@ -1877,16 +1852,14 @@ msgstr "來電"
 msgid ""
 "{caller} is calling {group}. ZapFast can't join group calls yet: answer on "
 "your phone."
-msgstr ""
-"{caller} 正在撥打給 {group}。ZapFast 暫時無法加入群組通話：請在手機上接聽。"
+msgstr "{caller} 正在撥打給 {group}。ZapFast 暫時無法加入群組通話：請在手機上接聽。"
 
 #: src/app/calls.rs:621
 #, rust-format
 msgid ""
 "{caller} is calling you and others. ZapFast can't join group calls yet: "
 "answer on your phone."
-msgstr ""
-"{caller} 正在撥打給你和其他人。ZapFast 暫時無法加入群組通話：請在手機上接聽。"
+msgstr "{caller} 正在撥打給你和其他人。ZapFast 暫時無法加入群組通話：請在手機上接聽。"
 
 #. Translators: {name} is replaced by the author's name, shown as a link.
 #: src/ui/widgets.rs:944
@@ -2014,9 +1987,7 @@ msgstr "這個對話已有三則釘選訊息"
 msgid ""
 "WhatsApp hasn't turned on group calls from a computer for your account yet. "
 "Ask someone in the group to call it, and answer here."
-msgstr ""
-"WhatsApp 尚未為你的帳號開啟電腦版群組通話。請群組中的其他人發起通話，然後在這"
-"裡接聽。"
+msgstr "WhatsApp 尚未為你的帳號開啟電腦版群組通話。請群組中的其他人發起通話，然後在這裡接聽。"
 
 #: src/app.rs:4060 src/app.rs:6649
 msgid "ZapFast can't join group calls yet: open the link on your phone."
@@ -2034,8 +2005,7 @@ msgstr "未送出：ZapFast 尚未連線至 WhatsApp。"
 msgid ""
 "Not sent: the message you’re replying to isn’t available on this computer. "
 "Cancel the reply to send without a quote."
-msgstr ""
-"未送出：您要回覆的訊息在這部電腦上無法使用。取消回覆即可不附帶引用內容送出。"
+msgstr "未送出：您要回覆的訊息在這部電腦上無法使用。取消回覆即可不附帶引用內容送出。"
 
 #: src/app.rs:6813
 msgid "A selected chat is no longer writable"
@@ -2160,8 +2130,8 @@ msgstr "建立"
 
 #: src/ui/labels.rs:311
 msgid ""
-"No labels yet. Create one above, then add chats to it from their right-click "
-"menu."
+"No labels yet. Create one above, then add chats to it from their right-click"
+" menu."
 msgstr "尚無標籤。請先在上方建立一個，再從對話的右鍵選單將對話加入。"
 
 #: src/ui/labels.rs:346
@@ -2247,8 +2217,8 @@ msgstr "自製"
 
 #: src/ui/picker.rs:1448
 msgid ""
-"Start a pack, then right-click any sticker to add it. Or turn a picture into "
-"a sticker."
+"Start a pack, then right-click any sticker to add it. Or turn a picture into"
+" a sticker."
 msgstr "先建立貼圖集，再在任一貼圖上按右鍵加入；也可以把圖片轉成貼圖。"
 
 #: src/ui/picker.rs:1460
@@ -2306,7 +2276,8 @@ msgstr "請換個字詞或選擇其他日期。"
 
 #: src/ui/pane.rs:346
 #, rust-format
-msgid "Only the newest {} matches are listed. Narrow the search or pick a day."
+msgid ""
+"Only the newest {} matches are listed. Narrow the search or pick a day."
 msgstr "僅列出最新的 {} 筆符合結果，請縮小搜尋範圍或選擇某一天。"
 
 #: src/ui/pane.rs:435
@@ -2505,8 +2476,7 @@ msgid ""
 "device from WhatsApp, deletes the chats stored here, and turns the app lock "
 "off. You can link again with a new code."
 msgstr ""
-"沒有密碼，唯一能再次使用的方式就是取消連結。這會將此裝置從 WhatsApp 移除、刪"
-"除儲存在此處的對話，並關閉應用程式鎖。之後可以用新代碼重新連結。"
+"沒有密碼，唯一能再次使用的方式就是取消連結。這會將此裝置從 WhatsApp 移除、刪除儲存在此處的對話，並關閉應用程式鎖。之後可以用新代碼重新連結。"
 
 #. Translators: the body of a notification that hides who wrote and
 #. what: a message has arrived.
@@ -2750,6 +2720,1340 @@ msgstr[0] "除你之外的 {count} 位成員"
 msgid "Creating the group…"
 msgstr "正在建立群組…"
 
+#: src/util.rs:383
+#, rust-format
+msgid "{day} {month}"
+msgstr "{month}{day}日"
+
+#: src/util.rs:390
+#, rust-format
+msgid "{date}, {year}"
+msgstr "{year}年{date}"
+
+#: src/util.rs:394
+#, rust-format
+msgid "{label} ({date})"
+msgstr "{label}（{date}）"
+
+#: src/util.rs:462
+msgctxt "date month"
+msgid "January"
+msgstr "1月"
+
+#: src/util.rs:463
+msgctxt "date month"
+msgid "February"
+msgstr "2月"
+
+#: src/util.rs:464
+msgctxt "date month"
+msgid "March"
+msgstr "3月"
+
+#: src/util.rs:465
+msgctxt "date month"
+msgid "April"
+msgstr "4月"
+
+#: src/util.rs:466
+msgctxt "date month"
+msgid "May"
+msgstr "5月"
+
+#: src/util.rs:467
+msgctxt "date month"
+msgid "June"
+msgstr "6月"
+
+#: src/util.rs:468
+msgctxt "date month"
+msgid "July"
+msgstr "7月"
+
+#: src/util.rs:469
+msgctxt "date month"
+msgid "August"
+msgstr "8月"
+
+#: src/util.rs:470
+msgctxt "date month"
+msgid "September"
+msgstr "9月"
+
+#: src/util.rs:471
+msgctxt "date month"
+msgid "October"
+msgstr "10月"
+
+#: src/util.rs:472
+msgctxt "date month"
+msgid "November"
+msgstr "11月"
+
+#: src/util.rs:473
+msgctxt "date month"
+msgid "December"
+msgstr "12月"
+
+#: src/ui/chats.rs:509
+msgid "Leave focus mode"
+msgstr "退出專注模式"
+
+#: src/ui/chats.rs:588 src/ui/statuses.rs:13
+msgid "Status"
+msgstr "動態"
+
+#: src/ui/chats.rs:712
+msgid "Load more"
+msgstr "載入更多"
+
+#: src/ui/chats.rs:2387
+msgid "Remove VIP indicator"
+msgstr "移除 VIP 標記"
+
+#: src/ui/chats.rs:2389
+msgid "Mark as VIP"
+msgstr "標記為 VIP"
+
+#: src/ui/chats.rs:2488
+msgid "Notification sound"
+msgstr "通知音效"
+
+#: src/ui/conversation.rs:1291
+msgid "Preparing attachment"
+msgstr "正在準備附件"
+
+#: src/ui/conversation.rs:1315
+msgid "Channels are read-only in Zap Faster"
+msgstr "在 Zap Faster 中，頻道僅供閱讀"
+
+#: src/ui/conversation.rs:4135
+msgid "Downloading voice message…"
+msgstr "正在下載貼圖集…"
+
+#: src/ui/conversation.rs:4142
+#, rust-format
+msgid "Downloading Whisper large-v3-turbo… {percent}%"
+msgstr "正在下載 Whisper large-v3-turbo… {percent}%"
+
+#: src/ui/conversation.rs:4149
+msgid "Downloading Whisper large-v3-turbo (1.5 GB)…"
+msgstr "正在下載 Whisper large-v3-turbo（1.5 GB）…"
+
+#: src/ui/conversation.rs:4153
+msgid "Verifying Whisper model…"
+msgstr "正在驗證 Whisper 模型…"
+
+#: src/ui/conversation.rs:4156
+msgid "Loading Whisper model…"
+msgstr "正在載入 Whisper 模型…"
+
+#: src/ui/conversation.rs:4159
+msgid "Transcribing locally…"
+msgstr "正在本機轉錄…"
+
+#: src/ui/conversation.rs:5831
+msgid "Waiting to send"
+msgstr "等待傳送"
+
+#: src/ui/conversation.rs:5834
+msgid ""
+"This message sends automatically when WhatsApp reconnects and any sending "
+"limit ends."
+msgstr "WhatsApp 重新連線且傳送限制解除後，此訊息將自動傳送。"
+
+#: src/ui/conversation.rs:5838
+msgid "Send unconfirmed"
+msgstr "傳送結果未確認"
+
+#: src/ui/conversation.rs:5841
+msgid ""
+"Sending was interrupted. This message may have been sent. It will not be "
+"resent automatically. You can copy it or delete it locally."
+msgstr "傳送已中斷。此訊息可能已送出，不會自動重新傳送。您可以複製訊息或在此裝置上刪除。"
+
+#: src/ui/conversation.rs:5855
+msgid "Cancel waiting message"
+msgstr "取消等待中的訊息"
+
+#: src/ui/conversation.rs:5864
+msgid "Delete this message so it is not sent"
+msgstr "刪除此訊息，讓它不會被傳送"
+
+#: src/ui/conversation.rs:5958
+msgid "Reactions"
+msgstr "表情回應"
+
+#: src/ui/conversation.rs:6375 src/ui/conversation.rs:6389
+msgid "30 days"
+msgstr "30 天"
+
+#: src/ui/conversation.rs:7666
+msgid "Download all"
+msgstr "全部下載"
+
+#: src/ui/conversation.rs:12155
+msgid "Send as an original document"
+msgstr "以原始文件傳送"
+
+#: src/ui/dialogs.rs:245
+msgid "Participant"
+msgstr "成員"
+
+#: src/ui/dialogs.rs:584 src/ui/dialogs.rs:664
+msgid "Message a number"
+msgstr "傳送訊息給電話號碼"
+
+#: src/ui/dialogs.rs:670
+msgid ""
+"Enter a phone number with its country code. You do not need to save it as a "
+"contact."
+msgstr "輸入含國碼的電話號碼。您不需要將其儲存為聯絡人。"
+
+#: src/ui/dialogs.rs:694
+msgid "Checking the number…"
+msgstr "正在檢查號碼…"
+
+#: src/ui/dialogs.rs:1584
+#, rust-format
+msgid ""
+"This deletes \"{}\" and its stickers from this computer. To use it again, "
+"import it again."
+msgstr "這會從此電腦刪除「{}」及其貼圖。若要再次使用，請重新匯入。"
+
+#: src/ui/dialogs.rs:1632
+msgid "Resume this restored account?"
+msgstr "恢復此已還原帳號的連線？"
+
+#: src/ui/dialogs.rs:1638
+msgid ""
+"Close Zap Faster on the original installation before continuing. Both "
+"installations share the same linked-device identity and must not connect at "
+"the same time. Resuming reconnects to WhatsApp and may send pending messages"
+" or account changes from the backup. If the phone has invalidated the "
+"session, you will need to link again."
+msgstr ""
+"繼續前，請關閉原安裝中的 Zap Faster。兩個安裝共用同一個已連結裝置身分，不得同時連線。恢復連線會重新連線 "
+"WhatsApp，並可能傳送備份中待處理的訊息或帳號變更。如果手機已使此工作階段失效，您需要重新連結。"
+
+#: src/ui/dialogs.rs:1648
+msgid "Resume connection"
+msgstr "恢復連線"
+
+#: src/ui/dialogs.rs:1659
+msgid "Keep offline"
+msgstr "保持離線"
+
+#: src/ui/dialogs.rs:2040
+msgid "Community"
+msgstr "社群"
+
+#: src/ui/dialogs.rs:2113
+msgid "Set local picture"
+msgstr "設定本機頭像"
+
+#: src/ui/dialogs.rs:2118
+msgid "Only changes this contact's picture in this account on this computer"
+msgstr "僅變更此聯絡人在此電腦上此帳號中的頭像"
+
+#: src/ui/dialogs.rs:2128
+msgid "Reset local picture"
+msgstr "重設本機頭像"
+
+#: src/ui/dialogs.rs:2324
+msgid "Community announcements"
+msgstr "社群公告"
+
+#: src/ui/dialogs.rs:2326
+msgid "Community general chat"
+msgstr "社群一般對話"
+
+#: src/ui/dialogs.rs:2328
+msgid "Community group"
+msgstr "社群群組"
+
+#: src/ui/dialogs.rs:2354
+msgid "Community groups"
+msgstr "社群群組"
+
+#: src/ui/dialogs.rs:2361
+msgid "No linked groups are known yet."
+msgstr "尚未發現關聯群組。"
+
+#: src/ui/dialogs.rs:2411
+msgid "Change disappearing messages"
+msgstr "變更限時訊息"
+
+#: src/ui/settings.rs:344
+msgid "Emoji style"
+msgstr "表情符號樣式"
+
+#: src/ui/settings.rs:345
+msgid ""
+"System uses platform emoji with Noto fallback. Noto uses bundled emoji only."
+" You can import a CBDT or sbix colour emoji font you are allowed to use (up "
+"to 256 MiB). Custom fonts have no Noto fallback. Restart Zap Faster to "
+"apply."
+msgstr ""
+"系統模式使用平台表情符號，並以 Noto 作為備用。Noto 模式僅使用內建表情符號。您可以匯入有權使用的 CBDT 或 sbix 彩色表情字型（最大 "
+"256 MiB）。自訂字型不使用 Noto 備用字型。重新啟動 Zap Faster 後生效。"
+
+#: src/ui/settings.rs:402
+msgid "Text size"
+msgstr "文字大小"
+
+#: src/ui/settings.rs:405
+msgid "Resize text without changing the window or controls."
+msgstr "調整文字大小，不改變視窗或控制項。"
+
+#: src/ui/settings.rs:430
+msgid "Keep chat list position after sending"
+msgstr "傳送後保持聊天清單位置"
+
+#: src/ui/settings.rs:433
+msgid ""
+"Stay among older conversations while replying. When off, the chat list "
+"scrolls to the top."
+msgstr "回覆時保持在較早的對話附近。關閉後，聊天清單會捲動到頂端。"
+
+#: src/ui/settings.rs:438
+msgid "Restore last open chat"
+msgstr "還原上次開啟的聊天"
+
+#: src/ui/settings.rs:441
+msgid "When off, start on the chat list. Your last chat stays remembered."
+msgstr "關閉後，啟動時顯示聊天清單。上次開啟的聊天仍會保留。"
+
+#: src/ui/settings.rs:446
+msgid "Convert typed emoticons"
+msgstr "轉換輸入的文字表情"
+
+#: src/ui/settings.rs:447
+msgid "Turn typed emoticons into emoji while composing."
+msgstr "撰寫訊息時將文字表情轉換為表情符號。"
+
+#: src/ui/settings.rs:459
+msgid "Recover older history in the background"
+msgstr "在背景復原較早的聊天記錄"
+
+#: src/ui/settings.rs:460
+msgid ""
+"Ask your phone for older messages without opening each chat. Your phone may "
+"not provide all history."
+msgstr "無須逐一開啟聊天，即可向手機要求較早的訊息。手機可能無法提供全部歷史記錄。"
+
+#: src/ui/settings.rs:464
+msgid "History recovery"
+msgstr "歷史記錄復原"
+
+#: src/ui/settings.rs:465
+msgid ""
+"Full history continues across all eligible chats. Changing the initial sync "
+"takes effect the next time you link this account."
+msgstr "完整歷史記錄復原會繼續處理所有符合條件的聊天。初始同步設定的變更將在下次連結此帳號時生效。"
+
+#: src/ui/settings.rs:470 src/ui/settings.rs:473 src/ui/login.rs:374
+msgid "Full history"
+msgstr "完整歷史記錄"
+
+#: src/ui/settings.rs:470 src/ui/settings.rs:472 src/ui/login.rs:396
+msgid "Recent history"
+msgstr "近期歷史記錄"
+
+#: src/ui/settings.rs:479
+msgid "Keep files in the background archive"
+msgstr "將檔案保存在背景封存中"
+
+#: src/ui/settings.rs:480
+msgid ""
+"Download files without opening their chats. Stored in this account's managed"
+" archive, separate from your chosen Downloads folder."
+msgstr "無須開啟聊天即可下載檔案。檔案保存在此帳號的受管理封存中，與您選擇的下載資料夾分開。"
+
+#: src/ui/settings.rs:484
+msgid "Daily history request limit"
+msgstr "每日歷史記錄要求上限"
+
+#: src/ui/settings.rs:485
+msgid ""
+"Full-history recovery pauses at this daily limit and continues the next day."
+" Requests stay at least twenty seconds apart."
+msgstr "完整歷史記錄復原達到每日上限後會暫停，並在隔日繼續。要求之間至少間隔二十秒。"
+
+#: src/ui/settings.rs:495
+msgid "Transcribe received voice messages automatically"
+msgstr "自動轉錄收到的語音訊息"
+
+#: src/ui/settings.rs:498
+msgid "Uses the local Whisper large-v3-turbo model (1.5 GB) and your CPU."
+msgstr "使用本機 Whisper large-v3-turbo 模型（1.5 GB）和您的 CPU。"
+
+#: src/ui/settings.rs:569
+msgid "Audio devices"
+msgstr "音訊裝置"
+
+#: src/ui/settings.rs:570
+msgid "Microphone and sound output"
+msgstr "麥克風和聲音輸出"
+
+#: src/ui/settings.rs:570
+msgid ""
+"Used for voice recording, voice and video playback, and calls. Missing sound"
+" outputs fall back to the system default with a warning; recording never "
+"switches microphones silently."
+msgstr "用於錄音、語音和影片播放以及通話。聲音輸出裝置無法使用時，會提示並改用系統預設裝置；錄音絕不會未經提示就切換麥克風。"
+
+#: src/ui/settings.rs:571
+msgid "Refresh audio devices"
+msgstr "重新整理音訊裝置"
+
+#: src/ui/settings.rs:573
+msgid "Sound output"
+msgstr "聲音輸出"
+
+#: src/ui/settings.rs:599
+msgid "In-app notification cards"
+msgstr "應用程式內通知卡片"
+
+#: src/ui/settings.rs:601
+msgid ""
+"Show notifications in the desktop corner, even while the window is hidden, "
+"with the same privacy and mute settings."
+msgstr "即使視窗已隱藏，也在螢幕角落顯示通知，並遵循相同的隱私和靜音設定。"
+
+#: src/ui/settings.rs:603
+msgid ""
+"Show notifications inside the window, with the same privacy and mute "
+"settings."
+msgstr "在視窗內顯示通知，使用相同的隱私和靜音設定。"
+
+#: src/ui/settings.rs:608
+msgid "Show notification sender"
+msgstr "顯示通知傳送者"
+
+#: src/ui/settings.rs:611
+msgid "Show chat names and pictures in desktop notifications."
+msgstr "在桌面通知中顯示聊天名稱和頭像。"
+
+#: src/ui/settings.rs:616
+msgid "Show notification content"
+msgstr "顯示通知內容"
+
+#: src/ui/settings.rs:619
+msgid "Include message previews. Hidden senders also hide content."
+msgstr "包含訊息預覽。隱藏傳送者時也會隱藏內容。"
+
+#: src/ui/settings.rs:682
+msgid "Allow local command-line access"
+msgstr "允許本機命令列存取"
+
+#: src/ui/settings.rs:683
+msgid ""
+"Allows this computer's user to read, watch and send in this account. App "
+"lock and locked chats stay private."
+msgstr "允許此電腦的使用者在此帳號中讀取、監看和傳送訊息。應用程式鎖和鎖定聊天仍會保護隱私。"
+
+#: src/ui/settings.rs:692
+msgid ""
+"Could not load your account privacy. Trying again when Zap Faster "
+"reconnects."
+msgstr "無法載入您的帳號隱私設定，將在 Zap Faster 重新連線後再試一次。"
+
+#: src/ui/settings.rs:747 src/ui/settings.rs:1192
+msgid "Screen privacy"
+msgstr "螢幕隱私"
+
+#: src/ui/settings.rs:752
+msgid "Unread count on tray icon"
+msgstr "系統匣圖示顯示未讀數量"
+
+#: src/ui/settings.rs:753
+msgid ""
+"Show the total unread chat count across accounts, up to 99+. Hidden while "
+"the app is locked or screen privacy is on."
+msgstr "顯示所有帳號的未讀聊天總數，上限為 99+。應用程式鎖定或開啟螢幕隱私時隱藏。"
+
+#: src/ui/settings.rs:757
+msgid "VIP tray indicator"
+msgstr "系統匣 VIP 標記"
+
+#: src/ui/settings.rs:758
+msgid ""
+"Highlight unread VIP chats. Mark a chat as VIP from its menu. Muted, "
+"archived and locked chats are excluded."
+msgstr "凸顯未讀 VIP 聊天。可在聊天選單中將其標記為 VIP。已靜音、已封存和已鎖定的聊天不計入。"
+
+#: src/ui/settings.rs:767
+msgid "Ctrl+W closes the chat"
+msgstr "Ctrl+W 關閉聊天"
+
+#: src/ui/settings.rs:768
+msgid ""
+"Close the open chat with Ctrl+W instead of closing the window. Turn off to "
+"keep the window shortcut."
+msgstr "使用 Ctrl+W 關閉目前聊天而非視窗。關閉此設定可保留關閉視窗的快捷鍵。"
+
+#: src/ui/settings.rs:800
+msgid "Asks GitHub once a day, sending only the Zap Faster version."
+msgstr "每天向 GitHub 詢問一次，只傳送 Zap Faster 的版本資訊。"
+
+#: src/ui/settings.rs:808
+msgid ""
+"You still choose when to restart. Package managers and Flatpak update Zap "
+"Faster themselves."
+msgstr "您仍可自行選擇重新啟動的時間。套件管理員與 Flatpak 會自行更新 Zap Faster。"
+
+#: src/ui/settings.rs:962
+msgid "Archive progress"
+msgstr "封存進度"
+
+#: src/ui/settings.rs:962
+msgid ""
+"Counts describe saved files and queued work. Unavailable includes oversized "
+"files and clips missing recovery keys; it does not prove that WhatsApp has "
+"no copy. History responses do not prove the archive is complete."
+msgstr ""
+"數量反映已保存的檔案和排隊工作。無法使用項目包括過大的檔案及缺少復原金鑰的片段；這不代表 WhatsApp 沒有副本。歷史記錄回應也不代表封存已經完整。"
+
+#: src/ui/settings.rs:964
+#, rust-format
+msgid "{count} file downloaded"
+msgid_plural "{count} files downloaded"
+msgstr[0] "已下載 {count} 個檔案"
+
+#: src/ui/settings.rs:965
+#, rust-format
+msgid "{count} file waiting"
+msgid_plural "{count} files waiting"
+msgstr[0] "{count} 個檔案等待中"
+
+#: src/ui/settings.rs:966
+#, rust-format
+msgid "{count} file cancelled"
+msgid_plural "{count} files cancelled"
+msgstr[0] "已取消 {count} 個檔案"
+
+#: src/ui/settings.rs:967
+#, rust-format
+msgid "{count} file unavailable"
+msgid_plural "{count} files unavailable"
+msgstr[0] "{count} 個檔案無法使用"
+
+#: src/ui/settings.rs:969
+#, rust-format
+msgid "{size} MiB stored"
+msgstr "已儲存 {size} MiB"
+
+#: src/ui/settings.rs:972
+msgid "Oldest saved message: unknown"
+msgstr "最早保存的訊息：未知"
+
+#: src/ui/settings.rs:972
+#, rust-format
+msgid "Oldest saved message: {date} (UTC)"
+msgstr "最早保存的訊息：{date}（UTC）"
+
+#: src/ui/settings.rs:973
+msgid "WhatsApp connection: disconnected"
+msgstr "WhatsApp 連線：已中斷"
+
+#: src/ui/settings.rs:974
+msgid "Phone history: no request observed this session"
+msgstr "手機歷史記錄：本次工作階段尚未觀察到要求"
+
+#: src/ui/settings.rs:975
+msgid "Phone history: waiting for a response"
+msgstr "手機歷史記錄：等待回應"
+
+#: src/ui/settings.rs:976
+msgid "Phone history: response received"
+msgstr "手機歷史記錄：已收到回應"
+
+#: src/ui/settings.rs:977
+msgid "Phone history: request failed or no response yet"
+msgstr "手機歷史記錄：要求失敗或尚未收到回應"
+
+#: src/ui/settings.rs:980
+msgid "Background downloads paused at the storage limit."
+msgstr "背景下載已因達到儲存上限而暫停。"
+
+#: src/ui/settings.rs:981
+msgid "Background downloads paused: storage usage could not be measured."
+msgstr "背景下載已暫停：無法測量儲存用量。"
+
+#: src/ui/settings.rs:986
+msgid "Background media storage limit"
+msgstr "背景媒體儲存上限"
+
+#: src/ui/settings.rs:987
+msgid ""
+"Pause new background downloads at this limit. Existing archived files are "
+"kept. Increase it to continue, or use 0 for unlimited (MiB)."
+msgstr "達到此上限後暫停新的背景下載。現有封存檔案會保留。提高上限可繼續下載，或設為 0 表示不限制（MiB）。"
+
+#: src/ui/settings.rs:997
+msgid "Unused cache cleanup"
+msgstr "清理未使用的快取檔案"
+
+#: src/ui/settings.rs:998
+msgid ""
+"Remove only old, unreferenced media-cache files. Archived attachments and "
+"background recovery files stay saved. Removed files may not be recoverable."
+msgstr "僅移除不再被參照的舊媒體快取檔案。已封存的附件與背景復原檔案會保留。移除的檔案可能無法復原。"
+
+#: src/ui/settings.rs:1003
+msgid "Remove unused files automatically"
+msgstr "自動移除未使用的檔案"
+
+#: src/ui/settings.rs:1006
+msgid "Keep unused files for this many days"
+msgstr "未使用檔案的保留天數"
+
+#: src/ui/settings.rs:1010
+msgid "Keep all files (default)"
+msgstr "保留所有檔案（預設）"
+
+#: src/ui/settings.rs:1019
+msgid "Encrypted account backups"
+msgstr "加密帳號備份"
+
+#: src/ui/settings.rs:1020
+msgid ""
+"Save the account and downloaded files with a passphrase. Restore into a "
+"separate account, initially offline."
+msgstr "使用通關密語保存帳號和已下載的檔案。還原到獨立帳號，初始狀態為離線。"
+
+#: src/ui/settings.rs:1023
+msgid "Back up…"
+msgstr "備份…"
+
+#: src/ui/settings.rs:1027
+msgid "Restore…"
+msgstr "還原…"
+
+#: src/ui/settings.rs:1032
+msgid "Review merge…"
+msgstr "檢查合併…"
+
+#: src/ui/settings.rs:1039
+msgid "Restored account connection"
+msgstr "已還原帳號的連線"
+
+#: src/ui/settings.rs:1042
+msgid ""
+"This account stays offline until you resume its saved linked-device session."
+msgstr "此帳號將保持離線，直到您恢復其保存的已連結裝置工作階段。"
+
+#: src/ui/settings.rs:1049
+msgid "Resume connection…"
+msgstr "恢復連線…"
+
+#: src/ui/settings.rs:1062
+msgid "Download folders"
+msgstr "下載資料夾"
+
+#: src/ui/settings.rs:1065
+msgid ""
+"Organize future downloads in your chosen folder. Existing files stay where "
+"they are."
+msgstr "在所選資料夾中整理之後的下載。現有檔案保持原位置。"
+
+#: src/ui/settings.rs:1091
+msgid "Include older files in automatic downloads"
+msgstr "自動下載包含較早的檔案"
+
+#: src/ui/settings.rs:1092
+msgid ""
+"Copy files from before automatic downloads were enabled into your chosen "
+"folder. Full history recovery still keeps older files in the private "
+"archive."
+msgstr "將啟用自動下載之前的檔案複製到所選資料夾。完整歷史復原仍會將較早的檔案保留在私人封存中。"
+
+#: src/ui/settings.rs:1096
+msgid "Preserve original download names"
+msgstr "保留下載檔案的原始名稱"
+
+#: src/ui/settings.rs:1097
+msgid ""
+"Use the original document filename inside your chosen folders. Unsafe "
+"characters are removed and duplicate names get a number."
+msgstr "在所選資料夾中使用文件的原始檔名。不安全的字元會被移除，同名檔案會加上編號。"
+
+#: src/ui/settings.rs:1101
+msgid "Readable download names"
+msgstr "易讀的下載檔名"
+
+#: src/ui/settings.rs:1102
+msgid ""
+"Include the chat, message date (UTC), file type and original document name. "
+"The private media archive keeps its own files."
+msgstr "包含聊天、訊息日期（UTC）、檔案類型和原始文件名稱。私人媒體封存保留自己的檔案。"
+
+#: src/ui/settings.rs:1118
+msgid "Space"
+msgstr "空間"
+
+#: src/ui/settings.rs:1120 src/ui/settings.rs:1886
+msgid "Videos"
+msgstr "影片"
+
+#: src/ui/settings.rs:1121 src/ui/settings.rs:1894
+msgid "Stickers and GIFs"
+msgstr "貼圖集"
+
+#: src/ui/settings.rs:1123 src/ui/settings.rs:1204
+msgid "Messages"
+msgstr "訊息提示音"
+
+#: src/ui/settings.rs:1195
+msgid "Hides chat content until hovered. Toggle quickly with Ctrl+Shift+H."
+msgstr "隱藏聊天內容，游標停留時顯示。使用 Ctrl+Shift+H 快速切換。"
+
+#: src/ui/settings.rs:1200
+msgid "Chat previews"
+msgstr "聊天預覽"
+
+#: src/ui/settings.rs:1205 src/ui/gallery.rs:38
+msgid "Media"
+msgstr "媒體"
+
+#: src/ui/settings.rs:1206
+msgid "Names"
+msgstr "姓名"
+
+#: src/ui/settings.rs:1207
+msgid "Avatars"
+msgstr "頭像"
+
+#: src/ui/settings.rs:1256
+msgid ""
+"Time without using Zap Faster, also counted while it is in the tray. "
+"Ctrl+Shift+L locks it at once."
+msgstr "未使用 Zap Faster 經過的時間，在系統匣中也會計算。Ctrl+Shift+L 可立即鎖定。"
+
+#: src/ui/settings.rs:1505
+msgid "Choose another font file"
+msgstr "選擇其他字型檔案"
+
+#: src/ui/settings.rs:1507 src/app.rs:8710
+msgid "Choose a font file"
+msgstr "選擇字型檔案"
+
+#: src/ui/settings.rs:1848
+msgid ""
+"Space taken by the pictures, videos, stickers, and GIFs Zap Faster has "
+"downloaded. The size is the one WhatsApp declared. Documents and audio count"
+" under Other."
+msgstr "Zap Faster 下載的圖片、影片、貼圖和 GIF 佔用的空間。大小以 WhatsApp 提供的資訊為準。文件和音訊計入「其他」。"
+
+#: src/ui/settings.rs:1866
+#, rust-format
+msgid "{} message"
+msgid_plural "{} messages"
+msgstr[0] "{} 則訊息"
+
+#: src/app.rs:1560
+msgid "Restoring encrypted archive…"
+msgstr "正在還原加密封存…"
+
+#: src/app.rs:1606
+msgid "Could not start archive restore"
+msgstr "無法開始還原封存"
+
+#: src/app.rs:1686
+msgid ""
+"Archive restored. Open the account switcher to view the offline archive."
+msgstr "封存已還原。請開啟帳號切換器查看離線封存。"
+
+#: src/app.rs:1693
+msgid "Archive restore cancelled"
+msgstr "封存還原已取消"
+
+#: src/app.rs:1697
+#, rust-format
+msgid "Archive restore failed: {error}"
+msgstr "封存還原失敗：{error}"
+
+#: src/app.rs:4274
+#, rust-format
+msgid ""
+"Backup merged: {added} messages added, {edited} edited snapshots updated, "
+"{removed} confirmed deletions applied, {conflicts} alternatives retained for"
+" review."
+msgstr ""
+"備份已合併：新增了 {added} 則訊息，更新了 {edited} 個編輯版本，套用了 {removed} 項已確認的刪除，並保留了 "
+"{conflicts} 個替代版本供檢查。"
+
+#: src/app.rs:4293
+#, rust-format
+msgid "Archive backup saved ({count} file, {size})"
+msgid_plural "Archive backup saved ({count} files, {size})"
+msgstr[0] "封存備份已保存（{count} 個檔案，{size}）"
+
+#: src/app.rs:4302
+msgid "Archive backup cancelled"
+msgstr "封存備份已取消"
+
+#: src/app.rs:4306
+#, rust-format
+msgid "Archive backup failed: {error}"
+msgstr "封存備份失敗：{error}"
+
+#: src/app.rs:4398
+msgid ""
+"This message could not be sent. Check your connection before sending it "
+"again."
+msgstr "此訊息無法傳送。請在再次傳送前檢查連線。"
+
+#: src/app.rs:4403
+msgid "This message could not be sent. Try again later."
+msgstr "此訊息無法傳送。請稍後再試。"
+
+#: src/app.rs:4467
+msgid "Could not save the archive change. Try again."
+msgstr "無法儲存封存變更。請再試一次。"
+
+#: src/app.rs:4474
+msgid "Could not save the star change"
+msgstr "無法儲存星號變更"
+
+#: src/app.rs:4477
+msgid "Could not read starred messages"
+msgstr "無法讀取已加星號的訊息"
+
+#: src/app.rs:4481
+msgid "Wait for the previous pin request to finish"
+msgstr "請等待上一次置頂請求完成"
+
+#: src/app.rs:4488
+msgid "This message is not stored on this computer"
+msgstr "這則訊息未儲存在這台電腦上"
+
+#: src/app.rs:4491
+msgid "Could not pin this message"
+msgstr "無法置頂這則訊息"
+
+#: src/app.rs:4494
+msgid "Could not save the pin change"
+msgstr "無法儲存置頂變更"
+
+#: src/app.rs:4499
+msgid "Pin request timed out; confirm its state on your phone before retrying"
+msgstr "置頂請求逾時；重試前請在手機上確認其狀態"
+
+#: src/app.rs:4505
+msgid "Could not confirm the pin request; check your phone before retrying"
+msgstr "無法確認置頂請求；重試前請檢查手機"
+
+#: src/app.rs:5130
+msgid "Not sent: Zap Faster is not connected to WhatsApp."
+msgstr "未送出：Zap Faster 尚未連線至 WhatsApp。"
+
+#: src/app.rs:5874 src/app.rs:21126
+msgid "This message can no longer be edited"
+msgstr "已無法編輯此訊息"
+
+#: src/app.rs:6342
+msgid "Could not use this font"
+msgstr "無法使用此字型"
+
+#: src/app.rs:8529 src/ui/labels.rs:292
+#, rust-format
+msgid "You have {limit} labels, the most Zap Faster keeps."
+msgstr "您已有 {limit} 個標籤，已達 Zap Faster 的上限。"
+
+#: src/app.rs:8711
+msgid "Font files"
+msgstr "字型檔案"
+
+#: src/app.rs:8977
+msgid "Saving encrypted archive backup…"
+msgstr "正在保存加密封存備份…"
+
+#: src/app.rs:9938
+msgid "Cannot play this video here; opening it in your system player"
+msgstr "無法在此播放這部影片，正在系統播放器中開啟。"
+
+#: src/app.rs:9942
+msgid ""
+"The selected audio output is unavailable. Choose an output and resume "
+"playback."
+msgstr "所選音訊輸出無法使用。請選擇輸出裝置並繼續播放。"
+
+#: src/app.rs:21133
+msgid "Could not send the edit"
+msgstr "無法傳送編輯內容"
+
+#: src/app.rs:21136
+msgid "The edit was sent but could not be saved locally"
+msgstr "已傳送編輯內容，但無法儲存到本機"
+
+#: src/file_drag.rs:16
+msgid "Could not drag the attachment"
+msgstr "無法拖曳附件"
+
+#: src/file_drag.rs:20
+msgid "The attachment is unavailable. Download it before dragging it."
+msgstr "附件無法使用。請先下載，再拖曳。"
+
+#: src/file_drag.rs:25
+msgid "Dragging attachments out is currently available on Windows only."
+msgstr "目前只有 Windows 支援將附件拖曳到其他應用程式。"
+
+#: src/ui/labels.rs:228
+msgid "Focus on selected labels"
+msgstr "專注於所選標籤"
+
+#: src/ui/labels.rs:238
+msgid "Allow mentions and replies outside focus labels"
+msgstr "允許專注標籤之外的提及和回覆"
+
+#: src/ui/labels.rs:248
+msgid ""
+"Focus filters this account's chat list and notifications. Chat sounds take "
+"priority, then mention sounds. Other messages use the first assigned label "
+"sound in this list."
+msgstr "專注模式會篩選此帳號的聊天清單和通知。優先使用聊天提示音，其次為提及提示音。其他訊息使用此清單中第一個已指派標籤的提示音。"
+
+#: src/ui/labels.rs:360
+msgid "Include in focus"
+msgstr "包含在專注模式中"
+
+#: src/ui/labels.rs:374
+msgid "Default sound"
+msgstr "預設提示音"
+
+#: src/ui/labels.rs:375
+msgid "Pidgin"
+msgstr "Pidgin"
+
+#: src/ui/labels.rs:382
+msgid "System sound"
+msgstr "系統提示音"
+
+#: src/ui/labels.rs:384
+msgid "No sound"
+msgstr "無聲"
+
+#: src/ui/image_preview.rs:684
+msgid "Play video"
+msgstr "播放影片"
+
+#: src/ui/lock.rs:17
+msgid "Zap Faster is locked"
+msgstr "Zap Faster 已鎖定"
+
+#: src/account.rs:331
+#, rust-format
+msgid "Offline archive {id}"
+msgstr "離線封存 {id}"
+
+#: src/ui/accounts.rs:79
+msgid "Offline archive"
+msgstr "離線封存"
+
+#: src/ui/accounts.rs:236
+#, rust-format
+msgid "{count} unread chat"
+msgid_plural "{count} unread chats"
+msgstr[0] "{count} 個未讀聊天"
+
+#: src/ui/gallery.rs:41
+msgid "Documents"
+msgstr "文件"
+
+#: src/ui/gallery.rs:43
+msgid "Links"
+msgstr "連結"
+
+#: src/ui/gallery.rs:53
+msgid "Refresh"
+msgstr "重新整理"
+
+#: src/ui/gallery.rs:68
+msgid "Could not load this chat's media."
+msgstr "無法載入此聊天的媒體。"
+
+#: src/ui/gallery.rs:84
+msgid "This list is limited. Use chat search for older items."
+msgstr "此清單有數量限制。請使用聊天搜尋尋找更早的內容。"
+
+#: src/ui/gallery.rs:193
+msgid "Link"
+msgstr "連結"
+
+#: src/ui/login.rs:12
+msgid "A native WhatsApp client."
+msgstr "原生 WhatsApp 用戶端。"
+
+#: src/ui/login.rs:98 src/ui/call.rs:23
+msgid "Connecting to WhatsApp…"
+msgstr "正在連線 WhatsApp…"
+
+#: src/ui/login.rs:105
+msgid "Linked. Waiting for your chats…"
+msgstr "已連結，正在等待您的聊天…"
+
+#: src/ui/login.rs:114
+msgid "This computer was unlinked from your phone. Requesting a new code."
+msgstr "手機已取消此電腦的連結。正在要求新驗證碼。"
+
+#: src/ui/login.rs:123
+msgid "Requesting a new code…"
+msgstr "正在要求新驗證碼…"
+
+#: src/ui/login.rs:174
+#, rust-format
+msgid "Requesting a code for +{phone}…"
+msgstr "正在為 +{phone} 要求驗證碼…"
+
+#: src/ui/login.rs:183
+msgid "Waiting for a code from WhatsApp…"
+msgstr "正在等待 WhatsApp 驗證碼…"
+
+#: src/ui/login.rs:194
+msgid ""
+"Unofficial client. Using it may be against WhatsApp's terms of service."
+msgstr "非官方用戶端，使用可能違反 WhatsApp 服務條款。"
+
+#: src/ui/login.rs:219
+msgid "Link this computer"
+msgstr "連結此電腦"
+
+#: src/ui/login.rs:234 src/ui/login.rs:297
+msgid "Open WhatsApp on your phone"
+msgstr "在手機上開啟 WhatsApp"
+
+#: src/ui/login.rs:235 src/ui/login.rs:298
+msgid "Tap Menu or Settings, then Linked devices"
+msgstr "點選「選單」或「設定」，然後選擇「已連結裝置」"
+
+#: src/ui/login.rs:238
+msgid "Tap Link a device and point the phone at this code"
+msgstr "點選「連結裝置」，然後用手機掃描此 QR 碼"
+
+#: src/ui/login.rs:256
+msgid "Link with phone number instead"
+msgstr "改用電話號碼連結"
+
+#: src/ui/login.rs:270
+msgid "Enter this code on your phone"
+msgstr "在手機上輸入此驗證碼"
+
+#: src/ui/login.rs:277
+#, rust-format
+msgid "for +{phone}"
+msgstr "用於 +{phone}"
+
+#: src/ui/login.rs:301
+msgid "Tap Link a device, then Link with phone number instead"
+msgstr "點選「連結裝置」，然後選擇「改用電話號碼連結」"
+
+#: src/ui/login.rs:323
+msgid "Copy code"
+msgstr "複製驗證碼"
+
+#: src/ui/login.rs:346
+msgid "How much history would you like to sync?"
+msgstr "您希望同步多少歷史記錄？"
+
+#: src/ui/login.rs:355
+msgid ""
+"Full history recovers as much as WhatsApp makes available, with older "
+"messages and files continuing in the background."
+msgstr "完整歷史記錄會盡可能復原 WhatsApp 提供的內容，較早的訊息和檔案會繼續在背景復原。"
+
+#: src/ui/login.rs:365
+msgid ""
+"This can take a long time and use significant internet data and disk space. "
+"Keep your phone online during recovery. Some older messages or files may be "
+"unavailable."
+msgstr "這可能需要很長時間，並消耗大量網路流量和磁碟空間。復原期間請讓手機保持上線。某些較早的訊息或檔案可能無法取得。"
+
+#: src/ui/login.rs:387
+msgid ""
+"Recent history starts with recent conversations for a quicker setup. You can"
+" enable older-history recovery later in Settings."
+msgstr "近期歷史記錄從最近的聊天開始，以更快完成設定。您可以稍後在設定中啟用較早歷史記錄的復原。"
+
+#: src/ui/archive_backup.rs:19
+msgid "Restore an account backup"
+msgstr "還原帳號備份"
+
+#: src/ui/archive_backup.rs:21
+msgid "Back up this account"
+msgstr "備份此帳號"
+
+#: src/ui/archive_backup.rs:27
+msgid "Merge messages into this account"
+msgstr "將訊息合併到此帳號"
+
+#: src/ui/archive_backup.rs:30
+msgid ""
+"A matching account identity and an exact preview are required. Current "
+"messages and work queues stay intact. Conflicting edits and imported pending"
+" work are retained separately without sending."
+msgstr "必須確認帳號身分一致並檢查準確的預覽。目前訊息和工作佇列會被保留。衝突的編輯版本和匯入的待處理工作會分別儲存，不會傳送。"
+
+#: src/ui/archive_backup.rs:34
+msgid ""
+"Merge historical messages and files. The current linked-device identity "
+"stays in use."
+msgstr "合併歷史訊息和檔案。繼續使用目前已連結裝置的身分。"
+
+#: src/ui/archive_backup.rs:36
+msgid ""
+"Restore into a separate account. Existing accounts stay intact. Full backups"
+" include the linked-device identity; archive-only backups open offline."
+msgstr "還原到獨立帳號，現有帳號保持不變。完整備份包含已連結裝置身分；僅含封存的備份以離線方式開啟。"
+
+#: src/ui/archive_backup.rs:38
+msgid ""
+"Save this account, its linked-device identity and downloaded files in an "
+"encrypted backup. The connection pauses while saving. Keep the passphrase "
+"safe: it cannot be recovered."
+msgstr "將此帳號、已連結裝置身分和下載的檔案保存為加密備份。保存期間會暫停連線。請妥善保管通關密語：無法找回。"
+
+#: src/ui/archive_backup.rs:43
+msgid "Backup passphrase (at least 12 characters)"
+msgstr "備份通關密語（至少 12 個字元）"
+
+#: src/ui/archive_backup.rs:51
+msgid "Repeat passphrase"
+msgstr "再次輸入通關密語"
+
+#: src/ui/archive_backup.rs:68
+msgid "Choose backup…"
+msgstr "選擇備份…"
+
+#: src/ui/archive_backup.rs:70
+msgid "Save backup…"
+msgstr "保存備份…"
+
+#: src/ui/archive_backup.rs:102
+msgid "Merge this backup?"
+msgstr "合併此備份？"
+
+#: src/ui/archive_backup.rs:103
+#, rust-format
+msgid ""
+"{added} messages added, {edited} edited snapshots updated. {removed} current"
+" messages removed by confirmed backup deletions. {protected} deleted or "
+"pending-deletion messages are protected. {conflicts} conflicting "
+"alternatives and {pending} imported pending records are retained separately."
+msgstr ""
+"新增 {added} 則訊息，更新 {edited} 個編輯版本。依據備份中已確認的刪除，移除 {removed} 則目前訊息。{protected} "
+"則已刪除或待刪除訊息受到保護。{conflicts} 個衝突的替代版本和 {pending} 筆匯入的待處理記錄會分別保留。"
+
+#: src/ui/archive_backup.rs:107
+msgid ""
+"Session credentials and current pending work are preserved. Confirmed backup"
+" deletions listed above are applied. Imported pending sends never run. "
+"Different edited snapshots without a revision timestamp keep the current "
+"version and retain the imported alternative in the encrypted archive."
+msgstr ""
+"工作階段憑證和目前待處理工作會保留。上方列出的已確認備份刪除記錄會被套用。匯入的待傳送訊息絕不會執行。不同的編輯版本若沒有修訂時間，則保留目前版本，並將匯入的替代版本儲存在加密封存中。"
+
+#: src/ui/archive_backup.rs:110
+msgid ""
+"If the current archive changes before confirmation, prepare a new preview."
+msgstr "如果目前封存在確認前發生變更，請重新產生預覽。"
+
+#: src/ui/archive_backup.rs:113
+msgid "Merge"
+msgstr "合併"
+
+#: src/ui/call.rs:19
+msgid "Starting call"
+msgstr "正在發起通話"
+
+#: src/ui/call.rs:24
+msgid "Cancel call"
+msgstr "取消通話"
+
+#: src/ui/call.rs:53 src/ui/call.rs:177
+msgid "WhatsApp contact"
+msgstr "WhatsApp 聯絡人"
+
+#: src/ui/call.rs:66
+msgid "Connected"
+msgstr "已連線"
+
+#: src/ui/call.rs:68 src/ui/call.rs:386
+msgid "Call failed"
+msgstr "通話失敗"
+
+#: src/ui/call.rs:83
+#, rust-format
+msgid "{device} is unavailable; using the system default"
+msgstr "{device} 無法使用；正在使用系統預設裝置"
+
+#: src/ui/call.rs:90
+msgid "Answer with video"
+msgstr "以視訊接聽"
+
+#: src/ui/call.rs:96
+msgid "Answer without camera"
+msgstr "不啟用攝影機接聽"
+
+#: src/ui/call.rs:98
+msgid "Answer"
+msgstr "接聽"
+
+#: src/ui/call.rs:118
+msgid "End call"
+msgstr "結束通話"
+
+#: src/ui/call.rs:125
+msgid "Opening the camera…"
+msgstr "正在開啟攝影機…"
+
+#: src/ui/call.rs:126
+msgid "Cancel video"
+msgstr "取消視訊"
+
+#: src/ui/call.rs:130
+msgid "Turn camera off"
+msgstr "關閉攝影機"
+
+#: src/ui/call.rs:135
+msgid "The other person requested video."
+msgstr "對方要求開啟視訊。"
+
+#: src/ui/call.rs:139
+msgid "Accept video and turn camera on"
+msgstr "接受視訊並開啟攝影機"
+
+#: src/ui/call.rs:141
+msgid "Turn camera on"
+msgstr "開啟攝影機"
+
+#: src/ui/call.rs:148
+msgid "Keep voice only"
+msgstr "保持僅語音"
+
+#: src/ui/call.rs:158
+msgid "Calls and audio devices"
+msgstr "通話和音訊裝置"
+
+#: src/ui/call.rs:194
+msgid "No calls recorded on this computer yet."
+msgstr "此電腦上尚無通話記錄。"
+
+#: src/ui/call.rs:245
+msgid "Waiting for the other person's video…"
+msgstr "正在等待對方的視訊…"
+
+#: src/ui/call.rs:248
+msgid "Your camera"
+msgstr "您的攝影機"
+
+#: src/ui/call.rs:318
+msgid "Selected camera unavailable"
+msgstr "所選攝影機無法使用"
+
+#: src/ui/call.rs:320
+msgid "Saved camera (refresh devices)"
+msgstr "已儲存的攝影機（重新整理裝置）"
+
+#: src/ui/call.rs:344
+msgid "Used next time the camera is turned on."
+msgstr "下次開啟攝影機時使用。"
+
+#: src/ui/call.rs:348
+msgid "Camera discovery failed. Try refreshing devices."
+msgstr "無法偵測攝影機。請嘗試重新整理裝置。"
+
+#: src/ui/call.rs:354
+msgid "Refresh devices"
+msgstr "重新整理裝置"
+
+#: src/ui/call.rs:375
+msgid "Incoming"
+msgstr "來電"
+
+#: src/ui/call.rs:376
+msgid "Outgoing"
+msgstr "撥出"
+
+#: src/ui/call.rs:382
+msgid "Answered"
+msgstr "已接聽"
+
+#: src/ui/call.rs:396
+msgid "No audio is arriving. Check the connection."
+msgstr "未收到音訊，請檢查連線。"
+
+#: src/ui/call.rs:398
+msgid "This audio format cannot be decoded by this build."
+msgstr "此版本無法解碼此音訊格式。"
+
+#: src/ui/call.rs:401
+msgid "The incoming audio could not be authenticated."
+msgstr "無法驗證傳入音訊的真實性。"
+
+#: src/ui/call.rs:405
+msgid "Incoming audio cannot be played. Try reconnecting the call."
+msgstr "無法播放傳入音訊，請嘗試重新連線通話。"
+
+#: src/ui/statuses.rs:21
+msgid ""
+"Statuses received while Zap Faster is running. They expire after 24 hours. "
+"Viewing does not send a read receipt."
+msgstr "Zap Faster 執行期間收到的動態。它們會在 24 小時後到期。查看不會傳送已讀回條。"
+
+#: src/ui/statuses.rs:38
+msgid "No recent statuses received"
+msgstr "尚未收到近期動態"
+
+#: src/ui/statuses.rs:75
+msgid "Content hidden"
+msgstr "內容已隱藏"
+
+#: src/ui/statuses.rs:126
+msgid "Open status"
+msgstr "開啟動態"
+
+#: src/ui/statuses.rs:143
+msgid "Could not download status. Click to retry."
+msgstr "無法下載動態。點擊重試。"
+
+#: src/ui/statuses.rs:153
+msgid "Download status"
+msgstr "下載動態"
+
+msgid "Loading media…"
+msgstr "正在載入媒體…"
+
+msgid "Searching…"
+msgstr "正在搜尋…"
+
+msgid "Checking password…"
+msgstr "正在驗證密碼…"
+
+msgid "Passphrases do not match."
+msgstr "密碼不一致。"
+
+msgid "Play / pause"
+msgstr "播放 / 暫停"
+
+msgid "Preparing call…"
+msgstr "正在準備通話…"
+
+#: src/ui/call.rs
+msgid ""
+"Microphone cleanup is unavailable. Audio is being sent without echo "
+"cancellation."
+msgstr "麥克風音訊處理無法使用。正在傳送未經回音消除的音訊。"
+
+#: src/ui/call.rs
+msgid "Minimize call"
+msgstr "最小化通話"
+
+#: src/ui/call.rs
+msgid "Restore call"
+msgstr "還原通話"
+
 #~ msgid "Back to the chats"
 #~ msgstr "返回對話"
 
@@ -2776,3 +4080,8 @@ msgstr "正在建立群組…"
 #, fuzzy
 #~ msgid "Next pinned message"
 #~ msgstr "{} 則未讀訊息"
+
+#~ msgid ""
+#~ "Up to five pages per chat this session. Your phone may not send all history."
+#~ " No automatic media downloads."
+#~ msgstr "本次工作階段每個聊天最多五頁。手機可能無法傳送完整記錄。不會自動下載媒體。"

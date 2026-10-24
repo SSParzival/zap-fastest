@@ -4,8 +4,7 @@
 msgid ""
 msgstr ""
 "Project-Id-Version: ZapFast\n"
-"Report-Msgid-Bugs-To: https://github.com/crmne/zapfast/issues/new?"
-"template=translation.yml\n"
+"Report-Msgid-Bugs-To: https://github.com/crmne/zapfast/issues/new?template=translation.yml\n"
 "POT-Creation-Date: 2026-10-23 15:36+0200\n"
 "PO-Revision-Date: 2026-09-22 00:00-0300\n"
 "Last-Translator: ZapFast contributors\n"
@@ -484,8 +483,8 @@ msgstr "Tambahkan keterangan"
 
 #: src/ui/conversation.rs:1861
 msgid ""
-"Enter sends · Shift+Enter for a new line · *bold* _italic_ ~strike~ · Ctrl+V "
-"pastes a picture"
+"Enter sends · Shift+Enter for a new line · *bold* _italic_ ~strike~ · Ctrl+V"
+" pastes a picture"
 msgstr ""
 "Enter untuk kirim · Shift+Enter untuk baris baru · *tebal* _miring_ ~coret~ "
 "· Ctrl+V menempelkan gambar"
@@ -493,7 +492,8 @@ msgstr ""
 #: src/ui/conversation.rs:1863
 msgid "Ctrl+Enter sends · *bold* _italic_ ~strike~ · Ctrl+V pastes a picture"
 msgstr ""
-"Ctrl+Enter untuk kirim · *tebal* _miring_ ~coret~ · Ctrl+V menempelkan gambar"
+"Ctrl+Enter untuk kirim · *tebal* _miring_ ~coret~ · Ctrl+V menempelkan "
+"gambar"
 
 #: src/ui/conversation.rs:1874
 msgid "Hide shortcut hints (bring them back from Keyboard shortcuts)"
@@ -711,11 +711,12 @@ msgstr ""
 #: src/ui/conversation.rs:6922
 msgid "View once video. For your privacy, it opens only on your phone."
 msgstr ""
-"Video sekali lihat. Untuk privasi Anda, video ini hanya dapat dibuka melalui "
-"aplikasi WhatsApp di ponsel."
+"Video sekali lihat. Untuk privasi Anda, video ini hanya dapat dibuka melalui"
+" aplikasi WhatsApp di ponsel."
 
 #: src/ui/conversation.rs:6926
-msgid "View once voice message. For your privacy, it opens only on your phone."
+msgid ""
+"View once voice message. For your privacy, it opens only on your phone."
 msgstr ""
 "Pesan suara sekali lihat. Untuk privasi Anda, pesan suara ini hanya dapat "
 "dibuka melalui aplikasi WhatsApp di ponsel."
@@ -723,14 +724,14 @@ msgstr ""
 #: src/ui/conversation.rs:6930
 msgid "View once audio. For your privacy, it opens only on your phone."
 msgstr ""
-"Audio sekali lihat. Untuk privasi Anda, audio ini hanya dapat dibuka melalui "
-"aplikasi WhatsApp di ponsel."
+"Audio sekali lihat. Untuk privasi Anda, audio ini hanya dapat dibuka melalui"
+" aplikasi WhatsApp di ponsel."
 
 #: src/ui/conversation.rs:6934
 msgid "View once message. For your privacy, it opens only on your phone."
 msgstr ""
-"Pesan sekali lihat. Untuk privasi Anda, pesan ini hanya dapat dibuka melalui "
-"aplikasi WhatsApp di ponsel."
+"Pesan sekali lihat. Untuk privasi Anda, pesan ini hanya dapat dibuka melalui"
+" aplikasi WhatsApp di ponsel."
 
 #: src/ui/conversation.rs:6936
 msgid "This message can only be seen on your phone."
@@ -845,8 +846,8 @@ msgstr "chat ini"
 #: src/ui/dialogs.rs:938
 #, rust-format
 msgid ""
-"This deletes your chat with {name}, including all messages, on this computer "
-"and on your phone. It cannot be undone."
+"This deletes your chat with {name}, including all messages, on this computer"
+" and on your phone. It cannot be undone."
 msgstr ""
 "Ini akan menghapus chat Anda dengan {name}, termasuk semua pesannya, di "
 "komputer ini dan di telepon Anda. Tindakan ini tidak dapat diurungkan."
@@ -866,8 +867,8 @@ msgid ""
 "media, on this computer and on your phone. The chat itself stays. It cannot "
 "be undone."
 msgstr ""
-"Ini akan mengosongkan semua pesan di chat Anda dengan {name}, termasuk media "
-"yang diunduh, di komputer ini dan di telepon Anda. Chat-nya tetap ada. "
+"Ini akan mengosongkan semua pesan di chat Anda dengan {name}, termasuk media"
+" yang diunduh, di komputer ini dan di telepon Anda. Chat-nya tetap ada. "
 "Tindakan ini tidak dapat diurungkan."
 
 #: src/ui/dialogs.rs:965
@@ -923,10 +924,10 @@ msgstr "Mulai dari awal?"
 
 #: src/ui/dialogs.rs:1260
 msgid ""
-"ZapFast keeps your unreadable archive as a separate file, creates a new one, "
-"and asks you to link again. Linking again brings back recent history from "
-"your phone. Afterwards, remove the old ZapFast entry under Linked devices on "
-"your phone."
+"ZapFast keeps your unreadable archive as a separate file, creates a new one,"
+" and asks you to link again. Linking again brings back recent history from "
+"your phone. Afterwards, remove the old ZapFast entry under Linked devices on"
+" your phone."
 msgstr ""
 "ZapFast menyimpan arsip Anda yang tidak terbaca sebagai file terpisah, "
 "membuat arsip baru, dan meminta Anda menautkan lagi. Menautkan lagi akan "
@@ -950,8 +951,8 @@ msgid ""
 "This removes the message from your phone and linked devices. Other people "
 "keep their copy. Connect to WhatsApp to delete it. This cannot be undone."
 msgstr ""
-"Ini akan menghapus pesan dari telepon Anda dan perangkat tertaut. Orang lain "
-"tetap menyimpan salinannya. Hubungkan ke WhatsApp untuk menghapusnya. "
+"Ini akan menghapus pesan dari telepon Anda dan perangkat tertaut. Orang lain"
+" tetap menyimpan salinannya. Hubungkan ke WhatsApp untuk menghapusnya. "
 "Tindakan ini tidak dapat diurungkan."
 
 #: src/ui/dialogs.rs:1276
@@ -964,8 +965,8 @@ msgstr ""
 
 #: src/ui/dialogs.rs:1277
 msgid ""
-"This removes these messages from your phone and linked devices. Other people "
-"keep their copy. Connect to WhatsApp to delete them. This cannot be undone."
+"This removes these messages from your phone and linked devices. Other people"
+" keep their copy. Connect to WhatsApp to delete them. This cannot be undone."
 msgstr ""
 "Ini akan menghapus pesan-pesan ini dari telepon Anda dan perangkat tertaut. "
 "Orang lain tetap menyimpan salinannya. Hubungkan ke WhatsApp untuk "
@@ -1017,8 +1018,8 @@ msgstr "Putuskan tautan komputer ini?"
 
 #: src/ui/dialogs.rs:1371
 msgid ""
-"This removes the device from WhatsApp and deletes the chats stored here. You "
-"can link again with a new code."
+"This removes the device from WhatsApp and deletes the chats stored here. You"
+" can link again with a new code."
 msgstr ""
 "Ini akan menghapus perangkat dari WhatsApp dan menghapus chat yang disimpan "
 "di sini. Anda dapat menautkan kembali dengan kode baru."
@@ -1039,8 +1040,8 @@ msgid ""
 "them, while WhatsApp still has them."
 msgstr ""
 "Ini menghapus foto, video, stiker, dan file yang diunduh {account} ke "
-"komputer ini. Pesan tetap ada, dan lampiran diunduh lagi saat dibuka, selama "
-"WhatsApp masih menyimpannya."
+"komputer ini. Pesan tetap ada, dan lampiran diunduh lagi saat dibuka, selama"
+" WhatsApp masih menyimpannya."
 
 #: src/ui/dialogs.rs:1398
 msgid "Files in a download folder you chose are kept."
@@ -1155,7 +1156,8 @@ msgstr "Zoom"
 #: src/ui/settings.rs:382
 msgid "Ctrl+Plus and Ctrl+Minus work anywhere, and Ctrl+0 resets it."
 msgstr ""
-"Ctrl+Plus dan Ctrl+Minus berfungsi di mana saja, dan Ctrl+0 untuk meresetnya."
+"Ctrl+Plus dan Ctrl+Minus berfungsi di mana saja, dan Ctrl+0 untuk "
+"meresetnya."
 
 #: src/ui/settings.rs:391
 msgid "Larger"
@@ -1206,8 +1208,8 @@ msgstr "Ambil riwayat lama"
 
 #: src/ui/settings.rs:448
 msgid ""
-"Asks your phone in the background for older messages in the open, pinned and "
-"ten most recent chats."
+"Asks your phone in the background for older messages in the open, pinned and"
+" ten most recent chats."
 msgstr ""
 "Meminta pesan lama dari telepon Anda di latar belakang untuk chat yang "
 "terbuka, yang disematkan, dan sepuluh chat terbaru."
@@ -1255,7 +1257,8 @@ msgstr "Notifikasi desktop"
 
 #: src/ui/settings.rs:524
 msgid "For chats you are not looking at. Muted chats stay quiet."
-msgstr "Untuk pesan yang tidak sedang dibuka. Pesan yang dibisukan tetap diam."
+msgstr ""
+"Untuk pesan yang tidak sedang dibuka. Pesan yang dibisukan tetap diam."
 
 #: src/ui/settings.rs:531
 msgid "Show message content in notifications"
@@ -1499,14 +1502,14 @@ msgstr "Kunci aplikasi"
 
 #: src/ui/settings.rs:902
 msgid ""
-"Asks for a password at start and after a while unused. It keeps people using "
-"this computer out of your chats and encrypts nothing more. A forgotten "
+"Asks for a password at start and after a while unused. It keeps people using"
+" this computer out of your chats and encrypts nothing more. A forgotten "
 "password means unlinking."
 msgstr ""
 "Meminta kata sandi saat mulai dan setelah beberapa waktu tidak digunakan. "
 "Ini menjaga privasi chat Anda dari pengguna komputer ini dan tidak "
-"mengenkripsi hal lainnya. Jika lupa kata sandi, Anda harus memutuskan tautan "
-"perangkat."
+"mengenkripsi hal lainnya. Jika lupa kata sandi, Anda harus memutuskan tautan"
+" perangkat."
 
 #: src/ui/settings.rs:909
 msgid "Turn off…"
@@ -1945,8 +1948,8 @@ msgid ""
 "{caller} is calling {group}. ZapFast can't join group calls yet: answer on "
 "your phone."
 msgstr ""
-"{caller} sedang memanggil {group}. ZapFast belum bisa bergabung ke panggilan "
-"grup: jawab di ponselmu."
+"{caller} sedang memanggil {group}. ZapFast belum bisa bergabung ke panggilan"
+" grup: jawab di ponselmu."
 
 #: src/app/calls.rs:621
 #, rust-format
@@ -2238,11 +2241,11 @@ msgstr "Buat"
 
 #: src/ui/labels.rs:311
 msgid ""
-"No labels yet. Create one above, then add chats to it from their right-click "
-"menu."
+"No labels yet. Create one above, then add chats to it from their right-click"
+" menu."
 msgstr ""
-"Belum ada label. Buat label baru di atas, lalu tambahkan chat dari menu klik "
-"kanan."
+"Belum ada label. Buat label baru di atas, lalu tambahkan chat dari menu klik"
+" kanan."
 
 #: src/ui/labels.rs:346
 msgid "Next colour"
@@ -2296,8 +2299,8 @@ msgid ""
 "Right-click any sticker to add it to your favorites. They stay in sync with "
 "your phone."
 msgstr ""
-"Klik kanan pada stiker mana pun untuk menambahkannya ke favorit. Stiker akan "
-"tetap disinkronkan dengan ponsel Anda."
+"Klik kanan pada stiker mana pun untuk menambahkannya ke favorit. Stiker akan"
+" tetap disinkronkan dengan ponsel Anda."
 
 #: src/ui/picker.rs:1302
 msgid "Stickers people send you appear here."
@@ -2325,7 +2328,8 @@ msgstr "Impor paket"
 msgid ""
 "Paste a signal.art link from signalstickers.org, or open a .wastickers file."
 msgstr ""
-"Tempel tautan signal.art dari signalstickers.org, atau buka file .wastickers."
+"Tempel tautan signal.art dari signalstickers.org, atau buka file "
+".wastickers."
 
 #: src/ui/picker.rs:1440
 msgid "Make your own"
@@ -2333,8 +2337,8 @@ msgstr "Buat sendiri"
 
 #: src/ui/picker.rs:1448
 msgid ""
-"Start a pack, then right-click any sticker to add it. Or turn a picture into "
-"a sticker."
+"Start a pack, then right-click any sticker to add it. Or turn a picture into"
+" a sticker."
 msgstr ""
 "Buat paket baru, lalu klik kanan stiker apa pun untuk menambahkannya. Atau "
 "ubah gambar menjadi stiker."
@@ -2394,9 +2398,11 @@ msgstr "Coba kata lain atau pilih hari yang berbeda."
 
 #: src/ui/pane.rs:346
 #, rust-format
-msgid "Only the newest {} matches are listed. Narrow the search or pick a day."
+msgid ""
+"Only the newest {} matches are listed. Narrow the search or pick a day."
 msgstr ""
-"Hanya {} hasil terbaru yang ditampilkan. Persempit pencarian atau pilih hari."
+"Hanya {} hasil terbaru yang ditampilkan. Persempit pencarian atau pilih "
+"hari."
 
 #: src/ui/pane.rs:435
 msgid "Clear the day filter"
@@ -2845,6 +2851,1462 @@ msgstr[1] "{count} anggota selain Anda"
 msgid "Creating the group…"
 msgstr "Membuat grup…"
 
+#: src/util.rs:383
+#, rust-format
+msgid "{day} {month}"
+msgstr "{day} {month}"
+
+#: src/util.rs:390
+#, rust-format
+msgid "{date}, {year}"
+msgstr "{date}, {year}"
+
+#: src/util.rs:394
+#, rust-format
+msgid "{label} ({date})"
+msgstr "{label} ({date})"
+
+#: src/util.rs:462
+msgctxt "date month"
+msgid "January"
+msgstr "Januari"
+
+#: src/util.rs:463
+msgctxt "date month"
+msgid "February"
+msgstr "Februari"
+
+#: src/util.rs:464
+msgctxt "date month"
+msgid "March"
+msgstr "Maret"
+
+#: src/util.rs:465
+msgctxt "date month"
+msgid "April"
+msgstr "April"
+
+#: src/util.rs:466
+msgctxt "date month"
+msgid "May"
+msgstr "Mei"
+
+#: src/util.rs:467
+msgctxt "date month"
+msgid "June"
+msgstr "Juni"
+
+#: src/util.rs:468
+msgctxt "date month"
+msgid "July"
+msgstr "Juli"
+
+#: src/util.rs:469
+msgctxt "date month"
+msgid "August"
+msgstr "Agustus"
+
+#: src/util.rs:470
+msgctxt "date month"
+msgid "September"
+msgstr "September"
+
+#: src/util.rs:471
+msgctxt "date month"
+msgid "October"
+msgstr "Oktober"
+
+#: src/util.rs:472
+msgctxt "date month"
+msgid "November"
+msgstr "November"
+
+#: src/util.rs:473
+msgctxt "date month"
+msgid "December"
+msgstr "Desember"
+
+#: src/ui/chats.rs:509
+msgid "Leave focus mode"
+msgstr "Keluar dari mode fokus"
+
+#: src/ui/chats.rs:588 src/ui/statuses.rs:13
+msgid "Status"
+msgstr "Status"
+
+#: src/ui/chats.rs:712
+msgid "Load more"
+msgstr "Muat lagi"
+
+#: src/ui/chats.rs:2387
+msgid "Remove VIP indicator"
+msgstr "Hapus penanda VIP"
+
+#: src/ui/chats.rs:2389
+msgid "Mark as VIP"
+msgstr "Tandai sebagai VIP"
+
+#: src/ui/chats.rs:2488
+msgid "Notification sound"
+msgstr "Suara notifikasi"
+
+#: src/ui/conversation.rs:1291
+msgid "Preparing attachment"
+msgstr "Menyiapkan lampiran"
+
+#: src/ui/conversation.rs:1315
+msgid "Channels are read-only in Zap Faster"
+msgstr "Saluran bersifat read-only di Zap Faster"
+
+#: src/ui/conversation.rs:4135
+msgid "Downloading voice message…"
+msgstr "Mengunduh paket…"
+
+#: src/ui/conversation.rs:4142
+#, rust-format
+msgid "Downloading Whisper large-v3-turbo… {percent}%"
+msgstr "Mengunduh Whisper large-v3-turbo… {percent}%"
+
+#: src/ui/conversation.rs:4149
+msgid "Downloading Whisper large-v3-turbo (1.5 GB)…"
+msgstr "Mengunduh Whisper large-v3-turbo (1,5 GB)…"
+
+#: src/ui/conversation.rs:4153
+msgid "Verifying Whisper model…"
+msgstr "Memverifikasi model Whisper…"
+
+#: src/ui/conversation.rs:4156
+msgid "Loading Whisper model…"
+msgstr "Memuat model Whisper…"
+
+#: src/ui/conversation.rs:4159
+msgid "Transcribing locally…"
+msgstr "Mentranskripsikan secara lokal…"
+
+#: src/ui/conversation.rs:5831
+msgid "Waiting to send"
+msgstr "Menunggu untuk dikirim"
+
+#: src/ui/conversation.rs:5834
+msgid ""
+"This message sends automatically when WhatsApp reconnects and any sending "
+"limit ends."
+msgstr ""
+"Pesan ini dikirim otomatis setelah WhatsApp terhubung kembali dan batas "
+"pengiriman berakhir."
+
+#: src/ui/conversation.rs:5838
+msgid "Send unconfirmed"
+msgstr "Pengiriman belum dikonfirmasi"
+
+#: src/ui/conversation.rs:5841
+msgid ""
+"Sending was interrupted. This message may have been sent. It will not be "
+"resent automatically. You can copy it or delete it locally."
+msgstr ""
+"Pengiriman terputus. Pesan ini mungkin sudah terkirim. Pesan tidak akan "
+"dikirim ulang secara otomatis. Anda dapat menyalinnya atau menghapusnya "
+"secara lokal."
+
+#: src/ui/conversation.rs:5855
+msgid "Cancel waiting message"
+msgstr "Batalkan pesan yang menunggu"
+
+#: src/ui/conversation.rs:5864
+msgid "Delete this message so it is not sent"
+msgstr "Hapus pesan ini agar tidak dikirim"
+
+#: src/ui/conversation.rs:5958
+msgid "Reactions"
+msgstr "Reaksi"
+
+#: src/ui/conversation.rs:6375 src/ui/conversation.rs:6389
+msgid "30 days"
+msgstr "30 hari"
+
+#: src/ui/conversation.rs:7666
+msgid "Download all"
+msgstr "Unduh semua"
+
+#: src/ui/conversation.rs:12155
+msgid "Send as an original document"
+msgstr "Kirim sebagai dokumen asli"
+
+#: src/ui/dialogs.rs:245
+msgid "Participant"
+msgstr "Peserta"
+
+#: src/ui/dialogs.rs:584 src/ui/dialogs.rs:664
+msgid "Message a number"
+msgstr "Arsip pesan"
+
+#: src/ui/dialogs.rs:670
+msgid ""
+"Enter a phone number with its country code. You do not need to save it as a "
+"contact."
+msgstr ""
+"Masukkan nomor telepon beserta kode negara. Anda tidak perlu menyimpannya "
+"sebagai kontak."
+
+#: src/ui/dialogs.rs:694
+msgid "Checking the number…"
+msgstr "Memeriksa nomor…"
+
+#: src/ui/dialogs.rs:1584
+#, rust-format
+msgid ""
+"This deletes \"{}\" and its stickers from this computer. To use it again, "
+"import it again."
+msgstr ""
+"Ini menghapus \"{}\" beserta stikernya dari komputer ini. Untuk "
+"menggunakannya kembali, impor ulang."
+
+#: src/ui/dialogs.rs:1632
+msgid "Resume this restored account?"
+msgstr "Lanjutkan akun yang dipulihkan ini?"
+
+#: src/ui/dialogs.rs:1638
+msgid ""
+"Close Zap Faster on the original installation before continuing. Both "
+"installations share the same linked-device identity and must not connect at "
+"the same time. Resuming reconnects to WhatsApp and may send pending messages"
+" or account changes from the backup. If the phone has invalidated the "
+"session, you will need to link again."
+msgstr ""
+"Tutup Zap Faster pada instalasi asal sebelum melanjutkan. Kedua instalasi "
+"memakai identitas perangkat tertaut yang sama dan tidak boleh terhubung "
+"bersamaan. Melanjutkan akan menghubungkan kembali ke WhatsApp dan dapat "
+"mengirim pesan tertunda atau perubahan akun dari cadangan. Jika ponsel telah"
+" membatalkan sesi, Anda harus menautkan kembali."
+
+#: src/ui/dialogs.rs:1648
+msgid "Resume connection"
+msgstr "Lanjutkan koneksi"
+
+#: src/ui/dialogs.rs:1659
+msgid "Keep offline"
+msgstr "Tetap offline"
+
+#: src/ui/dialogs.rs:2040
+msgid "Community"
+msgstr "Komunitas"
+
+#: src/ui/dialogs.rs:2113
+msgid "Set local picture"
+msgstr "Atur foto lokal"
+
+#: src/ui/dialogs.rs:2118
+msgid "Only changes this contact's picture in this account on this computer"
+msgstr "Hanya mengubah foto kontak ini di akun ini pada komputer ini"
+
+#: src/ui/dialogs.rs:2128
+msgid "Reset local picture"
+msgstr "Reset foto lokal"
+
+#: src/ui/dialogs.rs:2324
+msgid "Community announcements"
+msgstr "Pengumuman komunitas"
+
+#: src/ui/dialogs.rs:2326
+msgid "Community general chat"
+msgstr "Obrolan umum komunitas"
+
+#: src/ui/dialogs.rs:2328
+msgid "Community group"
+msgstr "Grup komunitas"
+
+#: src/ui/dialogs.rs:2354
+msgid "Community groups"
+msgstr "Grup komunitas"
+
+#: src/ui/dialogs.rs:2361
+msgid "No linked groups are known yet."
+msgstr "Belum ada grup tertaut yang diketahui."
+
+#: src/ui/dialogs.rs:2411
+msgid "Change disappearing messages"
+msgstr "Ubah pesan sementara"
+
+#: src/ui/settings.rs:344
+msgid "Emoji style"
+msgstr "Gaya emoji"
+
+#: src/ui/settings.rs:345
+msgid ""
+"System uses platform emoji with Noto fallback. Noto uses bundled emoji only."
+" You can import a CBDT or sbix colour emoji font you are allowed to use (up "
+"to 256 MiB). Custom fonts have no Noto fallback. Restart Zap Faster to "
+"apply."
+msgstr ""
+"Sistem memakai emoji platform dengan Noto sebagai cadangan. Noto hanya "
+"memakai emoji bawaan. Anda dapat mengimpor font emoji warna CBDT atau sbix "
+"yang diizinkan untuk Anda gunakan (hingga 256 MiB). Font khusus tidak "
+"memiliki cadangan Noto. Mulai ulang Zap Faster untuk menerapkannya."
+
+#: src/ui/settings.rs:402
+msgid "Text size"
+msgstr "Ukuran teks"
+
+#: src/ui/settings.rs:405
+msgid "Resize text without changing the window or controls."
+msgstr "Ubah ukuran teks tanpa mengubah jendela atau kontrol."
+
+#: src/ui/settings.rs:430
+msgid "Keep chat list position after sending"
+msgstr "Pertahankan posisi daftar chat setelah mengirim"
+
+#: src/ui/settings.rs:433
+msgid ""
+"Stay among older conversations while replying. When off, the chat list "
+"scrolls to the top."
+msgstr ""
+"Tetap di antara percakapan lama saat membalas. Jika nonaktif, daftar chat "
+"bergulir ke atas."
+
+#: src/ui/settings.rs:438
+msgid "Restore last open chat"
+msgstr "Pulihkan chat yang terakhir dibuka"
+
+#: src/ui/settings.rs:441
+msgid "When off, start on the chat list. Your last chat stays remembered."
+msgstr "Jika nonaktif, mulai dari daftar chat. Chat terakhir tetap diingat."
+
+#: src/ui/settings.rs:446
+msgid "Convert typed emoticons"
+msgstr "Konversi emotikon yang diketik"
+
+#: src/ui/settings.rs:447
+msgid "Turn typed emoticons into emoji while composing."
+msgstr "Ubah emotikon menjadi emoji saat menulis pesan."
+
+#: src/ui/settings.rs:459
+msgid "Recover older history in the background"
+msgstr "Pulihkan riwayat lama di latar belakang"
+
+#: src/ui/settings.rs:460
+msgid ""
+"Ask your phone for older messages without opening each chat. Your phone may "
+"not provide all history."
+msgstr ""
+"Minta pesan lama dari ponsel tanpa membuka setiap chat. Ponsel mungkin tidak"
+" menyediakan seluruh riwayat."
+
+#: src/ui/settings.rs:464
+msgid "History recovery"
+msgstr "Pemulihan riwayat"
+
+#: src/ui/settings.rs:465
+msgid ""
+"Full history continues across all eligible chats. Changing the initial sync "
+"takes effect the next time you link this account."
+msgstr ""
+"Riwayat lengkap berlanjut untuk semua chat yang memenuhi syarat. Perubahan "
+"sinkronisasi awal berlaku saat Anda menautkan akun ini lagi."
+
+#: src/ui/settings.rs:470 src/ui/settings.rs:473 src/ui/login.rs:374
+msgid "Full history"
+msgstr "Riwayat lengkap"
+
+#: src/ui/settings.rs:470 src/ui/settings.rs:472 src/ui/login.rs:396
+msgid "Recent history"
+msgstr "Riwayat terbaru"
+
+#: src/ui/settings.rs:479
+msgid "Keep files in the background archive"
+msgstr "Simpan file dalam arsip latar belakang"
+
+#: src/ui/settings.rs:480
+msgid ""
+"Download files without opening their chats. Stored in this account's managed"
+" archive, separate from your chosen Downloads folder."
+msgstr ""
+"Unduh file tanpa membuka chatnya. Disimpan dalam arsip terkelola akun ini, "
+"terpisah dari folder Unduhan yang dipilih."
+
+#: src/ui/settings.rs:484
+msgid "Daily history request limit"
+msgstr "Batas permintaan riwayat harian"
+
+#: src/ui/settings.rs:485
+msgid ""
+"Full-history recovery pauses at this daily limit and continues the next day."
+" Requests stay at least twenty seconds apart."
+msgstr ""
+"Pemulihan riwayat lengkap dijeda saat mencapai batas harian dan berlanjut "
+"keesokan hari. Jeda antarpermintaan minimal dua puluh detik."
+
+#: src/ui/settings.rs:495
+msgid "Transcribe received voice messages automatically"
+msgstr "Transkripsikan pesan suara masuk secara otomatis"
+
+#: src/ui/settings.rs:498
+msgid "Uses the local Whisper large-v3-turbo model (1.5 GB) and your CPU."
+msgstr "Menggunakan model Whisper large-v3-turbo lokal (1,5 GB) dan CPU Anda."
+
+#: src/ui/settings.rs:569
+msgid "Audio devices"
+msgstr "Perangkat audio"
+
+#: src/ui/settings.rs:570
+msgid "Microphone and sound output"
+msgstr "Mikrofon dan keluaran suara"
+
+#: src/ui/settings.rs:570
+msgid ""
+"Used for voice recording, voice and video playback, and calls. Missing sound"
+" outputs fall back to the system default with a warning; recording never "
+"switches microphones silently."
+msgstr ""
+"Digunakan untuk perekaman suara, pemutaran suara dan video, serta panggilan."
+" Keluaran suara yang tidak tersedia beralih ke default sistem disertai "
+"peringatan; perekaman tidak pernah mengganti mikrofon tanpa pemberitahuan."
+
+#: src/ui/settings.rs:571
+msgid "Refresh audio devices"
+msgstr "Segarkan perangkat audio"
+
+#: src/ui/settings.rs:573
+msgid "Sound output"
+msgstr "Keluaran suara"
+
+#: src/ui/settings.rs:599
+msgid "In-app notification cards"
+msgstr "Kartu notifikasi dalam aplikasi"
+
+#: src/ui/settings.rs:601
+msgid ""
+"Show notifications in the desktop corner, even while the window is hidden, "
+"with the same privacy and mute settings."
+msgstr ""
+"Tampilkan notifikasi di sudut desktop, meskipun jendela tersembunyi, dengan "
+"pengaturan privasi dan bisukan yang sama."
+
+#: src/ui/settings.rs:603
+msgid ""
+"Show notifications inside the window, with the same privacy and mute "
+"settings."
+msgstr ""
+"Tampilkan notifikasi di dalam jendela dengan pengaturan privasi dan "
+"pembisuan yang sama."
+
+#: src/ui/settings.rs:608
+msgid "Show notification sender"
+msgstr "Tampilkan pengirim notifikasi"
+
+#: src/ui/settings.rs:611
+msgid "Show chat names and pictures in desktop notifications."
+msgstr "Tampilkan nama dan foto chat dalam notifikasi desktop."
+
+#: src/ui/settings.rs:616
+msgid "Show notification content"
+msgstr "Tampilkan isi notifikasi"
+
+#: src/ui/settings.rs:619
+msgid "Include message previews. Hidden senders also hide content."
+msgstr ""
+"Sertakan pratinjau pesan. Menyembunyikan pengirim juga menyembunyikan isi."
+
+#: src/ui/settings.rs:682
+msgid "Allow local command-line access"
+msgstr "Izinkan akses baris perintah lokal"
+
+#: src/ui/settings.rs:683
+msgid ""
+"Allows this computer's user to read, watch and send in this account. App "
+"lock and locked chats stay private."
+msgstr ""
+"Mengizinkan pengguna komputer ini membaca, memantau, dan mengirim di akun "
+"ini. Kunci aplikasi dan chat terkunci tetap melindungi privasi."
+
+#: src/ui/settings.rs:692
+msgid ""
+"Could not load your account privacy. Trying again when Zap Faster "
+"reconnects."
+msgstr ""
+"Tidak dapat memuat privasi akun Anda. Mencoba lagi saat Zap Faster terhubung"
+" kembali."
+
+#: src/ui/settings.rs:747 src/ui/settings.rs:1192
+msgid "Screen privacy"
+msgstr "Privasi layar"
+
+#: src/ui/settings.rs:752
+msgid "Unread count on tray icon"
+msgstr "Jumlah chat belum dibaca pada ikon baki"
+
+#: src/ui/settings.rs:753
+msgid ""
+"Show the total unread chat count across accounts, up to 99+. Hidden while "
+"the app is locked or screen privacy is on."
+msgstr ""
+"Tampilkan total chat belum dibaca di semua akun, hingga 99+. Disembunyikan "
+"saat aplikasi terkunci atau privasi layar aktif."
+
+#: src/ui/settings.rs:757
+msgid "VIP tray indicator"
+msgstr "Penanda VIP di baki"
+
+#: src/ui/settings.rs:758
+msgid ""
+"Highlight unread VIP chats. Mark a chat as VIP from its menu. Muted, "
+"archived and locked chats are excluded."
+msgstr ""
+"Sorot chat VIP yang belum dibaca. Tandai chat sebagai VIP dari menunya. Chat"
+" dibisukan, diarsipkan, dan terkunci tidak disertakan."
+
+#: src/ui/settings.rs:767
+msgid "Ctrl+W closes the chat"
+msgstr "Ctrl+W menutup chat"
+
+#: src/ui/settings.rs:768
+msgid ""
+"Close the open chat with Ctrl+W instead of closing the window. Turn off to "
+"keep the window shortcut."
+msgstr ""
+"Tutup chat yang terbuka dengan Ctrl+W alih-alih menutup jendela. Nonaktifkan"
+" untuk mempertahankan pintasan jendela."
+
+#: src/ui/settings.rs:800
+msgid "Asks GitHub once a day, sending only the Zap Faster version."
+msgstr "Memeriksa GitHub sekali sehari, hanya mengirimkan versi Zap Faster."
+
+#: src/ui/settings.rs:808
+msgid ""
+"You still choose when to restart. Package managers and Flatpak update Zap "
+"Faster themselves."
+msgstr ""
+"Anda tetap memilih kapan harus memulai ulang. Manajer paket dan Flatpak "
+"memperbarui Zap Faster sendiri."
+
+#: src/ui/settings.rs:962
+msgid "Archive progress"
+msgstr "Progres pengarsipan"
+
+#: src/ui/settings.rs:962
+msgid ""
+"Counts describe saved files and queued work. Unavailable includes oversized "
+"files and clips missing recovery keys; it does not prove that WhatsApp has "
+"no copy. History responses do not prove the archive is complete."
+msgstr ""
+"Jumlah menunjukkan file tersimpan dan pekerjaan antrean. Tidak tersedia "
+"mencakup file terlalu besar dan klip tanpa kunci pemulihan; ini tidak "
+"membuktikan WhatsApp tidak memiliki salinan. Respons riwayat tidak "
+"membuktikan arsip sudah lengkap."
+
+#: src/ui/settings.rs:964
+#, rust-format
+msgid "{count} file downloaded"
+msgid_plural "{count} files downloaded"
+msgstr[0] "{count} file diunduh"
+msgstr[1] "{count} file diunduh"
+
+#: src/ui/settings.rs:965
+#, rust-format
+msgid "{count} file waiting"
+msgid_plural "{count} files waiting"
+msgstr[0] "{count} file menunggu"
+msgstr[1] "{count} file menunggu"
+
+#: src/ui/settings.rs:966
+#, rust-format
+msgid "{count} file cancelled"
+msgid_plural "{count} files cancelled"
+msgstr[0] "{count} file dibatalkan"
+msgstr[1] "{count} file dibatalkan"
+
+#: src/ui/settings.rs:967
+#, rust-format
+msgid "{count} file unavailable"
+msgid_plural "{count} files unavailable"
+msgstr[0] "{count} file tidak tersedia"
+msgstr[1] "{count} file tidak tersedia"
+
+#: src/ui/settings.rs:969
+#, rust-format
+msgid "{size} MiB stored"
+msgstr "{size} MiB tersimpan"
+
+#: src/ui/settings.rs:972
+msgid "Oldest saved message: unknown"
+msgstr "Pesan tersimpan terlama: tidak diketahui"
+
+#: src/ui/settings.rs:972
+#, rust-format
+msgid "Oldest saved message: {date} (UTC)"
+msgstr "Pesan tersimpan terlama: {date} (UTC)"
+
+#: src/ui/settings.rs:973
+msgid "WhatsApp connection: disconnected"
+msgstr "Koneksi WhatsApp: terputus"
+
+#: src/ui/settings.rs:974
+msgid "Phone history: no request observed this session"
+msgstr "Riwayat ponsel: belum ada permintaan pada sesi ini"
+
+#: src/ui/settings.rs:975
+msgid "Phone history: waiting for a response"
+msgstr "Riwayat ponsel: menunggu respons"
+
+#: src/ui/settings.rs:976
+msgid "Phone history: response received"
+msgstr "Riwayat ponsel: respons diterima"
+
+#: src/ui/settings.rs:977
+msgid "Phone history: request failed or no response yet"
+msgstr "Riwayat ponsel: permintaan gagal atau belum ada respons"
+
+#: src/ui/settings.rs:980
+msgid "Background downloads paused at the storage limit."
+msgstr "Unduhan latar belakang dijeda karena batas penyimpanan."
+
+#: src/ui/settings.rs:981
+msgid "Background downloads paused: storage usage could not be measured."
+msgstr ""
+"Unduhan latar belakang dijeda: penggunaan penyimpanan tidak dapat diukur."
+
+#: src/ui/settings.rs:986
+msgid "Background media storage limit"
+msgstr "Batas penyimpanan media latar belakang"
+
+#: src/ui/settings.rs:987
+msgid ""
+"Pause new background downloads at this limit. Existing archived files are "
+"kept. Increase it to continue, or use 0 for unlimited (MiB)."
+msgstr ""
+"Jeda unduhan latar belakang baru saat mencapai batas ini. File arsip yang "
+"sudah ada tetap disimpan. Naikkan batas untuk melanjutkan, atau gunakan 0 "
+"untuk tanpa batas (MiB)."
+
+#: src/ui/settings.rs:997
+msgid "Unused cache cleanup"
+msgstr "Pembersihan cache yang tidak digunakan"
+
+#: src/ui/settings.rs:998
+msgid ""
+"Remove only old, unreferenced media-cache files. Archived attachments and "
+"background recovery files stay saved. Removed files may not be recoverable."
+msgstr ""
+"Hanya hapus berkas cache media lama yang tidak lagi dirujuk. Lampiran yang "
+"diarsipkan dan berkas pemulihan latar belakang tetap tersimpan. Berkas yang "
+"dihapus mungkin tidak dapat dipulihkan."
+
+#: src/ui/settings.rs:1003
+msgid "Remove unused files automatically"
+msgstr "Hapus berkas yang tidak digunakan secara otomatis"
+
+#: src/ui/settings.rs:1006
+msgid "Keep unused files for this many days"
+msgstr "Simpan berkas yang tidak digunakan selama jumlah hari ini"
+
+#: src/ui/settings.rs:1010
+msgid "Keep all files (default)"
+msgstr "Simpan semua berkas (bawaan)"
+
+#: src/ui/settings.rs:1019
+msgid "Encrypted account backups"
+msgstr "Cadangan akun terenkripsi"
+
+#: src/ui/settings.rs:1020
+msgid ""
+"Save the account and downloaded files with a passphrase. Restore into a "
+"separate account, initially offline."
+msgstr ""
+"Simpan akun dan file unduhan dengan frasa sandi. Pulihkan ke akun terpisah "
+"yang awalnya offline."
+
+#: src/ui/settings.rs:1023
+msgid "Back up…"
+msgstr "Cadangkan…"
+
+#: src/ui/settings.rs:1027
+msgid "Restore…"
+msgstr "Pulihkan…"
+
+#: src/ui/settings.rs:1032
+msgid "Review merge…"
+msgstr "Tinjau penggabungan…"
+
+#: src/ui/settings.rs:1039
+msgid "Restored account connection"
+msgstr "Koneksi akun yang dipulihkan"
+
+#: src/ui/settings.rs:1042
+msgid ""
+"This account stays offline until you resume its saved linked-device session."
+msgstr ""
+"Akun ini tetap offline sampai Anda melanjutkan sesi perangkat tertaut yang "
+"tersimpan."
+
+#: src/ui/settings.rs:1049
+msgid "Resume connection…"
+msgstr "Lanjutkan koneksi…"
+
+#: src/ui/settings.rs:1062
+msgid "Download folders"
+msgstr "Folder unduhan"
+
+#: src/ui/settings.rs:1065
+msgid ""
+"Organize future downloads in your chosen folder. Existing files stay where "
+"they are."
+msgstr ""
+"Atur unduhan berikutnya dalam folder yang dipilih. File yang sudah ada tetap"
+" di tempatnya."
+
+#: src/ui/settings.rs:1091
+msgid "Include older files in automatic downloads"
+msgstr "Sertakan file lama dalam unduhan otomatis"
+
+#: src/ui/settings.rs:1092
+msgid ""
+"Copy files from before automatic downloads were enabled into your chosen "
+"folder. Full history recovery still keeps older files in the private "
+"archive."
+msgstr ""
+"Salin file dari sebelum unduhan otomatis diaktifkan ke folder pilihan Anda. "
+"Pemulihan riwayat lengkap tetap menyimpan file lama di arsip pribadi."
+
+#: src/ui/settings.rs:1096
+msgid "Preserve original download names"
+msgstr "Pertahankan nama unduhan asli"
+
+#: src/ui/settings.rs:1097
+msgid ""
+"Use the original document filename inside your chosen folders. Unsafe "
+"characters are removed and duplicate names get a number."
+msgstr ""
+"Gunakan nama file dokumen asli di folder pilihan Anda. Karakter yang tidak "
+"aman dihapus dan nama duplikat diberi nomor."
+
+#: src/ui/settings.rs:1101
+msgid "Readable download names"
+msgstr "Nama unduhan yang mudah dibaca"
+
+#: src/ui/settings.rs:1102
+msgid ""
+"Include the chat, message date (UTC), file type and original document name. "
+"The private media archive keeps its own files."
+msgstr ""
+"Sertakan chat, tanggal pesan (UTC), jenis file, dan nama dokumen asli. Arsip"
+" media pribadi menyimpan filenya sendiri."
+
+#: src/ui/settings.rs:1118
+msgid "Space"
+msgstr "Ruang"
+
+#: src/ui/settings.rs:1120 src/ui/settings.rs:1886
+msgid "Videos"
+msgstr "Video"
+
+#: src/ui/settings.rs:1121 src/ui/settings.rs:1894
+msgid "Stickers and GIFs"
+msgstr "Paket Stiker"
+
+#: src/ui/settings.rs:1123 src/ui/settings.rs:1204
+msgid "Messages"
+msgstr "Suara pesan masuk"
+
+#: src/ui/settings.rs:1195
+msgid "Hides chat content until hovered. Toggle quickly with Ctrl+Shift+H."
+msgstr ""
+"Menyembunyikan isi chat sampai kursor diarahkan ke sana. Alihkan cepat "
+"dengan Ctrl+Shift+H."
+
+#: src/ui/settings.rs:1200
+msgid "Chat previews"
+msgstr "Pratinjau chat"
+
+#: src/ui/settings.rs:1205 src/ui/gallery.rs:38
+msgid "Media"
+msgstr "Media"
+
+#: src/ui/settings.rs:1206
+msgid "Names"
+msgstr "Nama"
+
+#: src/ui/settings.rs:1207
+msgid "Avatars"
+msgstr "Avatar"
+
+#: src/ui/settings.rs:1256
+msgid ""
+"Time without using Zap Faster, also counted while it is in the tray. "
+"Ctrl+Shift+L locks it at once."
+msgstr ""
+"Waktu tidak menggunakan Zap Faster, juga dihitung saat berada di baki "
+"sistem. Tekan Ctrl+Shift+L untuk mengunci seketika."
+
+#: src/ui/settings.rs:1505
+msgid "Choose another font file"
+msgstr "Pilih file font lain"
+
+#: src/ui/settings.rs:1507 src/app.rs:8710
+msgid "Choose a font file"
+msgstr "Pilih file font"
+
+#: src/ui/settings.rs:1848
+msgid ""
+"Space taken by the pictures, videos, stickers, and GIFs Zap Faster has "
+"downloaded. The size is the one WhatsApp declared. Documents and audio count"
+" under Other."
+msgstr ""
+"Ruang yang digunakan gambar, video, stiker, dan GIF yang diunduh Zap Faster."
+" Ukurannya berdasarkan informasi WhatsApp. Dokumen dan audio dihitung dalam "
+"Lainnya."
+
+#: src/ui/settings.rs:1866
+#, rust-format
+msgid "{} message"
+msgid_plural "{} messages"
+msgstr[0] "{} pesan"
+msgstr[1] "{} pesan"
+
+#: src/app.rs:1560
+msgid "Restoring encrypted archive…"
+msgstr "Memulihkan arsip terenkripsi…"
+
+#: src/app.rs:1606
+msgid "Could not start archive restore"
+msgstr "Tidak dapat memulai pemulihan arsip"
+
+#: src/app.rs:1686
+msgid ""
+"Archive restored. Open the account switcher to view the offline archive."
+msgstr "Arsip dipulihkan. Buka pengalih akun untuk melihat arsip offline."
+
+#: src/app.rs:1693
+msgid "Archive restore cancelled"
+msgstr "Pemulihan arsip dibatalkan"
+
+#: src/app.rs:1697
+#, rust-format
+msgid "Archive restore failed: {error}"
+msgstr "Pemulihan arsip gagal: {error}"
+
+#: src/app.rs:4274
+#, rust-format
+msgid ""
+"Backup merged: {added} messages added, {edited} edited snapshots updated, "
+"{removed} confirmed deletions applied, {conflicts} alternatives retained for"
+" review."
+msgstr ""
+"Cadangan digabungkan: {added} pesan ditambahkan, {edited} versi suntingan "
+"diperbarui, {removed} penghapusan terkonfirmasi diterapkan, {conflicts} "
+"alternatif disimpan untuk ditinjau."
+
+#: src/app.rs:4293
+#, rust-format
+msgid "Archive backup saved ({count} file, {size})"
+msgid_plural "Archive backup saved ({count} files, {size})"
+msgstr[0] "Cadangan arsip disimpan ({count} file, {size})"
+msgstr[1] "Cadangan arsip disimpan ({count} file, {size})"
+
+#: src/app.rs:4302
+msgid "Archive backup cancelled"
+msgstr "Pencadangan arsip dibatalkan"
+
+#: src/app.rs:4306
+#, rust-format
+msgid "Archive backup failed: {error}"
+msgstr "Pencadangan arsip gagal: {error}"
+
+#: src/app.rs:4398
+msgid ""
+"This message could not be sent. Check your connection before sending it "
+"again."
+msgstr ""
+"Pesan ini tidak dapat dikirim. Periksa koneksi sebelum mengirimnya lagi."
+
+#: src/app.rs:4403
+msgid "This message could not be sent. Try again later."
+msgstr "Pesan ini tidak dapat dikirim. Coba lagi nanti."
+
+#: src/app.rs:4467
+msgid "Could not save the archive change. Try again."
+msgstr "Perubahan arsip tidak dapat disimpan. Coba lagi."
+
+#: src/app.rs:4474
+msgid "Could not save the star change"
+msgstr "Perubahan bintang tidak dapat disimpan"
+
+#: src/app.rs:4477
+msgid "Could not read starred messages"
+msgstr "Pesan berbintang tidak dapat dibaca"
+
+#: src/app.rs:4481
+msgid "Wait for the previous pin request to finish"
+msgstr "Tunggu hingga permintaan penyematan sebelumnya selesai"
+
+#: src/app.rs:4488
+msgid "This message is not stored on this computer"
+msgstr "Pesan ini tidak tersimpan di komputer ini"
+
+#: src/app.rs:4491
+msgid "Could not pin this message"
+msgstr "Pesan ini tidak dapat disematkan"
+
+#: src/app.rs:4494
+msgid "Could not save the pin change"
+msgstr "Perubahan sematan tidak dapat disimpan"
+
+#: src/app.rs:4499
+msgid "Pin request timed out; confirm its state on your phone before retrying"
+msgstr ""
+"Permintaan penyematan kehabisan waktu; pastikan statusnya di ponsel sebelum "
+"mencoba lagi"
+
+#: src/app.rs:4505
+msgid "Could not confirm the pin request; check your phone before retrying"
+msgstr ""
+"Permintaan penyematan tidak dapat dikonfirmasi; periksa ponsel sebelum "
+"mencoba lagi"
+
+#: src/app.rs:5130
+msgid "Not sent: Zap Faster is not connected to WhatsApp."
+msgstr "Tidak terkirim: Zap Faster tidak terhubung ke WhatsApp."
+
+#: src/app.rs:5874 src/app.rs:21126
+msgid "This message can no longer be edited"
+msgstr "Pesan ini sudah tidak tersedia lagi."
+
+#: src/app.rs:6342
+msgid "Could not use this font"
+msgstr "Tidak dapat menggunakan font ini"
+
+#: src/app.rs:8529 src/ui/labels.rs:292
+#, rust-format
+msgid "You have {limit} labels, the most Zap Faster keeps."
+msgstr "Anda memiliki {limit} label, batas maksimal yang disimpan Zap Faster."
+
+#: src/app.rs:8711
+msgid "Font files"
+msgstr "File font"
+
+#: src/app.rs:8977
+msgid "Saving encrypted archive backup…"
+msgstr "Menyimpan cadangan arsip terenkripsi…"
+
+#: src/app.rs:9938
+msgid "Cannot play this video here; opening it in your system player"
+msgstr "Video ini tidak dapat diputar di sini. Membukanya di pemutar sistem."
+
+#: src/app.rs:9942
+msgid ""
+"The selected audio output is unavailable. Choose an output and resume "
+"playback."
+msgstr ""
+"Keluaran audio yang dipilih tidak tersedia. Pilih keluaran dan lanjutkan "
+"pemutaran."
+
+#: src/app.rs:21133
+msgid "Could not send the edit"
+msgstr "Tidak dapat menggunakan gambar ini"
+
+#: src/app.rs:21136
+msgid "The edit was sent but could not be saved locally"
+msgstr "Hasil edit terkirim tetapi tidak dapat disimpan secara lokal"
+
+#: src/file_drag.rs:16
+msgid "Could not drag the attachment"
+msgstr "Tidak dapat menggunakan gambar ini"
+
+#: src/file_drag.rs:20
+msgid "The attachment is unavailable. Download it before dragging it."
+msgstr "Lampiran tidak tersedia. Unduh sebelum menyeretnya."
+
+#: src/file_drag.rs:25
+msgid "Dragging attachments out is currently available on Windows only."
+msgstr "Menyeret lampiran keluar saat ini hanya tersedia di Windows."
+
+#: src/ui/labels.rs:228
+msgid "Focus on selected labels"
+msgstr "Fokus pada label yang dipilih"
+
+#: src/ui/labels.rs:238
+msgid "Allow mentions and replies outside focus labels"
+msgstr "Izinkan sebutan dan balasan di luar label fokus"
+
+#: src/ui/labels.rs:248
+msgid ""
+"Focus filters this account's chat list and notifications. Chat sounds take "
+"priority, then mention sounds. Other messages use the first assigned label "
+"sound in this list."
+msgstr ""
+"Fokus menyaring daftar chat dan notifikasi akun ini. Suara chat "
+"diprioritaskan, lalu suara sebutan. Pesan lain menggunakan suara label "
+"pertama yang ditetapkan dalam daftar ini."
+
+#: src/ui/labels.rs:360
+msgid "Include in focus"
+msgstr "Sertakan dalam fokus"
+
+#: src/ui/labels.rs:374
+msgid "Default sound"
+msgstr "Suara default"
+
+#: src/ui/labels.rs:375
+msgid "Pidgin"
+msgstr "Pidgin"
+
+#: src/ui/labels.rs:382
+msgid "System sound"
+msgstr "Suara sistem"
+
+#: src/ui/labels.rs:384
+msgid "No sound"
+msgstr "Tanpa suara"
+
+#: src/ui/image_preview.rs:684
+msgid "Play video"
+msgstr "Putar video"
+
+#: src/ui/lock.rs:17
+msgid "Zap Faster is locked"
+msgstr "Zap Faster terkunci"
+
+#: src/account.rs:331
+#, rust-format
+msgid "Offline archive {id}"
+msgstr "Arsip offline {id}"
+
+#: src/ui/accounts.rs:79
+msgid "Offline archive"
+msgstr "Arsip offline"
+
+#: src/ui/accounts.rs:236
+#, rust-format
+msgid "{count} unread chat"
+msgid_plural "{count} unread chats"
+msgstr[0] "{count} chat belum dibaca"
+msgstr[1] "{count} chat belum dibaca"
+
+#: src/ui/gallery.rs:41
+msgid "Documents"
+msgstr "Dokumen"
+
+#: src/ui/gallery.rs:43
+msgid "Links"
+msgstr "Tautan"
+
+#: src/ui/gallery.rs:53
+msgid "Refresh"
+msgstr "Muat ulang"
+
+#: src/ui/gallery.rs:68
+msgid "Could not load this chat's media."
+msgstr "Media obrolan ini tidak dapat dimuat."
+
+#: src/ui/gallery.rs:84
+msgid "This list is limited. Use chat search for older items."
+msgstr ""
+"Daftar ini dibatasi. Gunakan pencarian obrolan untuk menemukan item yang "
+"lebih lama."
+
+#: src/ui/gallery.rs:193
+msgid "Link"
+msgstr "Tautan"
+
+#: src/ui/login.rs:12
+msgid "A native WhatsApp client."
+msgstr "Klien WhatsApp native."
+
+#: src/ui/login.rs:98 src/ui/call.rs:23
+msgid "Connecting to WhatsApp…"
+msgstr "Menghubungkan ke WhatsApp…"
+
+#: src/ui/login.rs:105
+msgid "Linked. Waiting for your chats…"
+msgstr "Tertaut. Menunggu chat Anda…"
+
+#: src/ui/login.rs:114
+msgid "This computer was unlinked from your phone. Requesting a new code."
+msgstr "Tautan komputer ini diputus dari ponsel Anda. Meminta kode baru."
+
+#: src/ui/login.rs:123
+msgid "Requesting a new code…"
+msgstr "Meminta kode baru…"
+
+#: src/ui/login.rs:174
+#, rust-format
+msgid "Requesting a code for +{phone}…"
+msgstr "Meminta kode untuk +{phone}…"
+
+#: src/ui/login.rs:183
+msgid "Waiting for a code from WhatsApp…"
+msgstr "Menunggu kode dari WhatsApp…"
+
+#: src/ui/login.rs:194
+msgid ""
+"Unofficial client. Using it may be against WhatsApp's terms of service."
+msgstr ""
+"Klien tidak resmi. Penggunaannya mungkin melanggar ketentuan layanan "
+"WhatsApp."
+
+#: src/ui/login.rs:219
+msgid "Link this computer"
+msgstr "Tautkan komputer ini"
+
+#: src/ui/login.rs:234 src/ui/login.rs:297
+msgid "Open WhatsApp on your phone"
+msgstr "Buka WhatsApp di ponsel Anda"
+
+#: src/ui/login.rs:235 src/ui/login.rs:298
+msgid "Tap Menu or Settings, then Linked devices"
+msgstr "Ketuk Menu atau Setelan, lalu Perangkat tertaut"
+
+#: src/ui/login.rs:238
+msgid "Tap Link a device and point the phone at this code"
+msgstr "Ketuk Tautkan perangkat dan arahkan ponsel ke kode ini"
+
+#: src/ui/login.rs:256
+msgid "Link with phone number instead"
+msgstr "Tautkan dengan nomor telepon"
+
+#: src/ui/login.rs:270
+msgid "Enter this code on your phone"
+msgstr "Masukkan kode ini di ponsel Anda"
+
+#: src/ui/login.rs:277
+#, rust-format
+msgid "for +{phone}"
+msgstr "untuk +{phone}"
+
+#: src/ui/login.rs:301
+msgid "Tap Link a device, then Link with phone number instead"
+msgstr "Ketuk Tautkan perangkat, lalu Tautkan dengan nomor telepon"
+
+#: src/ui/login.rs:323
+msgid "Copy code"
+msgstr "Salin kode"
+
+#: src/ui/login.rs:346
+msgid "How much history would you like to sync?"
+msgstr "Berapa banyak riwayat yang ingin disinkronkan?"
+
+#: src/ui/login.rs:355
+msgid ""
+"Full history recovers as much as WhatsApp makes available, with older "
+"messages and files continuing in the background."
+msgstr ""
+"Riwayat lengkap memulihkan sebanyak yang disediakan WhatsApp, dengan pesan "
+"dan file lama terus diunduh di latar belakang."
+
+#: src/ui/login.rs:365
+msgid ""
+"This can take a long time and use significant internet data and disk space. "
+"Keep your phone online during recovery. Some older messages or files may be "
+"unavailable."
+msgstr ""
+"Ini dapat memakan waktu lama serta menggunakan banyak data internet dan "
+"ruang disk. Biarkan ponsel online selama pemulihan. Sebagian pesan atau file"
+" lama mungkin tidak tersedia."
+
+#: src/ui/login.rs:387
+msgid ""
+"Recent history starts with recent conversations for a quicker setup. You can"
+" enable older-history recovery later in Settings."
+msgstr ""
+"Riwayat terbaru dimulai dari percakapan terbaru agar pengaturan lebih cepat."
+" Pemulihan riwayat lama dapat diaktifkan nanti di Setelan."
+
+#: src/ui/archive_backup.rs:19
+msgid "Restore an account backup"
+msgstr "Pulihkan cadangan akun"
+
+#: src/ui/archive_backup.rs:21
+msgid "Back up this account"
+msgstr "Cadangkan akun ini"
+
+#: src/ui/archive_backup.rs:27
+msgid "Merge messages into this account"
+msgstr "Gabungkan pesan ke akun ini"
+
+#: src/ui/archive_backup.rs:30
+msgid ""
+"A matching account identity and an exact preview are required. Current "
+"messages and work queues stay intact. Conflicting edits and imported pending"
+" work are retained separately without sending."
+msgstr ""
+"Identitas akun yang cocok dan pratinjau yang tepat diperlukan. Pesan dan "
+"antrean kerja saat ini tetap utuh. Suntingan yang bertentangan dan pekerjaan"
+" tertunda yang diimpor disimpan secara terpisah tanpa mengirim apa pun."
+
+#: src/ui/archive_backup.rs:34
+msgid ""
+"Merge historical messages and files. The current linked-device identity "
+"stays in use."
+msgstr ""
+"Gabungkan pesan dan file historis. Identitas perangkat tertaut saat ini "
+"tetap digunakan."
+
+#: src/ui/archive_backup.rs:36
+msgid ""
+"Restore into a separate account. Existing accounts stay intact. Full backups"
+" include the linked-device identity; archive-only backups open offline."
+msgstr ""
+"Pulihkan ke akun terpisah. Akun yang sudah ada tetap utuh. Cadangan lengkap "
+"mencakup identitas perangkat tertaut; cadangan khusus arsip dibuka offline."
+
+#: src/ui/archive_backup.rs:38
+msgid ""
+"Save this account, its linked-device identity and downloaded files in an "
+"encrypted backup. The connection pauses while saving. Keep the passphrase "
+"safe: it cannot be recovered."
+msgstr ""
+"Simpan akun ini, identitas perangkat tertaut, dan file unduhan dalam "
+"cadangan terenkripsi. Koneksi dijeda selama penyimpanan. Simpan frasa sandi "
+"dengan aman: frasa tersebut tidak dapat dipulihkan."
+
+#: src/ui/archive_backup.rs:43
+msgid "Backup passphrase (at least 12 characters)"
+msgstr "Frasa sandi cadangan (minimal 12 karakter)"
+
+#: src/ui/archive_backup.rs:51
+msgid "Repeat passphrase"
+msgstr "Ulangi frasa sandi"
+
+#: src/ui/archive_backup.rs:68
+msgid "Choose backup…"
+msgstr "Pilih cadangan…"
+
+#: src/ui/archive_backup.rs:70
+msgid "Save backup…"
+msgstr "Simpan cadangan…"
+
+#: src/ui/archive_backup.rs:102
+msgid "Merge this backup?"
+msgstr "Gabungkan cadangan ini?"
+
+#: src/ui/archive_backup.rs:103
+#, rust-format
+msgid ""
+"{added} messages added, {edited} edited snapshots updated. {removed} current"
+" messages removed by confirmed backup deletions. {protected} deleted or "
+"pending-deletion messages are protected. {conflicts} conflicting "
+"alternatives and {pending} imported pending records are retained separately."
+msgstr ""
+"{added} pesan ditambahkan, {edited} versi suntingan diperbarui. {removed} "
+"pesan saat ini dihapus oleh penghapusan terkonfirmasi dalam cadangan. "
+"{protected} pesan yang dihapus atau menunggu penghapusan dilindungi. "
+"{conflicts} alternatif yang bertentangan dan {pending} catatan tertunda yang"
+" diimpor disimpan secara terpisah."
+
+#: src/ui/archive_backup.rs:107
+msgid ""
+"Session credentials and current pending work are preserved. Confirmed backup"
+" deletions listed above are applied. Imported pending sends never run. "
+"Different edited snapshots without a revision timestamp keep the current "
+"version and retain the imported alternative in the encrypted archive."
+msgstr ""
+"Kredensial sesi dan pekerjaan tertunda saat ini tetap dipertahankan. "
+"Penghapusan yang dikonfirmasi dari cadangan dan tercantum di atas akan "
+"diterapkan. Pengiriman tertunda yang diimpor tidak pernah dijalankan. Versi "
+"suntingan berbeda tanpa stempel waktu revisi mempertahankan versi saat ini "
+"dan menyimpan alternatif yang diimpor di arsip terenkripsi."
+
+#: src/ui/archive_backup.rs:110
+msgid ""
+"If the current archive changes before confirmation, prepare a new preview."
+msgstr ""
+"Jika arsip saat ini berubah sebelum konfirmasi, siapkan pratinjau baru."
+
+#: src/ui/archive_backup.rs:113
+msgid "Merge"
+msgstr "Gabungkan"
+
+#: src/ui/call.rs:19
+msgid "Starting call"
+msgstr "Memulai panggilan"
+
+#: src/ui/call.rs:24
+msgid "Cancel call"
+msgstr "Batalkan panggilan"
+
+#: src/ui/call.rs:53 src/ui/call.rs:177
+msgid "WhatsApp contact"
+msgstr "Kontak WhatsApp"
+
+#: src/ui/call.rs:66
+msgid "Connected"
+msgstr "Terhubung"
+
+#: src/ui/call.rs:68 src/ui/call.rs:386
+msgid "Call failed"
+msgstr "Panggilan gagal"
+
+#: src/ui/call.rs:83
+#, rust-format
+msgid "{device} is unavailable; using the system default"
+msgstr "{device} tidak tersedia; menggunakan default sistem"
+
+#: src/ui/call.rs:90
+msgid "Answer with video"
+msgstr "Jawab dengan video"
+
+#: src/ui/call.rs:96
+msgid "Answer without camera"
+msgstr "Jawab tanpa kamera"
+
+#: src/ui/call.rs:98
+msgid "Answer"
+msgstr "Jawab"
+
+#: src/ui/call.rs:118
+msgid "End call"
+msgstr "Akhiri panggilan"
+
+#: src/ui/call.rs:125
+msgid "Opening the camera…"
+msgstr "Membuka kamera…"
+
+#: src/ui/call.rs:126
+msgid "Cancel video"
+msgstr "Batalkan video"
+
+#: src/ui/call.rs:130
+msgid "Turn camera off"
+msgstr "Matikan kamera"
+
+#: src/ui/call.rs:135
+msgid "The other person requested video."
+msgstr "Lawan bicara meminta video."
+
+#: src/ui/call.rs:139
+msgid "Accept video and turn camera on"
+msgstr "Terima video dan aktifkan kamera"
+
+#: src/ui/call.rs:141
+msgid "Turn camera on"
+msgstr "Aktifkan kamera"
+
+#: src/ui/call.rs:148
+msgid "Keep voice only"
+msgstr "Tetap hanya suara"
+
+#: src/ui/call.rs:158
+msgid "Calls and audio devices"
+msgstr "Panggilan dan perangkat audio"
+
+#: src/ui/call.rs:194
+msgid "No calls recorded on this computer yet."
+msgstr "Belum ada riwayat panggilan di komputer ini."
+
+#: src/ui/call.rs:245
+msgid "Waiting for the other person's video…"
+msgstr "Menunggu video lawan bicara…"
+
+#: src/ui/call.rs:248
+msgid "Your camera"
+msgstr "Kamera Anda"
+
+#: src/ui/call.rs:318
+msgid "Selected camera unavailable"
+msgstr "Kamera yang dipilih tidak tersedia"
+
+#: src/ui/call.rs:320
+msgid "Saved camera (refresh devices)"
+msgstr "Kamera tersimpan (perbarui daftar perangkat)"
+
+#: src/ui/call.rs:344
+msgid "Used next time the camera is turned on."
+msgstr "Digunakan saat kamera dinyalakan berikutnya."
+
+#: src/ui/call.rs:348
+msgid "Camera discovery failed. Try refreshing devices."
+msgstr "Pencarian kamera gagal. Coba perbarui daftar perangkat."
+
+#: src/ui/call.rs:354
+msgid "Refresh devices"
+msgstr "Perbarui daftar perangkat"
+
+#: src/ui/call.rs:375
+msgid "Incoming"
+msgstr "Masuk"
+
+#: src/ui/call.rs:376
+msgid "Outgoing"
+msgstr "Keluar"
+
+#: src/ui/call.rs:382
+msgid "Answered"
+msgstr "Dijawab"
+
+#: src/ui/call.rs:396
+msgid "No audio is arriving. Check the connection."
+msgstr "Tidak ada audio masuk. Periksa koneksi."
+
+#: src/ui/call.rs:398
+msgid "This audio format cannot be decoded by this build."
+msgstr "Format audio ini tidak dapat didekode oleh build ini."
+
+#: src/ui/call.rs:401
+msgid "The incoming audio could not be authenticated."
+msgstr "Audio masuk tidak dapat diautentikasi."
+
+#: src/ui/call.rs:405
+msgid "Incoming audio cannot be played. Try reconnecting the call."
+msgstr "Audio masuk tidak dapat diputar. Coba sambungkan ulang panggilan."
+
+#: src/ui/statuses.rs:21
+msgid ""
+"Statuses received while Zap Faster is running. They expire after 24 hours. "
+"Viewing does not send a read receipt."
+msgstr ""
+"Status yang diterima saat Zap Faster berjalan. Status kedaluwarsa setelah 24"
+" jam. Melihatnya tidak mengirim tanda sudah dibaca."
+
+#: src/ui/statuses.rs:38
+msgid "No recent statuses received"
+msgstr "Tidak ada status terbaru yang diterima"
+
+#: src/ui/statuses.rs:75
+msgid "Content hidden"
+msgstr "Konten disembunyikan"
+
+#: src/ui/statuses.rs:126
+msgid "Open status"
+msgstr "Buka status"
+
+#: src/ui/statuses.rs:143
+msgid "Could not download status. Click to retry."
+msgstr "Tidak dapat mengunduh status. Klik untuk mencoba lagi."
+
+#: src/ui/statuses.rs:153
+msgid "Download status"
+msgstr "Unduh status"
+
+msgid "Loading media…"
+msgstr "Memuat media…"
+
+msgid "Searching…"
+msgstr "Mencari…"
+
+msgid "Checking password…"
+msgstr "Memeriksa kata sandi…"
+
+msgid "Passphrases do not match."
+msgstr "Kata sandi tidak cocok."
+
+msgid "Play / pause"
+msgstr "Putar / jeda"
+
+msgid "Preparing call…"
+msgstr "Menyiapkan panggilan…"
+
+#: src/ui/call.rs
+msgid ""
+"Microphone cleanup is unavailable. Audio is being sent without echo "
+"cancellation."
+msgstr "Pemrosesan mikrofon tidak tersedia. Audio dikirim tanpa peredam gema."
+
+#: src/ui/call.rs
+msgid "Minimize call"
+msgstr "Minimalkan panggilan"
+
+#: src/ui/call.rs
+msgid "Restore call"
+msgstr "Pulihkan panggilan"
+
 #~ msgid "Back to the chats"
 #~ msgstr "Kembali ke chat"
 
@@ -2871,3 +4333,10 @@ msgstr "Membuat grup…"
 #, fuzzy
 #~ msgid "Next pinned message"
 #~ msgstr "{} pesan belum dibaca"
+
+#~ msgid ""
+#~ "Up to five pages per chat this session. Your phone may not send all history."
+#~ " No automatic media downloads."
+#~ msgstr ""
+#~ "Hingga lima halaman per chat dalam sesi ini. Ponsel mungkin tidak mengirim "
+#~ "seluruh riwayat. Tanpa unduhan media otomatis."

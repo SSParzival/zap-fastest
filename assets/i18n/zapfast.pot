@@ -7,8 +7,7 @@
 msgid ""
 msgstr ""
 "Project-Id-Version: ZapFast\n"
-"Report-Msgid-Bugs-To: https://github.com/crmne/zapfast/issues/new?"
-"template=translation.yml\n"
+"Report-Msgid-Bugs-To: https://github.com/crmne/zapfast/issues/new?template=translation.yml\n"
 "POT-Creation-Date: 2026-10-23 15:36+0200\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
@@ -483,8 +482,8 @@ msgstr ""
 
 #: src/ui/conversation.rs:1861
 msgid ""
-"Enter sends · Shift+Enter for a new line · *bold* _italic_ ~strike~ · Ctrl+V "
-"pastes a picture"
+"Enter sends · Shift+Enter for a new line · *bold* _italic_ ~strike~ · Ctrl+V"
+" pastes a picture"
 msgstr ""
 
 #: src/ui/conversation.rs:1863
@@ -706,7 +705,8 @@ msgid "View once video. For your privacy, it opens only on your phone."
 msgstr ""
 
 #: src/ui/conversation.rs:6926
-msgid "View once voice message. For your privacy, it opens only on your phone."
+msgid ""
+"View once voice message. For your privacy, it opens only on your phone."
 msgstr ""
 
 #: src/ui/conversation.rs:6930
@@ -829,8 +829,8 @@ msgstr ""
 #: src/ui/dialogs.rs:938
 #, rust-format
 msgid ""
-"This deletes your chat with {name}, including all messages, on this computer "
-"and on your phone. It cannot be undone."
+"This deletes your chat with {name}, including all messages, on this computer"
+" and on your phone. It cannot be undone."
 msgstr ""
 
 #: src/ui/dialogs.rs:944
@@ -902,10 +902,10 @@ msgstr ""
 
 #: src/ui/dialogs.rs:1260
 msgid ""
-"ZapFast keeps your unreadable archive as a separate file, creates a new one, "
-"and asks you to link again. Linking again brings back recent history from "
-"your phone. Afterwards, remove the old ZapFast entry under Linked devices on "
-"your phone."
+"ZapFast keeps your unreadable archive as a separate file, creates a new one,"
+" and asks you to link again. Linking again brings back recent history from "
+"your phone. Afterwards, remove the old ZapFast entry under Linked devices on"
+" your phone."
 msgstr ""
 
 #: src/ui/dialogs.rs:1264
@@ -932,8 +932,8 @@ msgstr ""
 
 #: src/ui/dialogs.rs:1277
 msgid ""
-"This removes these messages from your phone and linked devices. Other people "
-"keep their copy. Connect to WhatsApp to delete them. This cannot be undone."
+"This removes these messages from your phone and linked devices. Other people"
+" keep their copy. Connect to WhatsApp to delete them. This cannot be undone."
 msgstr ""
 
 #: src/ui/dialogs.rs:1278
@@ -976,8 +976,8 @@ msgstr ""
 
 #: src/ui/dialogs.rs:1371
 msgid ""
-"This removes the device from WhatsApp and deletes the chats stored here. You "
-"can link again with a new code."
+"This removes the device from WhatsApp and deletes the chats stored here. You"
+" can link again with a new code."
 msgstr ""
 
 #: src/ui/dialogs.rs:1373 src/ui/lock.rs:139
@@ -1150,8 +1150,8 @@ msgstr ""
 
 #: src/ui/settings.rs:448
 msgid ""
-"Asks your phone in the background for older messages in the open, pinned and "
-"ten most recent chats."
+"Asks your phone in the background for older messages in the open, pinned and"
+" ten most recent chats."
 msgstr ""
 
 #: src/ui/settings.rs:455
@@ -1429,8 +1429,8 @@ msgstr ""
 
 #: src/ui/settings.rs:902
 msgid ""
-"Asks for a password at start and after a while unused. It keeps people using "
-"this computer out of your chats and encrypts nothing more. A forgotten "
+"Asks for a password at start and after a while unused. It keeps people using"
+" this computer out of your chats and encrypts nothing more. A forgotten "
 "password means unlinking."
 msgstr ""
 
@@ -2139,8 +2139,8 @@ msgstr ""
 
 #: src/ui/labels.rs:311
 msgid ""
-"No labels yet. Create one above, then add chats to it from their right-click "
-"menu."
+"No labels yet. Create one above, then add chats to it from their right-click"
+" menu."
 msgstr ""
 
 #: src/ui/labels.rs:346
@@ -2227,8 +2227,8 @@ msgstr ""
 
 #: src/ui/picker.rs:1448
 msgid ""
-"Start a pack, then right-click any sticker to add it. Or turn a picture into "
-"a sticker."
+"Start a pack, then right-click any sticker to add it. Or turn a picture into"
+" a sticker."
 msgstr ""
 
 #: src/ui/picker.rs:1460
@@ -2286,7 +2286,8 @@ msgstr ""
 
 #: src/ui/pane.rs:346
 #, rust-format
-msgid "Only the newest {} matches are listed. Narrow the search or pick a day."
+msgid ""
+"Only the newest {} matches are listed. Narrow the search or pick a day."
 msgstr ""
 
 #: src/ui/pane.rs:435
@@ -2730,4 +2731,1356 @@ msgstr[1] ""
 
 #: src/ui/new_group.rs:410
 msgid "Creating the group…"
+msgstr ""
+
+#: src/util.rs:383
+#, rust-format
+msgid "{day} {month}"
+msgstr ""
+
+#: src/util.rs:390
+#, rust-format
+msgid "{date}, {year}"
+msgstr ""
+
+#: src/util.rs:394
+#, rust-format
+msgid "{label} ({date})"
+msgstr ""
+
+#: src/util.rs:462
+msgctxt "date month"
+msgid "January"
+msgstr ""
+
+#: src/util.rs:463
+msgctxt "date month"
+msgid "February"
+msgstr ""
+
+#: src/util.rs:464
+msgctxt "date month"
+msgid "March"
+msgstr ""
+
+#: src/util.rs:465
+msgctxt "date month"
+msgid "April"
+msgstr ""
+
+#: src/util.rs:466
+msgctxt "date month"
+msgid "May"
+msgstr ""
+
+#: src/util.rs:467
+msgctxt "date month"
+msgid "June"
+msgstr ""
+
+#: src/util.rs:468
+msgctxt "date month"
+msgid "July"
+msgstr ""
+
+#: src/util.rs:469
+msgctxt "date month"
+msgid "August"
+msgstr ""
+
+#: src/util.rs:470
+msgctxt "date month"
+msgid "September"
+msgstr ""
+
+#: src/util.rs:471
+msgctxt "date month"
+msgid "October"
+msgstr ""
+
+#: src/util.rs:472
+msgctxt "date month"
+msgid "November"
+msgstr ""
+
+#: src/util.rs:473
+msgctxt "date month"
+msgid "December"
+msgstr ""
+
+#: src/ui/chats.rs:509
+msgid "Leave focus mode"
+msgstr ""
+
+#: src/ui/chats.rs:588 src/ui/statuses.rs:13
+msgid "Status"
+msgstr ""
+
+#: src/ui/chats.rs:712
+msgid "Load more"
+msgstr ""
+
+#: src/ui/chats.rs:2387
+msgid "Remove VIP indicator"
+msgstr ""
+
+#: src/ui/chats.rs:2389
+msgid "Mark as VIP"
+msgstr ""
+
+#: src/ui/chats.rs:2488
+msgid "Notification sound"
+msgstr ""
+
+#: src/ui/conversation.rs:210
+#, rust-format
+msgid "Pinned message: {}"
+msgstr ""
+
+#: src/ui/conversation.rs:238 src/ui/conversation.rs:240
+msgid "Next pinned message"
+msgstr ""
+
+#: src/ui/conversation.rs:1291
+msgid "Preparing attachment"
+msgstr ""
+
+#: src/ui/conversation.rs:1315
+msgid "Channels are read-only in Zap Faster"
+msgstr ""
+
+#: src/ui/conversation.rs:4135
+msgid "Downloading voice message…"
+msgstr ""
+
+#: src/ui/conversation.rs:4142
+#, rust-format
+msgid "Downloading Whisper large-v3-turbo… {percent}%"
+msgstr ""
+
+#: src/ui/conversation.rs:4149
+msgid "Downloading Whisper large-v3-turbo (1.5 GB)…"
+msgstr ""
+
+#: src/ui/conversation.rs:4153
+msgid "Verifying Whisper model…"
+msgstr ""
+
+#: src/ui/conversation.rs:4156
+msgid "Loading Whisper model…"
+msgstr ""
+
+#: src/ui/conversation.rs:4159
+msgid "Transcribing locally…"
+msgstr ""
+
+#: src/ui/conversation.rs:5831
+msgid "Waiting to send"
+msgstr ""
+
+#: src/ui/conversation.rs:5834
+msgid ""
+"This message sends automatically when WhatsApp reconnects and any sending "
+"limit ends."
+msgstr ""
+
+#: src/ui/conversation.rs:5838
+msgid "Send unconfirmed"
+msgstr ""
+
+#: src/ui/conversation.rs:5841
+msgid ""
+"Sending was interrupted. This message may have been sent. It will not be "
+"resent automatically. You can copy it or delete it locally."
+msgstr ""
+
+#: src/ui/conversation.rs:5855
+msgid "Cancel waiting message"
+msgstr ""
+
+#: src/ui/conversation.rs:5864
+msgid "Delete this message so it is not sent"
+msgstr ""
+
+#: src/ui/conversation.rs:5958
+msgid "Reactions"
+msgstr ""
+
+#: src/ui/conversation.rs:6375 src/ui/conversation.rs:6389
+msgid "30 days"
+msgstr ""
+
+#: src/ui/conversation.rs:7666
+msgid "Download all"
+msgstr ""
+
+#: src/ui/conversation.rs:12155
+msgid "Send as an original document"
+msgstr ""
+
+#: src/ui/dialogs.rs:245
+msgid "Participant"
+msgstr ""
+
+#: src/ui/dialogs.rs:584 src/ui/dialogs.rs:664
+msgid "Message a number"
+msgstr ""
+
+#: src/ui/dialogs.rs:670
+msgid ""
+"Enter a phone number with its country code. You do not need to save it as a "
+"contact."
+msgstr ""
+
+#: src/ui/dialogs.rs:694
+msgid "Checking the number…"
+msgstr ""
+
+#: src/ui/dialogs.rs:1584
+#, rust-format
+msgid ""
+"This deletes \"{}\" and its stickers from this computer. To use it again, "
+"import it again."
+msgstr ""
+
+#: src/ui/dialogs.rs:1632
+msgid "Resume this restored account?"
+msgstr ""
+
+#: src/ui/dialogs.rs:1638
+msgid ""
+"Close Zap Faster on the original installation before continuing. Both "
+"installations share the same linked-device identity and must not connect at "
+"the same time. Resuming reconnects to WhatsApp and may send pending messages"
+" or account changes from the backup. If the phone has invalidated the "
+"session, you will need to link again."
+msgstr ""
+
+#: src/ui/dialogs.rs:1648
+msgid "Resume connection"
+msgstr ""
+
+#: src/ui/dialogs.rs:1659
+msgid "Keep offline"
+msgstr ""
+
+#: src/ui/dialogs.rs:2040
+msgid "Community"
+msgstr ""
+
+#: src/ui/dialogs.rs:2042
+msgid "Group"
+msgstr ""
+
+#: src/ui/dialogs.rs:2044
+msgid "Channel"
+msgstr ""
+
+#: src/ui/dialogs.rs:2113
+msgid "Set local picture"
+msgstr ""
+
+#: src/ui/dialogs.rs:2118
+msgid "Only changes this contact's picture in this account on this computer"
+msgstr ""
+
+#: src/ui/dialogs.rs:2128
+msgid "Reset local picture"
+msgstr ""
+
+#: src/ui/dialogs.rs:2324
+msgid "Community announcements"
+msgstr ""
+
+#: src/ui/dialogs.rs:2326
+msgid "Community general chat"
+msgstr ""
+
+#: src/ui/dialogs.rs:2328
+msgid "Community group"
+msgstr ""
+
+#: src/ui/dialogs.rs:2354
+msgid "Community groups"
+msgstr ""
+
+#: src/ui/dialogs.rs:2361
+msgid "No linked groups are known yet."
+msgstr ""
+
+#: src/ui/dialogs.rs:2411
+msgid "Change disappearing messages"
+msgstr ""
+
+#: src/ui/settings.rs:344
+msgid "Emoji style"
+msgstr ""
+
+#: src/ui/settings.rs:345
+msgid ""
+"System uses platform emoji with Noto fallback. Noto uses bundled emoji only."
+" You can import a CBDT or sbix colour emoji font you are allowed to use (up "
+"to 256 MiB). Custom fonts have no Noto fallback. Restart Zap Faster to "
+"apply."
+msgstr ""
+
+#: src/ui/settings.rs:402
+msgid "Text size"
+msgstr ""
+
+#: src/ui/settings.rs:405
+msgid "Resize text without changing the window or controls."
+msgstr ""
+
+#: src/ui/settings.rs:430
+msgid "Keep chat list position after sending"
+msgstr ""
+
+#: src/ui/settings.rs:433
+msgid ""
+"Stay among older conversations while replying. When off, the chat list "
+"scrolls to the top."
+msgstr ""
+
+#: src/ui/settings.rs:438
+msgid "Restore last open chat"
+msgstr ""
+
+#: src/ui/settings.rs:441
+msgid "When off, start on the chat list. Your last chat stays remembered."
+msgstr ""
+
+#: src/ui/settings.rs:446
+msgid "Convert typed emoticons"
+msgstr ""
+
+#: src/ui/settings.rs:447
+msgid "Turn typed emoticons into emoji while composing."
+msgstr ""
+
+#: src/ui/settings.rs:459
+msgid "Recover older history in the background"
+msgstr ""
+
+#: src/ui/settings.rs:460
+msgid ""
+"Ask your phone for older messages without opening each chat. Your phone may "
+"not provide all history."
+msgstr ""
+
+#: src/ui/settings.rs:464
+msgid "History recovery"
+msgstr ""
+
+#: src/ui/settings.rs:465
+msgid ""
+"Full history continues across all eligible chats. Changing the initial sync "
+"takes effect the next time you link this account."
+msgstr ""
+
+#: src/ui/settings.rs:470 src/ui/settings.rs:473 src/ui/login.rs:374
+msgid "Full history"
+msgstr ""
+
+#: src/ui/settings.rs:470 src/ui/settings.rs:472 src/ui/login.rs:396
+msgid "Recent history"
+msgstr ""
+
+#: src/ui/settings.rs:479
+msgid "Keep files in the background archive"
+msgstr ""
+
+#: src/ui/settings.rs:480
+msgid ""
+"Download files without opening their chats. Stored in this account's managed"
+" archive, separate from your chosen Downloads folder."
+msgstr ""
+
+#: src/ui/settings.rs:484
+msgid "Daily history request limit"
+msgstr ""
+
+#: src/ui/settings.rs:485
+msgid ""
+"Full-history recovery pauses at this daily limit and continues the next day."
+" Requests stay at least twenty seconds apart."
+msgstr ""
+
+#: src/ui/settings.rs:495
+msgid "Transcribe received voice messages automatically"
+msgstr ""
+
+#: src/ui/settings.rs:498
+msgid "Uses the local Whisper large-v3-turbo model (1.5 GB) and your CPU."
+msgstr ""
+
+#: src/ui/settings.rs:569
+msgid "Audio devices"
+msgstr ""
+
+#: src/ui/settings.rs:570
+msgid "Microphone and sound output"
+msgstr ""
+
+#: src/ui/settings.rs:570
+msgid ""
+"Used for voice recording, voice and video playback, and calls. Missing sound"
+" outputs fall back to the system default with a warning; recording never "
+"switches microphones silently."
+msgstr ""
+
+#: src/ui/settings.rs:571
+msgid "Refresh audio devices"
+msgstr ""
+
+#: src/ui/settings.rs:573
+msgid "Sound output"
+msgstr ""
+
+#: src/ui/settings.rs:599
+msgid "In-app notification cards"
+msgstr ""
+
+#: src/ui/settings.rs:601
+msgid ""
+"Show notifications in the desktop corner, even while the window is hidden, "
+"with the same privacy and mute settings."
+msgstr ""
+
+#: src/ui/settings.rs:603
+msgid ""
+"Show notifications inside the window, with the same privacy and mute "
+"settings."
+msgstr ""
+
+#: src/ui/settings.rs:608
+msgid "Show notification sender"
+msgstr ""
+
+#: src/ui/settings.rs:611
+msgid "Show chat names and pictures in desktop notifications."
+msgstr ""
+
+#: src/ui/settings.rs:616
+msgid "Show notification content"
+msgstr ""
+
+#: src/ui/settings.rs:619
+msgid "Include message previews. Hidden senders also hide content."
+msgstr ""
+
+#: src/ui/settings.rs:682
+msgid "Allow local command-line access"
+msgstr ""
+
+#: src/ui/settings.rs:683
+msgid ""
+"Allows this computer's user to read, watch and send in this account. App "
+"lock and locked chats stay private."
+msgstr ""
+
+#: src/ui/settings.rs:692
+msgid ""
+"Could not load your account privacy. Trying again when Zap Faster "
+"reconnects."
+msgstr ""
+
+#: src/ui/settings.rs:747 src/ui/settings.rs:1192
+msgid "Screen privacy"
+msgstr ""
+
+#: src/ui/settings.rs:752
+msgid "Unread count on tray icon"
+msgstr ""
+
+#: src/ui/settings.rs:753
+msgid ""
+"Show the total unread chat count across accounts, up to 99+. Hidden while "
+"the app is locked or screen privacy is on."
+msgstr ""
+
+#: src/ui/settings.rs:757
+msgid "VIP tray indicator"
+msgstr ""
+
+#: src/ui/settings.rs:758
+msgid ""
+"Highlight unread VIP chats. Mark a chat as VIP from its menu. Muted, "
+"archived and locked chats are excluded."
+msgstr ""
+
+#: src/ui/settings.rs:767
+msgid "Ctrl+W closes the chat"
+msgstr ""
+
+#: src/ui/settings.rs:768
+msgid ""
+"Close the open chat with Ctrl+W instead of closing the window. Turn off to "
+"keep the window shortcut."
+msgstr ""
+
+#: src/ui/settings.rs:800
+msgid "Asks GitHub once a day, sending only the Zap Faster version."
+msgstr ""
+
+#: src/ui/settings.rs:808
+msgid ""
+"You still choose when to restart. Package managers and Flatpak update Zap "
+"Faster themselves."
+msgstr ""
+
+#: src/ui/settings.rs:962
+msgid "Archive progress"
+msgstr ""
+
+#: src/ui/settings.rs:962
+msgid ""
+"Counts describe saved files and queued work. Unavailable includes oversized "
+"files and clips missing recovery keys; it does not prove that WhatsApp has "
+"no copy. History responses do not prove the archive is complete."
+msgstr ""
+
+#: src/ui/settings.rs:964
+#, rust-format
+msgid "{count} file downloaded"
+msgid_plural "{count} files downloaded"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/ui/settings.rs:965
+#, rust-format
+msgid "{count} file waiting"
+msgid_plural "{count} files waiting"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/ui/settings.rs:966
+#, rust-format
+msgid "{count} file cancelled"
+msgid_plural "{count} files cancelled"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/ui/settings.rs:967
+#, rust-format
+msgid "{count} file unavailable"
+msgid_plural "{count} files unavailable"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/ui/settings.rs:969
+#, rust-format
+msgid "{size} MiB stored"
+msgstr ""
+
+#: src/ui/settings.rs:972
+msgid "Oldest saved message: unknown"
+msgstr ""
+
+#: src/ui/settings.rs:972
+#, rust-format
+msgid "Oldest saved message: {date} (UTC)"
+msgstr ""
+
+#: src/ui/settings.rs:973
+msgid "WhatsApp connection: disconnected"
+msgstr ""
+
+#: src/ui/settings.rs:974
+msgid "Phone history: no request observed this session"
+msgstr ""
+
+#: src/ui/settings.rs:975
+msgid "Phone history: waiting for a response"
+msgstr ""
+
+#: src/ui/settings.rs:976
+msgid "Phone history: response received"
+msgstr ""
+
+#: src/ui/settings.rs:977
+msgid "Phone history: request failed or no response yet"
+msgstr ""
+
+#: src/ui/settings.rs:980
+msgid "Background downloads paused at the storage limit."
+msgstr ""
+
+#: src/ui/settings.rs:981
+msgid "Background downloads paused: storage usage could not be measured."
+msgstr ""
+
+#: src/ui/settings.rs:986
+msgid "Background media storage limit"
+msgstr ""
+
+#: src/ui/settings.rs:987
+msgid ""
+"Pause new background downloads at this limit. Existing archived files are "
+"kept. Increase it to continue, or use 0 for unlimited (MiB)."
+msgstr ""
+
+#: src/ui/settings.rs:997
+msgid "Unused cache cleanup"
+msgstr ""
+
+#: src/ui/settings.rs:998
+msgid ""
+"Remove only old, unreferenced media-cache files. Archived attachments and "
+"background recovery files stay saved. Removed files may not be recoverable."
+msgstr ""
+
+#: src/ui/settings.rs:1003
+msgid "Remove unused files automatically"
+msgstr ""
+
+#: src/ui/settings.rs:1006
+msgid "Keep unused files for this many days"
+msgstr ""
+
+#: src/ui/settings.rs:1010
+msgid "Keep all files (default)"
+msgstr ""
+
+#: src/ui/settings.rs:1019
+msgid "Encrypted account backups"
+msgstr ""
+
+#: src/ui/settings.rs:1020
+msgid ""
+"Save the account and downloaded files with a passphrase. Restore into a "
+"separate account, initially offline."
+msgstr ""
+
+#: src/ui/settings.rs:1023
+msgid "Back up…"
+msgstr ""
+
+#: src/ui/settings.rs:1027
+msgid "Restore…"
+msgstr ""
+
+#: src/ui/settings.rs:1032
+msgid "Review merge…"
+msgstr ""
+
+#: src/ui/settings.rs:1039
+msgid "Restored account connection"
+msgstr ""
+
+#: src/ui/settings.rs:1042
+msgid ""
+"This account stays offline until you resume its saved linked-device session."
+msgstr ""
+
+#: src/ui/settings.rs:1049
+msgid "Resume connection…"
+msgstr ""
+
+#: src/ui/settings.rs:1062
+msgid "Download folders"
+msgstr ""
+
+#: src/ui/settings.rs:1065
+msgid ""
+"Organize future downloads in your chosen folder. Existing files stay where "
+"they are."
+msgstr ""
+
+#: src/ui/settings.rs:1091
+msgid "Include older files in automatic downloads"
+msgstr ""
+
+#: src/ui/settings.rs:1092
+msgid ""
+"Copy files from before automatic downloads were enabled into your chosen "
+"folder. Full history recovery still keeps older files in the private "
+"archive."
+msgstr ""
+
+#: src/ui/settings.rs:1096
+msgid "Preserve original download names"
+msgstr ""
+
+#: src/ui/settings.rs:1097
+msgid ""
+"Use the original document filename inside your chosen folders. Unsafe "
+"characters are removed and duplicate names get a number."
+msgstr ""
+
+#: src/ui/settings.rs:1101
+msgid "Readable download names"
+msgstr ""
+
+#: src/ui/settings.rs:1102
+msgid ""
+"Include the chat, message date (UTC), file type and original document name. "
+"The private media archive keeps its own files."
+msgstr ""
+
+#: src/ui/settings.rs:1118
+msgid "Space"
+msgstr ""
+
+#: src/ui/settings.rs:1120 src/ui/settings.rs:1886
+msgid "Videos"
+msgstr ""
+
+#: src/ui/settings.rs:1121 src/ui/settings.rs:1894
+msgid "Stickers and GIFs"
+msgstr ""
+
+#: src/ui/settings.rs:1123 src/ui/settings.rs:1204
+msgid "Messages"
+msgstr ""
+
+#: src/ui/settings.rs:1195
+msgid "Hides chat content until hovered. Toggle quickly with Ctrl+Shift+H."
+msgstr ""
+
+#: src/ui/settings.rs:1200
+msgid "Chat previews"
+msgstr ""
+
+#: src/ui/settings.rs:1205 src/ui/gallery.rs:38
+msgid "Media"
+msgstr ""
+
+#: src/ui/settings.rs:1206
+msgid "Names"
+msgstr ""
+
+#: src/ui/settings.rs:1207
+msgid "Avatars"
+msgstr ""
+
+#: src/ui/settings.rs:1256
+msgid ""
+"Time without using Zap Faster, also counted while it is in the tray. "
+"Ctrl+Shift+L locks it at once."
+msgstr ""
+
+#: src/ui/settings.rs:1505
+msgid "Choose another font file"
+msgstr ""
+
+#: src/ui/settings.rs:1507 src/app.rs:8710
+msgid "Choose a font file"
+msgstr ""
+
+#: src/ui/settings.rs:1848
+msgid ""
+"Space taken by the pictures, videos, stickers, and GIFs Zap Faster has "
+"downloaded. The size is the one WhatsApp declared. Documents and audio count"
+" under Other."
+msgstr ""
+
+#: src/ui/settings.rs:1866
+#, rust-format
+msgid "{} message"
+msgid_plural "{} messages"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/app.rs:1560
+msgid "Restoring encrypted archive…"
+msgstr ""
+
+#: src/app.rs:1606
+msgid "Could not start archive restore"
+msgstr ""
+
+#: src/app.rs:1686
+msgid ""
+"Archive restored. Open the account switcher to view the offline archive."
+msgstr ""
+
+#: src/app.rs:1693
+msgid "Archive restore cancelled"
+msgstr ""
+
+#: src/app.rs:1697
+#, rust-format
+msgid "Archive restore failed: {error}"
+msgstr ""
+
+#: src/app.rs:4274
+#, rust-format
+msgid ""
+"Backup merged: {added} messages added, {edited} edited snapshots updated, "
+"{removed} confirmed deletions applied, {conflicts} alternatives retained for"
+" review."
+msgstr ""
+
+#: src/app.rs:4293
+#, rust-format
+msgid "Archive backup saved ({count} file, {size})"
+msgid_plural "Archive backup saved ({count} files, {size})"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/app.rs:4302
+msgid "Archive backup cancelled"
+msgstr ""
+
+#: src/app.rs:4306
+#, rust-format
+msgid "Archive backup failed: {error}"
+msgstr ""
+
+#: src/app.rs:4398
+msgid ""
+"This message could not be sent. Check your connection before sending it "
+"again."
+msgstr ""
+
+#: src/app.rs:4403
+msgid "This message could not be sent. Try again later."
+msgstr ""
+
+#: src/app.rs:4467
+msgid "Could not save the archive change. Try again."
+msgstr ""
+
+#: src/app.rs:4474
+msgid "Could not save the star change"
+msgstr ""
+
+#: src/app.rs:4477
+msgid "Could not read starred messages"
+msgstr ""
+
+#: src/app.rs:4481
+msgid "Wait for the previous pin request to finish"
+msgstr ""
+
+#: src/app.rs:4488
+msgid "This message is not stored on this computer"
+msgstr ""
+
+#: src/app.rs:4491
+msgid "Could not pin this message"
+msgstr ""
+
+#: src/app.rs:4494
+msgid "Could not save the pin change"
+msgstr ""
+
+#: src/app.rs:4499
+msgid "Pin request timed out; confirm its state on your phone before retrying"
+msgstr ""
+
+#: src/app.rs:4505
+msgid "Could not confirm the pin request; check your phone before retrying"
+msgstr ""
+
+#: src/app.rs:5130
+msgid "Not sent: Zap Faster is not connected to WhatsApp."
+msgstr ""
+
+#: src/app.rs:5874 src/app.rs:21126
+msgid "This message can no longer be edited"
+msgstr ""
+
+#: src/app.rs:6342
+msgid "Could not use this font"
+msgstr ""
+
+#: src/app.rs:8529 src/ui/labels.rs:292
+#, rust-format
+msgid "You have {limit} labels, the most Zap Faster keeps."
+msgstr ""
+
+#: src/app.rs:8711
+msgid "Font files"
+msgstr ""
+
+#: src/app.rs:8977
+msgid "Saving encrypted archive backup…"
+msgstr ""
+
+#: src/app.rs:9938
+msgid "Cannot play this video here; opening it in your system player"
+msgstr ""
+
+#: src/app.rs:9942
+msgid ""
+"The selected audio output is unavailable. Choose an output and resume "
+"playback."
+msgstr ""
+
+#: src/app.rs:21133
+msgid "Could not send the edit"
+msgstr ""
+
+#: src/app.rs:21136
+msgid "The edit was sent but could not be saved locally"
+msgstr ""
+
+#: src/file_drag.rs:16
+msgid "Could not drag the attachment"
+msgstr ""
+
+#: src/file_drag.rs:20
+msgid "The attachment is unavailable. Download it before dragging it."
+msgstr ""
+
+#: src/file_drag.rs:25
+msgid "Dragging attachments out is currently available on Windows only."
+msgstr ""
+
+#: src/ui/labels.rs:228
+msgid "Focus on selected labels"
+msgstr ""
+
+#: src/ui/labels.rs:238
+msgid "Allow mentions and replies outside focus labels"
+msgstr ""
+
+#: src/ui/labels.rs:248
+msgid ""
+"Focus filters this account's chat list and notifications. Chat sounds take "
+"priority, then mention sounds. Other messages use the first assigned label "
+"sound in this list."
+msgstr ""
+
+#: src/ui/labels.rs:360
+msgid "Include in focus"
+msgstr ""
+
+#: src/ui/labels.rs:374
+msgid "Default sound"
+msgstr ""
+
+#: src/ui/labels.rs:375
+msgid "Pidgin"
+msgstr ""
+
+#: src/ui/labels.rs:382
+msgid "System sound"
+msgstr ""
+
+#: src/ui/labels.rs:384
+msgid "No sound"
+msgstr ""
+
+#: src/ui/image_preview.rs:684
+msgid "Play video"
+msgstr ""
+
+#: src/ui/lock.rs:17
+msgid "Zap Faster is locked"
+msgstr ""
+
+#: src/notify.rs:425 src/notify.rs:445
+msgid "New message"
+msgstr ""
+
+#: src/account.rs:331
+#, rust-format
+msgid "Offline archive {id}"
+msgstr ""
+
+#: src/ui/accounts.rs:79
+msgid "Offline archive"
+msgstr ""
+
+#: src/ui/accounts.rs:236
+#, rust-format
+msgid "{count} unread chat"
+msgid_plural "{count} unread chats"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/ui/gallery.rs:41
+msgid "Documents"
+msgstr ""
+
+#: src/ui/gallery.rs:43
+msgid "Links"
+msgstr ""
+
+#: src/ui/gallery.rs:53
+msgid "Refresh"
+msgstr ""
+
+#: src/ui/gallery.rs:68
+msgid "Could not load this chat's media."
+msgstr ""
+
+#: src/ui/gallery.rs:84
+msgid "This list is limited. Use chat search for older items."
+msgstr ""
+
+#: src/ui/gallery.rs:193
+msgid "Link"
+msgstr ""
+
+#: src/ui/login.rs:12
+msgid "A native WhatsApp client."
+msgstr ""
+
+#: src/ui/login.rs:98 src/ui/call.rs:23
+msgid "Connecting to WhatsApp…"
+msgstr ""
+
+#: src/ui/login.rs:105
+msgid "Linked. Waiting for your chats…"
+msgstr ""
+
+#: src/ui/login.rs:114
+msgid "This computer was unlinked from your phone. Requesting a new code."
+msgstr ""
+
+#: src/ui/login.rs:123
+msgid "Requesting a new code…"
+msgstr ""
+
+#: src/ui/login.rs:174
+#, rust-format
+msgid "Requesting a code for +{phone}…"
+msgstr ""
+
+#: src/ui/login.rs:183
+msgid "Waiting for a code from WhatsApp…"
+msgstr ""
+
+#: src/ui/login.rs:194
+msgid ""
+"Unofficial client. Using it may be against WhatsApp's terms of service."
+msgstr ""
+
+#: src/ui/login.rs:219
+msgid "Link this computer"
+msgstr ""
+
+#: src/ui/login.rs:234 src/ui/login.rs:297
+msgid "Open WhatsApp on your phone"
+msgstr ""
+
+#: src/ui/login.rs:235 src/ui/login.rs:298
+msgid "Tap Menu or Settings, then Linked devices"
+msgstr ""
+
+#: src/ui/login.rs:238
+msgid "Tap Link a device and point the phone at this code"
+msgstr ""
+
+#: src/ui/login.rs:256
+msgid "Link with phone number instead"
+msgstr ""
+
+#: src/ui/login.rs:270
+msgid "Enter this code on your phone"
+msgstr ""
+
+#: src/ui/login.rs:277
+#, rust-format
+msgid "for +{phone}"
+msgstr ""
+
+#: src/ui/login.rs:301
+msgid "Tap Link a device, then Link with phone number instead"
+msgstr ""
+
+#: src/ui/login.rs:323
+msgid "Copy code"
+msgstr ""
+
+#: src/ui/login.rs:346
+msgid "How much history would you like to sync?"
+msgstr ""
+
+#: src/ui/login.rs:355
+msgid ""
+"Full history recovers as much as WhatsApp makes available, with older "
+"messages and files continuing in the background."
+msgstr ""
+
+#: src/ui/login.rs:365
+msgid ""
+"This can take a long time and use significant internet data and disk space. "
+"Keep your phone online during recovery. Some older messages or files may be "
+"unavailable."
+msgstr ""
+
+#: src/ui/login.rs:387
+msgid ""
+"Recent history starts with recent conversations for a quicker setup. You can"
+" enable older-history recovery later in Settings."
+msgstr ""
+
+#: src/ui/archive_backup.rs:19
+msgid "Restore an account backup"
+msgstr ""
+
+#: src/ui/archive_backup.rs:21
+msgid "Back up this account"
+msgstr ""
+
+#: src/ui/archive_backup.rs:27
+msgid "Merge messages into this account"
+msgstr ""
+
+#: src/ui/archive_backup.rs:30
+msgid ""
+"A matching account identity and an exact preview are required. Current "
+"messages and work queues stay intact. Conflicting edits and imported pending"
+" work are retained separately without sending."
+msgstr ""
+
+#: src/ui/archive_backup.rs:34
+msgid ""
+"Merge historical messages and files. The current linked-device identity "
+"stays in use."
+msgstr ""
+
+#: src/ui/archive_backup.rs:36
+msgid ""
+"Restore into a separate account. Existing accounts stay intact. Full backups"
+" include the linked-device identity; archive-only backups open offline."
+msgstr ""
+
+#: src/ui/archive_backup.rs:38
+msgid ""
+"Save this account, its linked-device identity and downloaded files in an "
+"encrypted backup. The connection pauses while saving. Keep the passphrase "
+"safe: it cannot be recovered."
+msgstr ""
+
+#: src/ui/archive_backup.rs:43
+msgid "Backup passphrase (at least 12 characters)"
+msgstr ""
+
+#: src/ui/archive_backup.rs:51
+msgid "Repeat passphrase"
+msgstr ""
+
+#: src/ui/archive_backup.rs:68
+msgid "Choose backup…"
+msgstr ""
+
+#: src/ui/archive_backup.rs:70
+msgid "Save backup…"
+msgstr ""
+
+#: src/ui/archive_backup.rs:102
+msgid "Merge this backup?"
+msgstr ""
+
+#: src/ui/archive_backup.rs:103
+#, rust-format
+msgid ""
+"{added} messages added, {edited} edited snapshots updated. {removed} current"
+" messages removed by confirmed backup deletions. {protected} deleted or "
+"pending-deletion messages are protected. {conflicts} conflicting "
+"alternatives and {pending} imported pending records are retained separately."
+msgstr ""
+
+#: src/ui/archive_backup.rs:107
+msgid ""
+"Session credentials and current pending work are preserved. Confirmed backup"
+" deletions listed above are applied. Imported pending sends never run. "
+"Different edited snapshots without a revision timestamp keep the current "
+"version and retain the imported alternative in the encrypted archive."
+msgstr ""
+
+#: src/ui/archive_backup.rs:110
+msgid ""
+"If the current archive changes before confirmation, prepare a new preview."
+msgstr ""
+
+#: src/ui/archive_backup.rs:113
+msgid "Merge"
+msgstr ""
+
+#: src/ui/call.rs:19
+msgid "Starting call"
+msgstr ""
+
+#: src/ui/call.rs:24
+msgid "Cancel call"
+msgstr ""
+
+#: src/ui/call.rs:53 src/ui/call.rs:177
+msgid "WhatsApp contact"
+msgstr ""
+
+#: src/ui/call.rs:66
+msgid "Connected"
+msgstr ""
+
+#: src/ui/call.rs:68 src/ui/call.rs:386
+msgid "Call failed"
+msgstr ""
+
+#: src/ui/call.rs:83
+#, rust-format
+msgid "{device} is unavailable; using the system default"
+msgstr ""
+
+#: src/ui/call.rs:90
+msgid "Answer with video"
+msgstr ""
+
+#: src/ui/call.rs:96
+msgid "Answer without camera"
+msgstr ""
+
+#: src/ui/call.rs:98
+msgid "Answer"
+msgstr ""
+
+#: src/ui/call.rs:118
+msgid "End call"
+msgstr ""
+
+#: src/ui/call.rs:125
+msgid "Opening the camera…"
+msgstr ""
+
+#: src/ui/call.rs:126
+msgid "Cancel video"
+msgstr ""
+
+#: src/ui/call.rs:130
+msgid "Turn camera off"
+msgstr ""
+
+#: src/ui/call.rs:135
+msgid "The other person requested video."
+msgstr ""
+
+#: src/ui/call.rs:139
+msgid "Accept video and turn camera on"
+msgstr ""
+
+#: src/ui/call.rs:141
+msgid "Turn camera on"
+msgstr ""
+
+#: src/ui/call.rs:148
+msgid "Keep voice only"
+msgstr ""
+
+#: src/ui/call.rs:158
+msgid "Calls and audio devices"
+msgstr ""
+
+#: src/ui/call.rs:194
+msgid "No calls recorded on this computer yet."
+msgstr ""
+
+#: src/ui/call.rs:245
+msgid "Waiting for the other person's video…"
+msgstr ""
+
+#: src/ui/call.rs:248
+msgid "Your camera"
+msgstr ""
+
+#: src/ui/call.rs:318
+msgid "Selected camera unavailable"
+msgstr ""
+
+#: src/ui/call.rs:320
+msgid "Saved camera (refresh devices)"
+msgstr ""
+
+#: src/ui/call.rs:344
+msgid "Used next time the camera is turned on."
+msgstr ""
+
+#: src/ui/call.rs:348
+msgid "Camera discovery failed. Try refreshing devices."
+msgstr ""
+
+#: src/ui/call.rs:354
+msgid "Refresh devices"
+msgstr ""
+
+#: src/ui/call.rs:375
+msgid "Incoming"
+msgstr ""
+
+#: src/ui/call.rs:376
+msgid "Outgoing"
+msgstr ""
+
+#: src/ui/call.rs:382
+msgid "Answered"
+msgstr ""
+
+#: src/ui/call.rs:396
+msgid "No audio is arriving. Check the connection."
+msgstr ""
+
+#: src/ui/call.rs:398
+msgid "This audio format cannot be decoded by this build."
+msgstr ""
+
+#: src/ui/call.rs:401
+msgid "The incoming audio could not be authenticated."
+msgstr ""
+
+#: src/ui/call.rs:405
+msgid "Incoming audio cannot be played. Try reconnecting the call."
+msgstr ""
+
+#: src/ui/statuses.rs:21
+msgid ""
+"Statuses received while Zap Faster is running. They expire after 24 hours. "
+"Viewing does not send a read receipt."
+msgstr ""
+
+#: src/ui/statuses.rs:38
+msgid "No recent statuses received"
+msgstr ""
+
+#: src/ui/statuses.rs:75
+msgid "Content hidden"
+msgstr ""
+
+#: src/ui/statuses.rs:126
+msgid "Open status"
+msgstr ""
+
+#: src/ui/statuses.rs:143
+msgid "Could not download status. Click to retry."
+msgstr ""
+
+#: src/ui/statuses.rs:153
+msgid "Download status"
+msgstr ""
+
+msgid "Loading media…"
+msgstr ""
+
+msgid "Searching…"
+msgstr ""
+
+msgid "Checking password…"
+msgstr ""
+
+msgid "Passphrases do not match."
+msgstr ""
+
+msgid "Play / pause"
+msgstr ""
+
+msgid "Preparing call…"
+msgstr ""
+
+#: src/ui/call.rs
+msgid ""
+"Microphone cleanup is unavailable. Audio is being sent without echo "
+"cancellation."
+msgstr ""
+
+#: src/ui/call.rs
+msgid "Minimize call"
+msgstr ""
+
+#: src/ui/call.rs
+msgid "Restore call"
 msgstr ""
