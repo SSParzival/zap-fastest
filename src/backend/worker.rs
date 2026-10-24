@@ -58,6 +58,7 @@ mod favorite_chats;
 mod interactive;
 mod link_watch;
 mod outgoing;
+mod new_group;
 mod poll_history;
 mod polls;
 mod statuses;
@@ -3248,25 +3249,8 @@ impl Worker {
                         }
                         jid.to_non_ad_string()
                     };
-                    let mut participants = Vec::new();
-                    let mut admin = false;
-                    for participant in &metadata.participants {
-                        let id = participant
-                            .phone_number
-                            .as_ref()
-                            .map(canonical)
-                            .unwrap_or_else(|| canonical(&participant.jid));
-                        let mine = me.contains(&id)
-                            || participant
-                                .lid
-                                .as_ref()
-                                .is_some_and(|lid| me.contains(&lid.to_non_ad_string()))
-                            || me.contains(&participant.jid.to_non_ad_string());
-                        if mine && participant.is_admin() {
-                            admin = true;
-                        }
-                        participants.push(id);
-                    }
+                    let (participants, admin) =
+                        new_group::group_members(&metadata.participants, &me, &lids);
                     let role = if metadata.is_parent_group {
                         Some(crate::model::CommunityRole::Parent)
                     } else {
@@ -7000,6 +6984,18 @@ impl Worker {
                 });
             }
             Command::SetGroupPicture { chat, jpeg } => self.set_group_picture(chat, jpeg),
+            Command::PickNewGroupPicture => self.pick_new_group_picture(),
+            Command::CreateGroup {
+                request,
+                subject,
+                members,
+                picture,
+            } => self.create_group(request, subject, members, picture),
+            Command::GroupCreated {
+                request,
+                result,
+                picture,
+            } => self.group_created(request, result, picture),
             Command::GroupEdited { chat, edit, result } => self.group_edited(chat, edit, result),
             Command::ProfileSaved {
                 name,

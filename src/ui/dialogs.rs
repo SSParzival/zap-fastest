@@ -581,25 +581,13 @@ fn confirm_lock_chat(app: &mut App, ui: &mut egui::Ui, id: &str) {
 
 /// Draws contact selection and the entry point for messaging an unsaved number.
 fn new_chat(app: &mut App, ui: &mut egui::Ui) {
+    // Making a group turns the same dialog into its steps.
+    if app.new_group.is_some() {
+        super::new_group::show(app, ui);
+        return;
+    }
     let palette = app.palette;
     title(ui, app, "New chat");
-    // "Message yourself" heads the contact list below, as on the phone.
-    ui.horizontal_wrapped(|ui| {
-        if theme::soft_button(
-            ui,
-            &palette,
-            Some(Icon::MessageCircle),
-            &crate::i18n::gettext(app.locale, "Message a number"),
-            false,
-        )
-        .clicked()
-        {
-            app.actions.push(Action::ShowDialog(Dialog::MessageNumber));
-        }
-        if theme::soft_button(ui, &palette, Some(Icon::Plus), "Add contact", false).clicked() {
-            app.actions.push(Action::ShowDialog(Dialog::NewContact));
-        }
-    });
     let width = ui.available_width();
     let search = super::widgets::search_field(
         ui,
@@ -613,6 +601,47 @@ fn new_chat(app: &mut App, ui: &mut egui::Ui) {
         search.request_focus();
     }
     let needle = crate::util::search_key(app.new_chat_search.trim());
+    let contacts = contact_choices(app, &needle);
+    egui::ScrollArea::vertical()
+        .id_salt("new-chat-contacts")
+        .max_height((ui.ctx().content_rect().height() - 280.0).clamp(100.0, 420.0))
+        .auto_shrink([false, true])
+        .show(ui, |ui| {
+            // New group and Add contact head the list, then "Message
+            // yourself", as on the phone.
+            let new_group = crate::i18n::gettext(app.locale, "New group");
+            if super::chats::action_row(app, ui, Icon::Users, &new_group).clicked() {
+                app.actions.push(Action::StartNewGroup);
+            }
+            let add_contact = crate::i18n::gettext(app.locale, "Add contact");
+            if super::chats::action_row(app, ui, Icon::Plus, &add_contact).clicked() {
+                app.actions.push(Action::ShowDialog(Dialog::NewContact));
+            }
+            let message_number = crate::i18n::gettext(app.locale, "Message a number");
+            if super::chats::action_row(app, ui, Icon::MessageCircle, &message_number).clicked() {
+                app.actions.push(Action::ShowDialog(Dialog::MessageNumber));
+            }
+            let offer_self = app.offers_self(&needle);
+            if offer_self {
+                super::chats::self_row(app, ui);
+            }
+            if contacts.is_empty() && !offer_self {
+                theme::text(
+                    ui,
+                    "No matching contacts",
+                    theme::regular(13.0),
+                    palette.secondary,
+                );
+            }
+            for contact in contacts {
+                ui.push_id(&contact.id, |ui| {
+                    super::chats::contact_row(app, ui, &contact)
+                });
+            }
+        });
+}
+
+pub(super) fn contact_choices(app: &App, needle: &str) -> Vec<crate::model::Contact> {
     let mut contacts = app.contacts.clone();
     for chat in &app.chats {
         if chat.kind == crate::model::ChatKind::Direct {
@@ -632,35 +661,13 @@ fn new_chat(app: &mut App, ui: &mut egui::Ui) {
                 && app.me.as_deref() != Some(contact.id.as_str())
                 && !app.chat(&contact.id).is_some_and(|chat| chat.locked)
                 && (needle.is_empty()
-                    || crate::util::search_key(&app.display_name(&contact.id)).contains(&needle)
+                    || crate::util::search_key(&app.display_name(&contact.id)).contains(needle)
                     || crate::model::phone_of(&contact.id)
-                        .is_some_and(|phone| phone.contains(&needle)))
+                        .is_some_and(|phone| phone.contains(needle)))
         })
         .collect();
     contacts.sort_by_key(|contact| crate::util::search_key(&app.display_name(&contact.id)));
-    egui::ScrollArea::vertical()
-        .id_salt("new-chat-contacts")
-        .max_height((ui.ctx().content_rect().height() - 280.0).clamp(100.0, 420.0))
-        .auto_shrink([false, true])
-        .show(ui, |ui| {
-            let offer_self = app.offers_self(&needle);
-            if offer_self {
-                super::chats::self_row(app, ui);
-            }
-            if contacts.is_empty() && !offer_self {
-                theme::text(
-                    ui,
-                    "No matching contacts",
-                    theme::regular(13.0),
-                    palette.secondary,
-                );
-            }
-            for contact in contacts {
-                ui.push_id(&contact.id, |ui| {
-                    super::chats::contact_row(app, ui, &contact)
-                });
-            }
-        });
+    contacts
 }
 
 /// Draws international-number entry, validation feedback and lookup submission.
@@ -850,6 +857,7 @@ fn forward(app: &mut App, ui: &mut egui::Ui, messages: &[String]) {
                 });
                 if ui.is_rect_visible(rect) {
                     let selected = app.forward_recipients.contains(&chat.id);
+                    let blocked = false;
                     if response.hovered() || selected {
                         super::widgets::dialog_row_highlight(ui, rect, palette.surface_hover);
                     }
@@ -857,17 +865,9 @@ fn forward(app: &mut App, ui: &mut egui::Ui, messages: &[String]) {
                         pos2(rect.right() - 18.0, rect.center().y),
                         egui::Vec2::splat(20.0),
                     );
-                    let mut checked = selected;
-                    let checkbox = ui.put(check, egui::Checkbox::without_text(&mut checked));
-                    checkbox.widget_info(|| {
-                        egui::WidgetInfo::selected(
-                            egui::WidgetType::Checkbox,
-                            ui.is_enabled(),
-                            checked,
-                            &title,
-                        )
-                    });
-                    if checked != selected {
+                    if super::widgets::round_check(
+                        ui, &palette, check, &chat.id, selected, !blocked, &title,
+                    ) {
                         app.actions
                             .push(Action::ToggleForwardRecipient(chat.id.clone()));
                     }
