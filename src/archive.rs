@@ -514,7 +514,13 @@ impl Archive {
     }
 
     fn prepare(connection: Connection) -> Result<Self> {
-        connection.execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL;")?;
+        connection.execute_batch(
+            "PRAGMA journal_mode = WAL;
+             PRAGMA synchronous = NORMAL;
+             PRAGMA cache_size = -64000;
+             PRAGMA temp_store = MEMORY;
+             PRAGMA mmap_size = 268435456;",
+        )?;
         connection.execute_batch(SCHEMA)?;
         connection.execute_batch(history_capture::SCHEMA)?;
         connection.execute_batch(outgoing::SCHEMA)?;
