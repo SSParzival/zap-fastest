@@ -671,9 +671,19 @@ show the unread count as a badge on the app icon: KDE Plasma's taskbar, with
 or Dash to Panel. Windows overlays a compact unread-message count on Zap Faster's
 taskbar button while the window is open, using `99+` above 99. Windows must use
 its regular taskbar icon size for overlays to appear. The count
-does not count toasts remaining in Windows notification history. On Linux and
-Windows, notifications show the chat picture and open the chat at the message
-they announced when clicked. On Linux, a notification that arrives while the
+does not count toasts remaining in Windows notification history. On macOS, the
+Dock icon shows the number of unread chats in a red badge. The icon and
+badge stay with the app when its window is closed and reopened. A macOS
+source build run through Cargo uses ZapFastest's icon too. Starting hidden
+lets you open the first window from the menu-bar menu. On Linux and
+Windows, notifications show the chat picture. On Linux, Windows, and macOS, a
+click on a notification opens the chat at the message it announced. This holds for the 32 most recent tracked notifications on all three platforms;
+older notifications remain in system history without a message click listener.
+Reading a chat removes its tracked notifications, including Windows toasts.
+On Windows, while every display is off, ZapFastest leaves new-message notifications
+to the phone instead of queuing desktop banners to appear when the display turns on.
+Fastframe provides the same delivery and cancellation interface on each platform. macOS
+asks once for permission to show notifications. On Linux, a notification that arrives while the
 window is open behind others also highlights ZapFastest in the taskbar until you
 switch to it. GNOME and Hyprland get no highlight: GNOME would show a second
 notice, and Hyprland can bring the window to the front instead. Muted chats do not send notifications, and
