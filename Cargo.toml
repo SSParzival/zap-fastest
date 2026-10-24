@@ -1,11 +1,11 @@
 [package]
-name = "zap-faster"
-version = "0.30.0"
+name = "zap-fastest"
+version = "0.31.0-alpha.1"
 edition = "2024"
 rust-version = "1.98"
 license = "MIT"
-description = "Native WhatsApp for power users, with more control and faster feature development. Built on ZapFast with Rust and egui."
-homepage = "https://github.com/eternalwaitt/zap-faster"
+description = "Native WhatsApp for power users, combining ZapFast v0.20+ with ZapFaster advanced workflows. Built with Rust and egui."
+homepage = "https://github.com/crmne/zapfast"
 repository = "https://github.com/eternalwaitt/zap-faster"
 keywords = ["whatsapp", "chat", "egui", "messaging"]
 categories = ["gui"]
@@ -15,7 +15,7 @@ name = "zapfast"
 path = "src/lib.rs"
 
 [[bin]]
-name = "zap-faster"
+name = "zap-fastest"
 path = "src/main.rs"
 
 [dependencies]
