@@ -13,7 +13,7 @@ All credit is reserved for the upstream ZapFast and ZapFaster contributors who m
 To build from source, use the toolchain defined in `rust-toolchain.toml`:
 
 ```sh
-git clone https://github.com/eternalwaitt/zap-faster.git zap-fastest
+git clone https://github.com/SSParzival/zap-fastest.git
 cd zap-fastest
 cargo run --locked --release
 ```
@@ -44,7 +44,7 @@ The [settings and files guide](docs/_reference/settings-and-files.md) describes 
 
 ## Contribute
 
-Help build the WhatsApp client you want to use every day. Bug reports, feature requests, code, testing, translations and documentation are welcome through our [issues](https://github.com/eternalwaitt/zap-faster/issues) and [pull requests](https://github.com/eternalwaitt/zap-faster/pulls).
+Help build the WhatsApp client you want to use every day. Bug reports, feature requests, code, testing, translations and documentation are welcome through our [issues](https://github.com/SSParzival/zap-fastest/issues) and [pull requests](https://github.com/SSParzival/zap-fastest/pulls).
 
 **AI-assisted coding is welcome.** A developer must review the code, understand it, test it, and sign off on the submission. Maintainer review and required checks still apply before merging. See [CONTRIBUTING.md](CONTRIBUTING.md) for how to get started and what a good contribution includes.
 

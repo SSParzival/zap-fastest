@@ -1,16 +1,43 @@
+# Rust build output
 /target/
 **/target/
+*.rs.bk
+
+# IDE and Editor configurations
 .idea/
 .vscode/
 .claude/
+.gemini/
+.cursor/
+.windsurf/
+*.swp
+*.swo
+*~
+.project
+.settings/
+
+# Environment and local tooling
 .direnv/
+.env
+.env.local
 
+# Operating System artifacts
+.DS_Store
+Thumbs.db
+desktop.ini
+._*
+
+# Local caches and temporary files
 /.cache/
+*.log
+*.tmp
+*.bak
+*.zfbackup
 
+# Distribution and packaging artifacts
 /dist/
-
+/build-dir/
+/.flatpak-builder/
 /packaging/flatpak/built/
 /packaging/flatpak/cargo-sources.json
 /packaging/flatpak/flatpak-cargo-generator.py
-/.flatpak-builder/
-/build-dir/
