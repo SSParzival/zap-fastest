@@ -459,9 +459,9 @@ impl Downloadable for PhoneSticker {
 fn device_name() -> String {
     let host = crate::util::hostname();
     if host.is_empty() {
-        "Zap Faster".to_owned()
+        "ZapFastest".to_owned()
     } else {
-        format!("Zap Faster ({host})")
+        format!("ZapFastest ({host})")
     }
 }
 
@@ -2552,17 +2552,30 @@ impl Worker {
                 return;
             }
         }
-        let capture =
-            match crate::archive::history_capture::HistoryCapture::open(&self.dirs.archive_db()) {
-                Ok(capture) => capture,
-                Err(_) => {
-                    self.set_status(LinkStatus::Failed(
-                        "Could not open durable history capture. WhatsApp has not been connected."
-                            .into(),
-                    ));
-                    return;
-                }
-            };
+        let db_path = self.dirs.archive_db();
+        let capture = match tokio::task::spawn_blocking(move || {
+            crate::archive::history_capture::HistoryCapture::open(&db_path)
+        })
+        .await
+        {
+            Ok(Ok(capture)) => capture,
+            Ok(Err(error)) => {
+                log::error!("failed to open history capture: {error:#}");
+                self.set_status(LinkStatus::Failed(
+                    "Could not open durable history capture. WhatsApp has not been connected."
+                        .into(),
+                ));
+                return;
+            }
+            Err(join_error) => {
+                log::error!("history capture worker task panicked or failed: {join_error}");
+                self.set_status(LinkStatus::Failed(
+                    "Could not open durable history capture. WhatsApp has not been connected."
+                        .into(),
+                ));
+                return;
+            }
+        };
         let sender = self.wa_sender.clone();
         let builder = host_owned_presence(Bot::builder().with_backend(store))
             .with_watched_ab_props([abprops::web::AURA_PINNED_CHATS_BENEFIT_ACTIVE])
@@ -2897,7 +2910,7 @@ impl Worker {
         // stays serialized while the snapshot is copied; the window stays responsive.
         let destination = tokio::task::spawn_blocking(|| {
             rfd::FileDialog::new()
-                .add_filter("Encrypted Zap Faster account", &["zfbackup"])
+                .add_filter("Encrypted ZapFastest account", &["zfbackup"])
                 .set_file_name("WhatsApp-account.zfbackup")
                 .save_file()
         })
@@ -2941,7 +2954,7 @@ impl Worker {
                 .is_err()
         {
             self.device_store_release = Some(release);
-            self.set_status(LinkStatus::Failed("Backup paused: the device store did not stop safely. Restart Zap Faster before trying again.".into()));
+            self.set_status(LinkStatus::Failed("Backup paused: the device store did not stop safely. Restart ZapFastest before trying again.".into()));
             self.emit(Event::ArchiveBackupFinished(Err(
                 "The device store is still in use. No backup was created.".into(),
             )));
@@ -3635,7 +3648,7 @@ impl Worker {
             }
             E::ClientOutdated(_) => {
                 self.set_status(LinkStatus::Failed(
-                    "WhatsApp rejected this version of Zap Faster. Update the app".to_owned(),
+                    "WhatsApp rejected this version of ZapFastest. Update the app".to_owned(),
                 ));
             }
             E::Messages(batch) => {
@@ -6320,7 +6333,7 @@ impl Worker {
         if let Some(chat) = destination
             && !self.destination_writable(chat)
         {
-            let error = "This conversation is read-only in Zap Faster".to_owned();
+            let error = "This conversation is read-only in ZapFastest".to_owned();
             if matches!(&command, Command::CreatePoll { .. }) {
                 self.emit(Event::PollCreated {
                     chat: chat.clone(),
@@ -7289,7 +7302,7 @@ impl Worker {
             Command::PrepareClipboardImage(path) => {
                 if !crate::safety::image_preview_size_allowed(&path) {
                     self.emit(Event::Error(
-                        "This image could not be displayed in Zap Faster.".into(),
+                        "This image could not be displayed in ZapFastest.".into(),
                     ));
                     return;
                 }
@@ -7615,7 +7628,7 @@ impl Worker {
                 let Some(client) = self.client.clone() else {
                     self.emit(Event::InvitePreview {
                         code,
-                        result: Err("Zap Faster is not connected to WhatsApp".to_owned()),
+                        result: Err("ZapFastest is not connected to WhatsApp".to_owned()),
                     });
                     return;
                 };
@@ -7644,7 +7657,7 @@ impl Worker {
                 let Some(client) = self.client.clone() else {
                     self.emit(Event::InviteJoined {
                         code,
-                        result: Err("Zap Faster is not connected to WhatsApp".to_owned()),
+                        result: Err("ZapFastest is not connected to WhatsApp".to_owned()),
                     });
                     return;
                 };
@@ -7922,7 +7935,7 @@ impl Worker {
                         // The phone has cleared it; say so rather than leave
                         // the messages here looking as if nothing happened.
                         self.emit(Event::Error(
-                            "The phone cleared this chat, but Zap Faster could not clear it here"
+                            "The phone cleared this chat, but ZapFastest could not clear it here"
                                 .to_owned(),
                         ));
                     }
@@ -10676,7 +10689,7 @@ impl Worker {
                 }
             }
             Err(_) => self.emit(Event::Error(
-                "WhatsApp accepted the deletion, but Zap Faster could not remove its copy. Local cleanup is saved for restart or reconnect".to_owned(),
+                "WhatsApp accepted the deletion, but ZapFastest could not remove its copy. Local cleanup is saved for restart or reconnect".to_owned(),
             )),
 
         }

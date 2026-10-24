@@ -1598,11 +1598,23 @@ impl Backend {
         let thread = std::thread::Builder::new()
             .name("zapfast-backend".to_string())
             .spawn(move || {
-                runtime.block_on(async move {
-                    if started.await.is_ok() {
-                        worker::run(dirs, event_tx, worker_commands, command_rx, waker).await;
-                    }
-                });
+                let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    runtime.block_on(async move {
+                        if started.await.is_ok() {
+                            worker::run(dirs, event_tx, worker_commands, command_rx, waker).await;
+                        }
+                    });
+                }));
+                if let Err(panic) = outcome {
+                    let msg = if let Some(s) = panic.downcast_ref::<&str>() {
+                        s.to_string()
+                    } else if let Some(s) = panic.downcast_ref::<String>() {
+                        s.clone()
+                    } else {
+                        "unknown panic".to_string()
+                    };
+                    log::error!("backend worker panicked: {msg}");
+                }
                 runtime.shutdown_timeout(Duration::from_secs(3));
             })
             .expect("unable to start the backend thread");
