@@ -151,8 +151,17 @@
             postFixup =
               # The GUI dlopens its Wayland, X11 and GL libraries at run time.
               pkgs.lib.optionalString isLinux ''
-                wrapProgram $out/bin/zap-faster \
-                  --prefix LD_LIBRARY_PATH : ${pkgs.lib.makeLibraryPath runtimeLibs}
+                for b in $out/bin/zap-fastest $out/bin/zap-faster; do
+                  if [ -f "$b" ]; then
+                    wrapProgram "$b" \
+                      --prefix LD_LIBRARY_PATH : ${pkgs.lib.makeLibraryPath runtimeLibs}
+                  fi
+                done
+                if [ -f $out/bin/zap-fastest ] && [ ! -f $out/bin/zap-faster ]; then
+                  ln -sf zap-fastest $out/bin/zap-faster
+                elif [ -f $out/bin/zap-faster ] && [ ! -f $out/bin/zap-fastest ]; then
+                  ln -sf zap-faster $out/bin/zap-fastest
+                fi
               ''
               # Sign after the strip hook, which would invalidate the signature.
               # The entitlement allows microphone access for voice messages.
@@ -178,12 +187,16 @@
               + pkgs.lib.optionalString isDarwin ''
                 app="$out/Applications/Zap Faster.app"
                 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
-                mv "$out/bin/zap-faster" "$app/Contents/MacOS/zap-faster"
-                chmod 755 "$app/Contents/MacOS/zap-faster"
+                bin="$out/bin/zap-fastest"
+                [ -f "$bin" ] || bin="$out/bin/zap-faster"
+                mv "$bin" "$app/Contents/MacOS/zap-fastest"
+                chmod 755 "$app/Contents/MacOS/zap-fastest"
+                ln -sf zap-fastest "$app/Contents/MacOS/zap-faster"
                 # The command runs the bundled executable, so macOS applies the
                 # bundle's Info.plist and entitlements, and start at login
                 # records the bundled path.
-                makeWrapper "$app/Contents/MacOS/zap-faster" "$out/bin/zap-faster"
+                makeWrapper "$app/Contents/MacOS/zap-fastest" "$out/bin/zap-fastest"
+                ln -sf zap-fastest "$out/bin/zap-faster"
                 sed "s/__VERSION__/''${version%%-*}/g" packaging/macos/Info.plist \
                   > "$app/Contents/Info.plist"
                 icnsify packaging/macos/icon-1024.png \
@@ -192,9 +205,9 @@
 
             meta = {
               description = "Fast native WhatsApp client";
-              homepage = "https://github.com/eternalwaitt/zap-faster";
+              homepage = "https://github.com/SSParzival/zap-fastest";
               license = with pkgs.lib.licenses; [ mit gpl2Only ];
-              mainProgram = "zap-faster";
+              mainProgram = "zap-fastest";
               # The flake publishes only aarch64-darwin. Older nixpkgs, for
               # example through follows, still list x86_64-darwin.
               platforms = pkgs.lib.platforms.linux ++ [ "aarch64-darwin" ];

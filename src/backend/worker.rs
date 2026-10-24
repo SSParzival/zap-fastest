@@ -57,8 +57,8 @@ mod disappearing;
 mod favorite_chats;
 mod interactive;
 mod link_watch;
-mod outgoing;
 mod new_group;
+mod outgoing;
 mod poll_history;
 mod polls;
 mod statuses;
@@ -1491,7 +1491,10 @@ const PHONE_RANGE_LOOKBACK: usize = 20;
 /// the change came without one. Local call entries were never sent, so they
 /// give their time but name no message, and a message without a time is
 /// treated as none.
-pub(crate) fn archive_range(jid: &Jid, last: Option<&Message>) -> whatsapp_rust::SyncActionMessageRange {
+pub(crate) fn archive_range(
+    jid: &Jid,
+    last: Option<&Message>,
+) -> whatsapp_rust::SyncActionMessageRange {
     let Some(last) = last.filter(|last| last.timestamp > 0) else {
         return whatsapp_rust::message_range(crate::util::now(), None, Vec::new());
     };
@@ -19988,8 +19991,9 @@ mod receipt_tests {
         let (mut worker, _events, _inbox, _wa) = worker();
         let archived = |worker: &Worker| worker.archive.chat(PEER).unwrap().unwrap().archived;
         let setting = |unarchive: bool| {
-            let mut action = wa::sync_action_value::UnarchiveChatsSetting::default();
-            action.unarchive_chats = Some(unarchive);
+            let action = wa::sync_action_value::UnarchiveChatsSetting {
+                unarchive_chats: Some(unarchive),
+            };
             Arc::new(wa_events::Event::UnarchiveChatsSettingUpdate(
                 wa_events::UnarchiveChatsSettingUpdate::builder()
                     .unarchive_chats(unarchive)

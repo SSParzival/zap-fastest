@@ -94,14 +94,16 @@ jobs:
         if: runner.os == 'macOS'
         timeout-minutes: 3
         run: |
-          target/debug/zap-faster --demo --demo-shot "$RUNNER_TEMP/zap-faster-content.png" --demo-shot-delay 8000 &
+          bin="target/debug/zap-fastest"
+          [ -f "$bin" ] || bin="target/debug/zap-faster"
+          "$bin" --demo --demo-shot "$RUNNER_TEMP/zap-faster-content.png" --demo-shot-delay 8000 &
           demo_pid=$!
           sleep 6
           screencapture -x "$RUNNER_TEMP/zap-faster-window.png" || true
           wait "$demo_pid"
           test -s "$RUNNER_TEMP/zap-faster-content.png"
           for page in media-album forward-review voice-transcript starred star-menu pinned background-history original-documents international-sender; do
-            target/debug/zap-faster --demo --demo-page "$page" --demo-shot "$RUNNER_TEMP/zap-faster-$page.png" --demo-shot-delay 1200
+            "$bin" --demo --demo-page "$page" --demo-shot "$RUNNER_TEMP/zap-faster-$page.png" --demo-shot-delay 1200
             test -s "$RUNNER_TEMP/zap-faster-$page.png"
           done
       - name: macOS preview
@@ -123,10 +125,12 @@ jobs:
         run: |
           mkdir -p "$XDG_RUNTIME_DIR"
           chmod 700 "$XDG_RUNTIME_DIR"
+          bin="target/debug/zap-fastest"
+          [ -f "$bin" ] || bin="target/debug/zap-faster"
           for page in media-album forward-review voice-transcript starred star-menu pinned background-history original-documents international-sender; do
             timeout 45s xvfb-run -a -s "-screen 0 1600x1200x24" \
               env -u WAYLAND_DISPLAY -u WAYLAND_SOCKET \
-              target/debug/zap-faster --demo --demo-page "$page" \
+              "$bin" --demo --demo-page "$page" \
               --demo-shot "$RUNNER_TEMP/zap-faster-$page.png" --demo-shot-delay 2500 \
               > "$RUNNER_TEMP/zap-faster-$page.log" 2>&1
             test -s "$RUNNER_TEMP/zap-faster-$page.png"

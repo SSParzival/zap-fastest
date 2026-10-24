@@ -69,7 +69,9 @@ impl Worker {
         let last = match self.newest_on_phone(&chat) {
             Ok(last) => last,
             Err(error) => {
-                log::warn!("archive sync: could not read a chat to archive it on the phone: {error}");
+                log::warn!(
+                    "archive sync: could not read a chat to archive it on the phone: {error}"
+                );
                 let _ = self.archive.finish_archive_change(&chat, at);
                 return;
             }

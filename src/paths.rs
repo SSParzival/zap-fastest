@@ -23,10 +23,13 @@ pub struct AppDirs {
 /// A separate preferences marker is required; the updater's installation marker is insufficient.
 fn portable_settings_beside(executable: &Path) -> Option<PathBuf> {
     let parent = executable.parent()?;
-    let marker = ["zap-fastest-portable-settings.txt", "zap-faster-portable-settings.txt"]
-        .into_iter()
-        .map(|name| parent.join(name))
-        .find(|path| path.exists())?;
+    let marker = [
+        "zap-fastest-portable-settings.txt",
+        "zap-faster-portable-settings.txt",
+    ]
+    .into_iter()
+    .map(|name| parent.join(name))
+    .find(|path| path.exists())?;
     let metadata = std::fs::symlink_metadata(&marker).ok()?;
     if !metadata.is_file() || metadata.file_type().is_symlink() || metadata.len() > 128 {
         return None;
