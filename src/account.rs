@@ -46,7 +46,9 @@ pub struct Account {
     pub open_chat: Option<ChatId>,
     pub scroll_chat_into_view: Option<ChatId>,
     pub drafts: HashMap<ChatId, String>,
-    /// of claiming the archive is empty.
+    /// Whether the open chat had a draft when opened. Keep its list priority
+    /// stable while the reader types, clears, or sends that draft.
+    pub(crate) open_draft_priority: bool,
     pub storage_stats: Option<crate::model::StorageStats>,
     /// When the last reading was asked for, so a stale one is asked again.
     pub(crate) storage_stats_at: Option<std::time::Instant>,
@@ -199,6 +201,7 @@ impl Account {
             open_chat,
             scroll_chat_into_view: None,
             drafts: HashMap::new(),
+            open_draft_priority: false,
             storage_stats: None,
             storage_stats_at: None,
             storage_stats_asked: false,

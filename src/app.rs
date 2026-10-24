@@ -1464,6 +1464,7 @@ impl App {
     /// Restores the active account's last conversation draft after changing accounts.
     fn restore_composer(&mut self) {
         if let Some(id) = self.open_chat.clone() {
+            self.open_draft_priority = self.parked_draft(&id);
             let text = self.drafts.remove(&id).unwrap_or_default();
             self.replace_composer_text(text);
             self.composer_mentions = self.draft_mentions.remove(&id).unwrap_or_default();
@@ -3022,7 +3023,8 @@ impl App {
     }
 
     /// Visible chats filtered by search, archive state, and the chat filter,
-    /// with drafts first, then pinned chats.
+    /// with pins first, then parked drafts. The Favorites chip retains the
+    /// phone's order below pins instead of promoting drafts.
     /// Locked chats only appear inside the locked folder.
     pub fn focus_allows_chat(&self, chat: &Chat) -> bool {
         !self.account().settings.focus_enabled
@@ -3084,23 +3086,23 @@ impl App {
                     })
             })
             .collect();
-        // Within each draft group, preserve pin and phone Favorites order.
+        // Pinned chats come first, then Favorites order, then parked drafts, then last activity.
         let favorites_order = self.favorites_order();
         chats.sort_by(|a, b| {
-            self.has_draft(&b.id)
-                .cmp(&self.has_draft(&a.id))
-                .then_with(|| b.pinned.cmp(&a.pinned))
-                .then_with(|| {
-                    if a.pinned && b.pinned {
-                        b.pinned_at.cmp(&a.pinned_at).then(a.id.cmp(&b.id))
-                    } else if favorites_order {
-                        a.favorite_position
-                            .cmp(&b.favorite_position)
-                            .then(a.id.cmp(&b.id))
-                    } else {
-                        b.last_activity.cmp(&a.last_activity).then(a.id.cmp(&b.id))
-                    }
-                })
+            b.pinned.cmp(&a.pinned).then_with(|| {
+                if a.pinned && b.pinned {
+                    b.pinned_at.cmp(&a.pinned_at).then(a.id.cmp(&b.id))
+                } else if favorites_order {
+                    a.favorite_position
+                        .cmp(&b.favorite_position)
+                        .then(a.id.cmp(&b.id))
+                } else {
+                    self.draft_priority(&b.id)
+                        .cmp(&self.draft_priority(&a.id))
+                        .then_with(|| b.last_activity.cmp(&a.last_activity))
+                        .then(a.id.cmp(&b.id))
+                }
+            })
         });
         chats
     }
@@ -3231,6 +3233,24 @@ impl App {
         message.from_me
             && !matches!(message.content, Content::Revoked)
             && crate::util::now() - message.timestamp <= REVOKE_WINDOW.as_secs() as i64
+    }
+
+    /// Whether a closed chat has unsent text or attachments.
+    fn parked_draft(&self, chat: &str) -> bool {
+        if self.open_chat.as_deref() == Some(chat) {
+            return false;
+        }
+        self.has_draft(chat)
+    }
+
+    /// Opening a draft keeps its priority until the reader leaves. New
+    /// typing is promoted only after leaving, so editing cannot move a row.
+    fn draft_priority(&self, chat: &str) -> bool {
+        if self.open_chat.as_deref() == Some(chat) {
+            self.open_draft_priority
+        } else {
+            self.has_draft(chat)
+        }
     }
 
     /// The open composer's current contents take precedence over its saved draft.
@@ -3570,6 +3590,9 @@ impl App {
                         && self.editing.is_none()
                         && self.composer.is_empty()
                     {
+                        if self.pending.is_empty() {
+                            self.open_draft_priority = !text.trim().is_empty();
+                        }
                         self.replace_composer_text(text);
                     } else {
                         self.drafts.entry(chat).or_insert(text);
@@ -5814,6 +5837,7 @@ impl App {
                         count: chat.unread,
                         placed: false,
                     });
+            self.open_draft_priority = self.parked_draft(&id);
             let text = self.drafts.remove(&id).unwrap_or_default();
             self.replace_composer_text(text);
             self.composer_mentions = self.draft_mentions.remove(&id).unwrap_or_default();
@@ -20040,6 +20064,8 @@ mod tests {
             },
         ];
         app.chat_filter = ChatFilter::Favorites;
+        app.drafts
+            .insert("1@s.whatsapp.net".into(), "Unsent favorite".into());
         let names: Vec<&str> = app
             .visible_chats()
             .iter()
@@ -20057,6 +20083,129 @@ mod tests {
             ["Cy", "Ada", "Bob", "Dee"],
             "other chips keep recency"
         );
+    }
+
+    /// Pins retain their order above text and attachment drafts; filtered
+    /// chats do not reappear merely because they contain a draft.
+    #[test]
+    fn pins_stay_above_eligible_text_and_attachment_drafts() {
+        let mut app = app();
+        let mut chat = |id: &str, activity| {
+            let mut chat = Chat::new(id.into(), id.into());
+            chat.last_activity = activity;
+            app.chats.push(chat);
+        };
+        chat("pin-old", 1);
+        chat("pin-new", 2);
+        chat("recent", 50);
+        chat("text", 20);
+        chat("file", 10);
+        chat("locked", 100);
+        chat("archived", 100);
+        app.chats[0].pinned = true;
+        app.chats[0].pinned_at = 10;
+        app.chats[1].pinned = true;
+        app.chats[1].pinned_at = 20;
+        app.chats[5].locked = true;
+        app.chats[6].archived = true;
+        for id in ["pin-old", "text", "locked", "archived"] {
+            app.drafts.insert(id.into(), "Unsent text".into());
+        }
+        app.open_chat("file".into());
+        app.stage_files(vec!["Synthetic document.pdf".into()]);
+        app.apply(Action::CloseChat, &egui::Context::default());
+        let ids: Vec<_> = app
+            .visible_chats()
+            .iter()
+            .map(|chat| chat.id.clone())
+            .collect();
+        assert_eq!(ids, ["pin-new", "pin-old", "text", "file", "recent"]);
+    }
+
+    /// A new draft moves only on leaving; reopening and clearing a saved
+    /// draft cannot move its row while the reader is composing.
+    #[test]
+    fn draft_priority_changes_on_leaving_instead_of_typing_or_opening() {
+        let mut app = app();
+        let mut recent = Chat::new("recent".into(), "Recent".into());
+        recent.last_activity = 20;
+        // An older chat, not a stranger never written to: those leave the
+        // list once their draft is gone.
+        let mut draft = Chat::new("draft".into(), "Draft".into());
+        draft.last_activity = 10;
+        app.chats = vec![recent, draft];
+        let ids = |app: &App| -> Vec<String> {
+            app.visible_chats()
+                .iter()
+                .map(|chat| chat.id.clone())
+                .collect()
+        };
+        app.open_chat("draft".into());
+        app.composer = "Typing a new draft".into();
+        assert_eq!(ids(&app), ["recent", "draft"]);
+        app.open_chat("recent".into());
+        assert_eq!(ids(&app), ["draft", "recent"]);
+        app.open_chat("draft".into());
+        assert_eq!(ids(&app), ["draft", "recent"]);
+        app.composer.clear();
+        assert_eq!(ids(&app), ["draft", "recent"]);
+        app.open_chat("recent".into());
+        assert_eq!(ids(&app), ["recent", "draft"]);
+    }
+
+    /// Archive drafts can establish the initial startup priority, but a
+    /// delayed answer cannot promote an active attachment composer.
+    #[test]
+    fn late_archived_draft_keeps_an_attachment_composers_priority() {
+        for staged_attachment in [false, true] {
+            let mut app = app();
+            let mut recent = Chat::new("recent".into(), "Recent".into());
+            recent.last_activity = 20;
+            app.chats = vec![recent, Chat::new("draft".into(), "Draft".into())];
+            app.open_chat("draft".into());
+            if staged_attachment {
+                app.stage_files(vec!["Synthetic document.pdf".into()]);
+            }
+            assert_eq!(app.visible_chats()[0].id, "recent");
+            events_for(
+                &mut app,
+                Event::Drafts(vec![("draft".into(), "Saved archive text".into())]),
+            );
+            assert_eq!(app.composer, "Saved archive text");
+            assert_eq!(app.pending.len(), usize::from(staged_attachment));
+            assert_eq!(
+                app.visible_chats()[0].id,
+                if staged_attachment { "recent" } else { "draft" },
+                "only the untouched startup composer gains draft priority"
+            );
+            app.open_chat("recent".into());
+            assert_eq!(app.visible_chats()[0].id, "draft");
+        }
+    }
+
+    /// Identical chat ids in two accounts never share draft priority, and
+    /// restoring an account keeps its parked draft in the same priority group.
+    #[test]
+    fn draft_priority_stays_with_its_account() {
+        let directory = tempfile::tempdir().unwrap();
+        let (mut app, _) = two_accounts(directory.path());
+        for account in &mut app.accounts {
+            let mut recent = Chat::new("recent".into(), "Recent".into());
+            recent.last_activity = 20;
+            account.chats = vec![recent, Chat::new("draft".into(), "Draft".into())];
+        }
+        let first = app.account().id.clone();
+        let second = app.accounts[1].id.clone();
+        app.drafts
+            .insert("draft".into(), "First account only".into());
+        app.open_chat("draft".into());
+        assert_eq!(app.visible_chats()[0].id, "draft");
+        app.switch_account(&second);
+        app.open_chat("draft".into());
+        assert_eq!(app.visible_chats()[0].id, "recent");
+        app.switch_account(&first);
+        assert_eq!(app.visible_chats()[0].id, "draft");
+        assert_eq!(app.composer, "First account only");
     }
 
     #[test]
@@ -20164,7 +20313,8 @@ mod tests {
         app.search.clear();
         app.open_chat("2@s.whatsapp.net".into());
         assert_eq!(names(&app), ["Ada", "Stranger", "Group"]);
-        // A draft left unsent keeps the chat listed once it is closed.
+        // A draft left unsent keeps the chat listed once it is closed, and
+        // parked drafts come before other chats.
         app.open_chat = None;
         app.drafts.insert("2@s.whatsapp.net".into(), "hello".into());
         assert_eq!(names(&app), ["Stranger", "Ada", "Group"]);
