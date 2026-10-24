@@ -36,9 +36,9 @@ See [ZapFast's pull requests](https://github.com/crmne/zapfast/pulls) for work p
 
 ## Existing ZapFast users
 
-Quit ZapFast before starting ZapFaster. The fork intentionally retains ZapFast's existing settings, session, encrypted archive, OS keyring identity and single-instance lock. It uses the existing `zapfast` data directories; installing both does not create independent accounts. Back up your data before switching, and use one application at a time. The fork does not read your archive during builds or development.
+Quit ZapFast before starting ZapFastest. The fork intentionally retains ZapFast's existing settings, session, encrypted archive, OS keyring identity and single-instance lock. It uses the existing `zapfast` data directories; installing both does not create independent accounts. Back up your data before switching, and use one application at a time. The fork does not read your archive during builds or development.
 
-ZapFaster checks its own GitHub releases for updates and verifies them with its own Ed25519 signing key. It does not consume upstream ZapFast updates. Update signatures are separate from Windows Authenticode and Apple notarization; download pages state any platform signing limitations.
+ZapFastest checks its own GitHub releases for updates and verifies them with its own Ed25519 signing key. It does not consume upstream ZapFast updates. Update signatures are separate from Windows Authenticode and Apple notarization; download pages state any platform signing limitations.
 
 The [settings and files guide](docs/_reference/settings-and-files.md) describes local storage, encryption and network behavior. GIF search contacts Giphy only when used and configured; preview links and location map links may contact the relevant website when opened. Whisper downloads its 1.5 GB multilingual model from Hugging Face when first requested, verifies its pinned SHA-256 digest, and transcribes on your CPU. Transcripts are stored in the encrypted account archive; model files are in the account cache. No feature uploads message content to a transcription or analytics service.
 
