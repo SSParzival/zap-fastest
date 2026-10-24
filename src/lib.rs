@@ -1,4 +1,4 @@
-//! Zap Faster internals exposed for diagnostics and tests.
+//! ZapFastest internals exposed for diagnostics and tests.
 
 pub mod account;
 pub mod animation;
@@ -18,6 +18,7 @@ mod call_transport;
 pub mod calls;
 pub mod camera;
 pub mod chat_link;
+pub mod config;
 pub mod custom_emoji;
 pub mod custom_font;
 #[cfg(any(test, feature = "demo"))]

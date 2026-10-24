@@ -483,9 +483,9 @@ fn unlock_locked_chats(app: &mut App, ui: &mut egui::Ui) {
     theme::paragraph(
         ui,
         if setup {
-            "Choose a local code to open the Locked tab. It is separate from your phone's code. This hides chats in Zap Faster, it does not add another encryption layer."
+            "Choose a local code to open the Locked tab. It is separate from your phone's code. This hides chats in ZapFastest, it does not add another encryption layer."
         } else {
-            "Enter your local Zap Faster code. Leaving the Locked tab or closing the window locks it again."
+            "Enter your local ZapFastest code. Leaving the Locked tab or closing the window locks it again."
         },
         theme::regular(13.0),
         palette.secondary,
@@ -561,7 +561,7 @@ fn confirm_lock_chat(app: &mut App, ui: &mut egui::Ui, id: &str) {
     title(ui, app, "Lock this chat?");
     theme::paragraph(
         ui,
-        "This moves the chat to the Locked tab, hiding it from the normal chat list, search, unread badges, and notifications. The lock status also syncs to your phone. Open Locked with a separate local Zap Faster code to read it. Sending from locked chats is not supported yet.",
+        "This moves the chat to the Locked tab, hiding it from the normal chat list, search, unread badges, and notifications. The lock status also syncs to your phone. Open Locked with a separate local ZapFastest code to read it. Sending from locked chats is not supported yet.",
         theme::regular(13.0),
         palette.secondary,
     );
@@ -1084,7 +1084,7 @@ fn about(app: &mut App, ui: &mut egui::Ui) {
         let (logo, _) = ui.allocate_exact_size(egui::Vec2::splat(44.0), egui::Sense::hover());
         theme::mark(ui, logo.center(), 44.0);
         ui.vertical(|ui| {
-            theme::text(ui, "Zap Faster", theme::bold(17.0), palette.text);
+            theme::text(ui, "ZapFastest", theme::bold(17.0), palette.text);
             theme::text(
                 ui,
                 format!("Version {}", env!("CARGO_PKG_VERSION")),
@@ -1096,7 +1096,7 @@ fn about(app: &mut App, ui: &mut egui::Ui) {
     ui.add_space(6.0);
     theme::paragraph(
         ui,
-        "A community fork of ZapFast, maintained by a daily user. Built with Rust, egui and whatsapp-rust. Messages are end-to-end encrypted on this device.",
+        "A community fork of ZapFast and ZapFaster, maintained by a daily user. Built with Rust, egui and whatsapp-rust. Messages are end-to-end encrypted on this device.",
         theme::regular(13.0),
         palette.text,
     );
@@ -1110,7 +1110,7 @@ fn about(app: &mut App, ui: &mut egui::Ui) {
     ui.horizontal(|ui| {
         if theme::link(ui, "Source code", theme::medium(13.0), palette.link).clicked() {
             app.actions
-                .push(Action::OpenUrl(env!("CARGO_PKG_REPOSITORY").to_owned()));
+                .push(Action::OpenUrl(crate::config::GITHUB_REPO_URL.to_owned()));
         }
         theme::text(ui, "·", theme::regular(13.0), palette.dim);
         if theme::link(ui, "whatsapp-rust", theme::medium(13.0), palette.link).clicked() {
@@ -1483,7 +1483,7 @@ fn confirm_start_over(app: &mut App, ui: &mut egui::Ui) {
     title(ui, app, "Start over?");
     theme::paragraph(
         ui,
-        "Zap Faster keeps your unreadable archive as a separate file, creates a new one, and asks you to link again. Linking again brings back recent history from your phone. Afterwards, remove the old Zap Faster entry under Linked devices on your phone.",
+        "ZapFastest keeps your unreadable archive as a separate file, creates a new one, and asks you to link again. Linking again brings back recent history from your phone. Afterwards, remove the old ZapFastest entry under Linked devices on your phone.",
         theme::regular(13.5),
         palette.text,
     );
@@ -1663,7 +1663,7 @@ fn resume_restored_account(app: &mut App, ui: &mut egui::Ui, id: crate::model::A
         ui,
         &*crate::i18n::gettext(
             locale,
-            "Close Zap Faster on the original installation before continuing. Both installations share the same linked-device identity and must not connect at the same time. Resuming reconnects to WhatsApp and may send pending messages or account changes from the backup. If the phone has invalidated the session, you will need to link again.",
+            "Close ZapFastest on the original installation before continuing. Both installations share the same linked-device identity and must not connect at the same time. Resuming reconnects to WhatsApp and may send pending messages or account changes from the backup. If the phone has invalidated the session, you will need to link again.",
         ),
         theme::regular(13.5),
         palette.text,

@@ -372,7 +372,7 @@ fn sections(app: &App) -> Vec<Section> {
     );
     appearance.row(
         translated(locale, "Emoji style"),
-        translated(locale, "System uses platform emoji with Noto fallback. Noto uses bundled emoji only. You can import a CBDT or sbix colour emoji font you are allowed to use (up to 256 MiB). Custom fonts have no Noto fallback. Restart Zap Faster to apply."),
+        translated(locale, "System uses platform emoji with Noto fallback. Noto uses bundled emoji only. You can import a CBDT or sbix colour emoji font you are allowed to use (up to 256 MiB). Custom fonts have no Noto fallback. Restart ZapFastest to apply."),
         emoji_renderer_picker,
     );
     appearance.row(
@@ -706,7 +706,7 @@ fn sections(app: &App) -> Vec<Section> {
     let note = if app.account_privacy.fetch_failed {
         Some(crate::i18n::gettext(
             locale,
-            "Could not load your account privacy. Trying again when Zap Faster reconnects.",
+            "Could not load your account privacy. Trying again when ZapFastest reconnects.",
         ))
     } else if !app.is_connected() {
         Some(crate::i18n::gettext(
@@ -814,7 +814,7 @@ fn sections(app: &App) -> Vec<Section> {
         translated(locale, "Check for updates"),
         translated(
             locale,
-            "Asks GitHub once a day, sending only the Zap Faster version.",
+            "Asks GitHub once a day, sending only the ZapFastest version.",
         ),
         |settings| &mut settings.check_for_updates,
     );
@@ -822,7 +822,7 @@ fn sections(app: &App) -> Vec<Section> {
         translated(locale, "Download updates automatically"),
         translated(
             locale,
-            "You still choose when to restart. Package managers and Flatpak update Zap Faster themselves.",
+            "You still choose when to restart. Package managers and Flatpak update ZapFastest themselves.",
         ),
         |settings| &mut settings.download_updates_automatically,
     );
@@ -1168,7 +1168,8 @@ fn sections(app: &App) -> Vec<Section> {
     let mut about_section = Section::new(translated(locale, "About"));
     about_section.block(
         vec![
-            "Zap Faster".into(),
+            "ZapFastest".into(),
+            "zap-fastest".into(),
             translated(locale, "Keyboard shortcuts"),
             translated(locale, "Source code"),
         ],
@@ -1275,7 +1276,7 @@ fn app_lock_rows(app: &App, privacy: &mut Section) {
             translated(locale, "Lock after"),
             keyed(translated(
                 locale,
-                "Time without using Zap Faster, also counted while it is in the tray. Ctrl+Shift+L locks it at once.",
+                "Time without using ZapFastest, also counted while it is in the tray. Ctrl+Shift+L locks it at once.",
             )),
             move |ui, app| {
                 let selected = app.settings.app_lock_after;
@@ -1494,7 +1495,7 @@ fn theme_picker(ui: &mut egui::Ui, app: &mut App) {
 
 /// The website's page on writing a theme.
 const THEMES_GUIDE: &str =
-    "https://github.com/eternalwaitt/zap-faster/blob/main/docs/_reference/themes.md";
+    "https://github.com/SSParzival/zap-fastest/blob/main/docs/_reference/themes.md";
 
 /// The interface language menu.
 fn font_picker(ui: &mut egui::Ui, app: &mut App) {
@@ -1869,7 +1870,7 @@ fn storage_usage(ui: &mut egui::Ui, app: &App) {
         ui,
         &crate::i18n::gettext(
             app.locale,
-            "Space taken by the pictures, videos, stickers, and GIFs Zap Faster has \
+            "Space taken by the pictures, videos, stickers, and GIFs ZapFastest has \
              downloaded. The size is the one WhatsApp declared. Documents and audio \
              count under Other.",
         ),
@@ -2195,7 +2196,7 @@ fn about(app: &mut App, ui: &mut egui::Ui) {
         ui.vertical(|ui| {
             theme::text(
                 ui,
-                format!("Zap Faster {}", env!("CARGO_PKG_VERSION")),
+                format!("ZapFastest {}", env!("CARGO_PKG_VERSION")),
                 theme::semibold(16.0),
                 palette.text,
             );
@@ -2252,7 +2253,7 @@ fn about(app: &mut App, ui: &mut egui::Ui) {
         .clicked()
         {
             app.actions
-                .push(Action::OpenUrl(env!("CARGO_PKG_REPOSITORY").to_owned()));
+                .push(Action::OpenUrl(crate::config::GITHUB_REPO_URL.to_owned()));
         }
     });
     ui.add_space(14.0);

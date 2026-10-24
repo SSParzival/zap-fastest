@@ -11,22 +11,27 @@ pub use fastframe_update::{
 };
 use fastframe_update::{MacConfig, ReqwestTransport, UpdateConfig};
 
-/// Zap Faster's releases and the names its installations have had.
+pub use crate::config::GITHUB_REPO_URL;
+
+/// ZapFastest's releases and the names its installations have had.
 pub const CONFIG: UpdateConfig = UpdateConfig {
-    // Upstream installations are never treated as Zap Faster update targets.
-    legacy_names: &[],
+    // Upstream installations are never treated as ZapFastest update targets.
+    legacy_names: &["zap-faster"],
     macos: MacConfig {
-        bundle_ids: &["io.github.eternalwaitt.ZapFaster"],
-        executable_names: &[],
-        legacy_bundle_names: &[],
+        bundle_ids: &[
+            "io.github.eternalwaitt.ZapFastest",
+            "io.github.eternalwaitt.ZapFaster",
+        ],
+        executable_names: &["zap-fastest", "zap-faster"],
+        legacy_bundle_names: &["Zap Faster", "ZapFaster"],
     },
     publisher_key: Some(include_str!("../assets/update-public-key.hex")),
-    // Only Zap Faster signatures authorize updates.
+    // Only ZapFastest signatures authorize updates.
     additional_publisher_keys: &[],
     ..UpdateConfig::new(
-        "eternalwaitt/zap-faster",
-        "Zap Faster",
-        "zap-faster",
+        crate::config::REPOSITORY,
+        "ZapFastest",
+        "zap-fastest",
         env!("CARGO_PKG_VERSION"),
     )
 };
@@ -48,10 +53,10 @@ mod tests {
     fn update_config_is_valid() {
         CONFIG.validate().unwrap();
         assert_eq!(CONFIG.current_version, env!("CARGO_PKG_VERSION"));
-        assert_eq!(CONFIG.slug, "zap-faster");
-        assert_eq!(CONFIG.repository, "eternalwaitt/zap-faster");
+        assert_eq!(CONFIG.slug, "zap-fastest");
+        assert_eq!(CONFIG.repository, crate::config::REPOSITORY);
         assert!(CONFIG.additional_publisher_keys.is_empty());
-        assert!(CONFIG.legacy_names.is_empty());
+        assert_eq!(CONFIG.legacy_names, &["zap-faster"]);
     }
 
     #[test]
