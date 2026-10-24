@@ -3510,6 +3510,12 @@ pub fn apply_flags(app: &mut App, page: Option<&str>) {
                 }
                 app.composer = "Original document files and lossless clipboard pixels".into();
             }
+            "view-once" | "view-once-off" => {
+                let (photo, _) = sample_files(app);
+                app.stage(crate::app::Pending::File(photo));
+                app.pending_view_once = part == "view-once";
+                app.composer = "One moment, just for you.".into();
+            }
             "staged" => {
                 let (photo, _) = sample_files(app);
                 let side = 48usize;
@@ -6455,6 +6461,9 @@ mod tests {
             "staged",
             "original-documents",
             "international-sender",
+            "view-once-off",
+            "view-once",
+            "view-once,light",
             "attachment-draft-away",
             "attachment-draft-return",
             "crop",
@@ -8483,6 +8492,186 @@ mod tests {
         );
         render(&mut app, &ctx);
         assert!(ctx.memory(|memory| memory.has_focus(composer)));
+    }
+
+    #[test]
+    fn view_once_photo_toggle_supports_click_keyboard_and_send() {
+        use crate::ui::focus::{Stop, control};
+        let mut app = app();
+        apply_flags(&mut app, Some("view-once-off"));
+        app.backend.record_demo_commands();
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        app.attach(&ctx);
+        render(&mut app, &ctx);
+
+        press_labelled(&mut app, &ctx, "View once", egui::accesskit::Role::CheckBox);
+        assert!(app.pending_view_once);
+        ctx.memory_mut(|memory| memory.request_focus(egui::Id::new("composer-text")));
+        frame_with(&mut app, &ctx, tab());
+        assert_eq!(focused_stop(&ctx), Some(Stop::ViewOnce));
+        frame_with(
+            &mut app,
+            &ctx,
+            vec![key(egui::Key::Space, egui::Modifiers::NONE)],
+        );
+        render(&mut app, &ctx);
+        assert!(
+            !app.pending_view_once,
+            "Space switches the selected icon off"
+        );
+
+        press_labelled(&mut app, &ctx, "View once", egui::accesskit::Role::CheckBox);
+        app.backend.take_demo_commands();
+        press_labelled(&mut app, &ctx, "Send", egui::accesskit::Role::Button);
+        assert!(
+            app.backend
+                .take_demo_commands()
+                .iter()
+                .any(|command| matches!(command,
+            crate::backend::Command::SendFiles { view_once: true, caption: Some(caption), .. }
+                if caption == "One moment, just for you."))
+        );
+        assert!(app.pending.is_empty());
+        assert!(!app.pending_view_once);
+        assert!(control(&ctx, Stop::ViewOnce).is_none());
+    }
+
+    #[test]
+    fn view_once_photo_control_fits_the_caption_in_both_themes_and_narrow_windows() {
+        use crate::ui::focus::{Stop, control};
+        for page in ["view-once", "view-once,light"] {
+            for width in [380.0, 640.0, 1180.0] {
+                let mut app = app();
+                apply_flags(&mut app, Some(page));
+                apply_flags(&mut app, Some("nosidebar"));
+                let ctx = egui::Context::default();
+                ctx.enable_accesskit();
+                app.attach(&ctx);
+                for _ in 0..4 {
+                    let mut output = ctx.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(width, 780.0),
+                            )),
+                            ..Default::default()
+                        },
+                        |ui| {
+                            let ctx = ui.ctx().clone();
+                            app.background_frame(&ctx);
+                            app.frame_ui(ui);
+                        },
+                    );
+                    let tree = output.platform_output.accesskit_update.as_ref().unwrap();
+                    let toggle = tree
+                        .nodes
+                        .iter()
+                        .map(|(_, node)| node)
+                        .find(|node| node.label() == Some("View once"))
+                        .expect("the icon has a readable name");
+                    assert_eq!(toggle.role(), egui::accesskit::Role::CheckBox);
+                    assert_eq!(toggle.toggled(), Some(egui::accesskit::Toggled::True));
+                    output.textures_delta.clear();
+                }
+                let toggle = ctx
+                    .read_response(control(&ctx, Stop::ViewOnce).unwrap())
+                    .unwrap()
+                    .rect;
+                let send = ctx
+                    .read_response(control(&ctx, Stop::Send).unwrap())
+                    .unwrap()
+                    .rect;
+                let caption = ctx
+                    .read_response(egui::Id::new("composer-text"))
+                    .unwrap()
+                    .rect;
+                let pill = ctx
+                    .data(|data| {
+                        data.get_temp::<egui::Rect>(crate::ui::conversation::composer_pill_id())
+                    })
+                    .unwrap();
+                assert!(caption.right() <= toggle.left(), "{page} {width}");
+                assert!(toggle.right() <= send.left(), "{page} {width}");
+                assert!(
+                    pill.contains_rect(toggle) && pill.contains_rect(send),
+                    "{page} {width}"
+                );
+                assert!((toggle.center().y - send.center().y).abs() < 1.0);
+            }
+        }
+    }
+
+    #[test]
+    fn view_once_toggle_is_hidden_for_documents_batches_and_edits() {
+        use crate::ui::focus::{Stop, control};
+        for kind in ["document", "batch", "video", "edit"] {
+            let mut app = app();
+            apply_flags(&mut app, Some("view-once-off"));
+            let path = match &app.pending[0] {
+                crate::app::Pending::File(path) => path.clone(),
+                _ => unreachable!(),
+            };
+            match kind {
+                "document" => {
+                    app.pending[0] =
+                        crate::app::Pending::Document(Box::new(crate::app::Pending::File(path)))
+                }
+                "video" => {
+                    app.pending[0] = crate::app::Pending::File("/fixture/clip.mp4".into())
+                }
+                "batch" => {
+                    app.stage(crate::app::Pending::File(path));
+                }
+                "edit" => apply_flags(&mut app, Some("edit")),
+                _ => unreachable!(),
+            }
+            let ctx = egui::Context::default();
+            app.attach(&ctx);
+            render(&mut app, &ctx);
+            assert!(control(&ctx, Stop::ViewOnce).is_none(), "{kind}");
+        }
+    }
+
+    /// New contact with a blank name messages a formatted number without
+    /// saving it, and refuses a number that formatting cannot explain.
+    #[test]
+    fn new_contact_messages_a_formatted_number_left_unnamed() {
+        let mut app = app();
+        app.backend.record_demo_commands();
+        let ctx = egui::Context::default();
+        app.attach(&ctx);
+        app.actions
+            .push(crate::model::Action::ShowDialog(Dialog::NewContact));
+        render(&mut app, &ctx);
+        app.backend.take_demo_commands();
+        let submit = |app: &mut App, phone: &str| {
+            app.new_contact_phone = phone.into();
+            ctx.memory_mut(|memory| memory.request_focus(egui::Id::new("new-contact-phone")));
+            render(app, &ctx);
+            frame_with(
+                app,
+                &ctx,
+                vec![key(egui::Key::Enter, egui::Modifiers::NONE)],
+            );
+            app.backend.take_demo_commands()
+        };
+        for refused in ["123", "+1 555 123 4567 ext. 89", "+1 (555 123-4567"] {
+            assert!(
+                !submit(&mut app, refused)
+                    .iter()
+                    .any(|command| matches!(command, crate::backend::Command::NewContact { .. })),
+                "{refused}"
+            );
+        }
+        assert!(
+            submit(&mut app, "+1 (555) 123-4567")
+                .iter()
+                .any(|command| matches!(command,
+            crate::backend::Command::NewContact { phone, full_name, first_name, .. }
+                if phone == "15551234567" && full_name.is_none() && first_name.is_none()))
+        );
+        assert!(app.new_contact_pending);
     }
 
     /// Checks that navigation to an individual album member scrolls its grouped row into view.

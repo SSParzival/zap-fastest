@@ -2686,6 +2686,8 @@ pub enum Action {
     RemovePending(usize),
     /// Toggles original-document sending for a staged attachment.
     TogglePendingDocument(usize),
+    /// Sends the one eligible staged photo as a WhatsApp view-once message.
+    SetPendingViewOnce(bool),
     /// Opens the cropper on a staged picture.
     EditPicture(usize),
     /// Keeps the crop and the turn, replacing the staged picture.

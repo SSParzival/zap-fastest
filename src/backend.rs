@@ -467,6 +467,11 @@ pub enum Command {
     SendFiles {
         chat: ChatId,
         paths: Vec<PathBuf>,
+        /// Sends every file as a document with its original bytes, instead
+        /// of turning pictures, videos and audio into media messages.
+        documents: bool,
+        /// Sends the one supported photo as a WhatsApp view-once message.
+        view_once: bool,
         caption: Option<String>,
         mentions: Vec<String>,
         /// The message the first file replies to.
@@ -486,6 +491,8 @@ pub enum Command {
         width: u32,
         height: u32,
         rgba: Vec<u8>,
+        /// Sends this pasted picture as a WhatsApp view-once message.
+        view_once: bool,
         caption: Option<String>,
         mentions: Vec<String>,
         quoting: Option<crate::model::ReplyTarget>,
@@ -1538,6 +1545,8 @@ pub enum Refusal {
     /// original protobuf is missing, unreadable, or deleted. Sending anyway
     /// would deliver the reply without its quote.
     QuoteUnavailable,
+    /// View-once sends must be one photo, not a document or batch.
+    UnsupportedViewOnce,
 }
 
 /// The content of a refused send.
@@ -1553,12 +1562,15 @@ pub enum Unsent {
     Voice(Vec<f32>),
     Files {
         paths: Vec<PathBuf>,
+        documents: bool,
+        view_once: bool,
         caption: Option<String>,
     },
     Image {
         width: u32,
         height: u32,
         rgba: Vec<u8>,
+        view_once: bool,
         caption: Option<String>,
     },
     Document {

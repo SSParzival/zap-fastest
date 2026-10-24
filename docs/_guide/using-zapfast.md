@@ -235,6 +235,23 @@ are grouped. **Download all** uses the normal per-file download limit and
 shows individual failures; **Save all…** copies downloaded files to a folder
 without replacing existing files. Open an item to view it individually.
 
+With exactly one supported photo (JPEG, PNG, or WebP) staged, select
+the **View once** icon (a 1 inside a dashed circle) beside Send. It lights up
+when enabled, and sends the photo as a WhatsApp view-once message. You can still
+add a caption. The sent message appears as a view-once placeholder in ZapFastest;
+the recipient opens it on their phone. This option is not available for
+documents or batches of attachments.
+If you add more attachments, or a refused send returns to a draft with other
+attachments, remove the extras or turn off **View once** before sending.
+ZapFastest keeps this choice until you switch it off, send, or clear the draft.
+
+Pictures sent this way become photos, which WhatsApp shows inline but
+compresses: transparency and the file's metadata are lost. To send a picture as
+it is, choose **Send as document** in the plus menu beside the message field
+instead. The files you select there go as documents with their own name and
+bytes, pictures included, and show as files above the composer until you send
+them.
+
 Staged attachments, captions, selected mentions and reply quotes remain with
 their chat and account when you switch or close conversations. Text drafts
 persist in the encrypted archive; attachment drafts stay in memory until
