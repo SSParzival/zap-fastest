@@ -1324,7 +1324,15 @@ fn composer(app: &mut App, ui: &mut egui::Ui, chat: &Chat) {
                 }
                 if chat.locked {
                     ui.vertical_centered(|ui| {
-                        theme::text(ui, "Locked chats are read-only in ZapFastest", theme::regular(13.5), palette.secondary);
+                        theme::text(
+                            ui,
+                            crate::i18n::gettext(
+                                app.locale,
+                                "Locked chats are read-only in ZapFastest",
+                            ),
+                            theme::regular(13.5),
+                            palette.secondary,
+                        );
                     });
                     return;
                 }
@@ -1398,9 +1406,10 @@ fn composer(app: &mut App, ui: &mut egui::Ui, chat: &Chat) {
                                     );
                                 });
                                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                    let cancel_reply = crate::i18n::gettext(app.locale, "Cancel reply (Esc)");
                                     if theme::icon_button(
                                         ui, Icon::X, 16.0, palette.secondary, palette.text,
-                                        "Cancel reply (Esc)",
+                                        cancel_reply.as_ref(),
                                     ).clicked() {
                                         app.actions.push(Action::CancelReply);
                                     }
@@ -1587,7 +1596,7 @@ fn composer(app: &mut App, ui: &mut egui::Ui, chat: &Chat) {
                             palette.secondary
                         },
                         palette.text,
-                        "Emoji, GIFs, and stickers",
+                        &crate::i18n::gettext(app.locale, "Emoji, GIFs, and stickers"),
                     )).tab_stop(Stop::Emoji);
                     app.picker_anchor = Some(smile.rect);
                     if smile.clicked() {
@@ -1836,7 +1845,7 @@ fn composer(app: &mut App, ui: &mut egui::Ui, chat: &Chat) {
                         fill,
                         hover,
                         palette.secondary,
-                        "Record a voice message",
+                        &crate::i18n::gettext(app.locale, "Record a voice message"),
                     )
                     .tab_stop(Stop::Send)
                     .clicked()
@@ -1849,7 +1858,15 @@ fn composer(app: &mut App, ui: &mut egui::Ui, chat: &Chat) {
                     } else {
                         Icon::Send
                     };
-                    if theme::circle_button(ui, icon_kind, button_width, fill, hover, icon, "Send")
+                    if theme::circle_button(
+                        ui,
+                        icon_kind,
+                        button_width,
+                        fill,
+                        hover,
+                        icon,
+                        &crate::i18n::gettext(app.locale, "Send"),
+                    )
                         .tab_stop(Stop::Send)
                         .clicked()
                     {
@@ -2161,15 +2178,17 @@ fn edit_strip(app: &mut App, ui: &mut egui::Ui) {
         ui.set_width(ui.available_width());
         ui.horizontal(|ui| {
             theme::icon(ui, Icon::Pencil, 16.0, palette.accent);
-            theme::text(ui, "Editing message", theme::semibold(12.5), palette.accent);
+            let label = crate::i18n::gettext(app.locale, "Editing message");
+            theme::text(ui, &*label, theme::semibold(12.5), palette.accent);
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let stop_editing = crate::i18n::gettext(app.locale, "Stop editing (Esc)");
                 if theme::icon_button(
                     ui,
                     Icon::X,
                     16.0,
                     palette.secondary,
                     palette.text,
-                    "Stop editing (Esc)",
+                    stop_editing.as_ref(),
                 )
                 .clicked()
                 {
@@ -2184,7 +2203,7 @@ fn edit_strip(app: &mut App, ui: &mut egui::Ui) {
 fn reply_strip(app: &mut App, ui: &mut egui::Ui, quoted: &Message) {
     let palette = app.palette;
     let who = if quoted.from_me {
-        "You".to_owned()
+        crate::i18n::gettext(app.locale, "You").into_owned()
     } else {
         app.display_name_or(&quoted.sender, quoted.sender_name.as_deref())
     };
@@ -2197,22 +2216,20 @@ fn reply_strip(app: &mut App, ui: &mut egui::Ui, quoted: &Message) {
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing.y = 1.0;
                 ui.set_max_width((ui.available_width() - 40.0).max(0.0));
-                widgets::rich_text(
-                    ui,
-                    &format!("Replying to {who}"),
-                    theme::semibold(12.5),
-                    palette.accent,
-                );
+                let replying_to =
+                    crate::i18n::gettext(app.locale, "Replying to {name}").replace("{name}", &who);
+                widgets::rich_text(ui, &replying_to, theme::semibold(12.5), palette.accent);
                 widgets::rich_text(ui, &summary, theme::regular(12.5), palette.secondary);
             });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let cancel_reply = crate::i18n::gettext(app.locale, "Cancel reply (Esc)");
                 if theme::icon_button(
                     ui,
                     Icon::X,
                     16.0,
                     palette.secondary,
                     palette.text,
-                    "Cancel reply (Esc)",
+                    cancel_reply.as_ref(),
                 )
                 .clicked()
                 {
@@ -4719,7 +4736,9 @@ fn bubble_frame(
             // Reserve the label's line now and paint it once the contents
             // are measured, at their start: an own bubble lays out from the
             // right, and its width is known only then.
-            let forwarded = message.forwarded.then(|| forwarded_label(ui, &palette));
+            let forwarded = message
+                .forwarded
+                .then(|| forwarded_label(ui, &palette, view.locale));
             // Cards share the bubble's settled width: at least CARD_WIDTH and
             // no more than the cap. Text spans that width and stays left-aligned.
             // Bubbles without cards use the natural text width.
@@ -5219,7 +5238,7 @@ fn quote_block(
     let palette = view.palette;
     let mine = view.me == Some(quoted.sender.as_str());
     let who = if mine {
-        "You".to_owned()
+        crate::i18n::gettext(view.locale, "You").into_owned()
     } else {
         (view.names_or)(&quoted.sender, quoted.sender_name.as_deref())
     };
@@ -5344,10 +5363,15 @@ const FORWARDED_HEIGHT: f32 = 15.0;
 /// Reserves the line for a forwarded message's label at the top of its
 /// bubble and returns that space with the laid-out word, for
 /// [`paint_forwarded_label`] once the bubble's contents are measured.
-fn forwarded_label(ui: &mut egui::Ui, palette: &Palette) -> (Rect, std::sync::Arc<egui::Galley>) {
+fn forwarded_label(
+    ui: &mut egui::Ui,
+    palette: &Palette,
+    locale: crate::i18n::Locale,
+) -> (Rect, std::sync::Arc<egui::Galley>) {
     let mut job = egui::text::LayoutJob::default();
+    let text = crate::i18n::gettext(locale, "Forwarded");
     job.append(
-        "Forwarded",
+        &text,
         0.0,
         egui::TextFormat {
             font_id: theme::regular(12.5),
@@ -5360,7 +5384,7 @@ fn forwarded_label(ui: &mut egui::Ui, palette: &Palette) -> (Rect, std::sync::Ar
     let width = FORWARDED_ICON + FORWARDED_GAP + galley.size().x;
     let (reserved, response) =
         ui.allocate_exact_size(vec2(width, FORWARDED_HEIGHT), Sense::hover());
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, "Forwarded"));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, text.clone()));
     // Sit closer to what follows than the bubble's usual spacing.
     ui.add_space(-1.0);
     (reserved, galley)
@@ -10621,20 +10645,23 @@ fn selection_bar(app: &mut App, ui: &mut egui::Ui, chat: &str, selected: &[Strin
         {
             app.actions.push(Action::CancelSelection);
         }
-        let count = if selected.len() == 1 {
-            "1 selected".to_owned()
-        } else {
-            format!("{} selected", selected.len())
-        };
+        let count = crate::i18n::ngettext(
+            app.locale,
+            "{count} selected",
+            "{count} selected",
+            u32::try_from(selected.len()).unwrap_or(u32::MAX),
+        )
+        .replace("{count}", &selected.len().to_string());
         theme::text(ui, &count, theme::medium(14.5), palette.text);
         ui.with_layout(
             Layout::right_to_left(Align::Center).with_main_wrap(true),
             |ui| {
                 // The selection stays open with nothing in it, as its check
                 // boxes do; there is nothing to forward until one is ticked.
+                let forward_label = format!("{}…", crate::i18n::gettext(app.locale, "Forward"));
                 let forward = ui
                     .add_enabled_ui(!selected.is_empty(), |ui| {
-                        theme::pill_button(ui, &palette, "Forward…", true)
+                        theme::pill_button(ui, &palette, &forward_label, true)
                     })
                     .inner;
                 if forward.clicked() {
@@ -10643,9 +10670,10 @@ fn selection_bar(app: &mut App, ui: &mut egui::Ui, chat: &str, selected: &[Strin
                         messages: selected.to_vec(),
                     }));
                 }
+                let delete_label = format!("{}…", crate::i18n::gettext(app.locale, "Delete"));
                 let delete = ui
                     .add_enabled_ui(!selected.is_empty(), |ui| {
-                        theme::pill_button(ui, &palette, "Delete…", false)
+                        theme::pill_button(ui, &palette, &delete_label, false)
                     })
                     .inner;
                 // Demo/test: hold this menu open for a screenshot.

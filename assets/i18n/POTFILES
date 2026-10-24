@@ -1,4 +1,4 @@
-src/mentions.rs
+src/ui/notification_overlay.rs
 src/new_group.rs
 src/model.rs
 src/util.rs
@@ -28,6 +28,6 @@ src/ui/login.rs
 src/ui/archive_backup.rs
 src/ui/call.rs
 src/ui/statuses.rs
-src/ui/rail.rs
+src/ui/video_preview.rs
 src/ui/mod.rs
 src/ui/new_group.rs

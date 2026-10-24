@@ -21,6 +21,6 @@ crate=$(cargo metadata --format-version 1 --locked | python3 -c 'import json,sys
 if command -v cygpath >/dev/null 2>&1; then
     crate=$(cygpath -u "$crate")
 fi
-exec "$crate/scripts/update-translations.sh" --package "Zap Faster" --domain zapfast \
-    --bugs 'https://github.com/eternalwaitt/zap-faster/issues/new?template=translation.yml' \
+exec "$crate/scripts/update-translations.sh" --package "ZapFastest" --domain zapfast \
+    --bugs 'https://github.com/eternalwaitt/zap-fastest/issues/new?template=translation.yml' \
     --keyword translated:2 --fuzzy-matching "$@"

@@ -359,6 +359,15 @@ mod tests {
         assert_eq!(gettext(Locale::Italian, "Search"), "Cerca");
         assert_eq!(gettext(Locale::Russian, "Search"), "Поиск");
         assert_eq!(gettext(Locale::Spanish, "Unread"), "No leídos");
+        assert_eq!(
+            gettext(Locale::Spanish, "ZapFastest is locked"),
+            "ZapFastest está bloqueado"
+        );
+        assert_eq!(
+            gettext(Locale::Spanish, "Channels are read-only in ZapFastest"),
+            "Los canales son de solo lectura en ZapFastest"
+        );
+        assert_eq!(gettext(Locale::Spanish, "Forwarded"), "Reenviado");
         assert_eq!(gettext(Locale::French, "Settings"), "Paramètres");
         assert_eq!(
             gettext(Locale::Italian, "Type a message"),
