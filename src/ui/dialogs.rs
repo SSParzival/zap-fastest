@@ -885,10 +885,10 @@ fn forward(app: &mut App, ui: &mut egui::Ui, messages: &[String]) {
                 ui.ctx().data_mut(|data| {
                     data.insert_temp(egui::Id::new(("forward-recipient", &chat.id)), rect)
                 });
+                let selected = app.forward_recipients.contains(&chat.id);
+                let blocked = full && !selected;
                 if ui.is_rect_visible(rect) {
-                    let selected = app.forward_recipients.contains(&chat.id);
-                    let blocked = false;
-                    if response.hovered() || selected {
+                    if (response.hovered() && !blocked) || selected {
                         super::widgets::dialog_row_highlight(ui, rect, palette.surface_hover);
                     }
                     let check = egui::Rect::from_center_size(
@@ -918,20 +918,30 @@ fn forward(app: &mut App, ui: &mut egui::Ui, messages: &[String]) {
                         ui,
                         &title,
                         theme::medium(14.5),
-                        palette.text,
+                        if blocked {
+                            palette.secondary
+                        } else {
+                            palette.text
+                        },
                         rect.width() - 90.0,
                         1,
                     );
                     line.paint(
                         ui,
                         pos2(rect.left() + 50.0, rect.center().y - line.size().y / 2.0),
-                        palette.text,
+                        if blocked {
+                            palette.secondary
+                        } else {
+                            palette.text
+                        },
                     );
                 }
-                if response
-                    .on_hover_cursor(egui::CursorIcon::PointingHand)
-                    .clicked()
-                {
+                let response = if blocked {
+                    response
+                } else {
+                    response.on_hover_cursor(egui::CursorIcon::PointingHand)
+                };
+                if response.clicked() && !blocked {
                     app.actions
                         .push(Action::ToggleForwardRecipient(chat.id.clone()));
                 }

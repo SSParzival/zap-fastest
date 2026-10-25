@@ -468,6 +468,19 @@ pub struct LinkPreview {
 
 pub const EDIT_WINDOW: std::time::Duration = std::time::Duration::from_secs(15 * 60);
 
+/// How many chats a message may be forwarded to at once, as on WhatsApp.
+pub const FORWARD_LIMIT: usize = 5;
+
+/// The forwarding limit for messages: one chat when any of them was
+/// forwarded many times, [`FORWARD_LIMIT`] otherwise.
+pub fn forward_limit(frequently_forwarded: bool) -> usize {
+    if frequently_forwarded {
+        1
+    } else {
+        FORWARD_LIMIT
+    }
+}
+
 impl Message {
     /// Only sent text inside the original fifteen-minute window can be edited.
     pub fn editable_at(&self, now: i64) -> bool {

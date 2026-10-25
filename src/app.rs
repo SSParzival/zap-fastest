@@ -630,6 +630,8 @@ pub struct App {
     /// Selected destinations in the active account forwarding dialog.
     pub forward_recipients: Vec<ChatId>,
     pub forward_reviewing: bool,
+    /// How many recipients the forwarding dialog's messages may have.
+    pub forward_limit: usize,
 
     pub location_draft: String,
     /// The group name being typed in the group info dialog.
@@ -1304,6 +1306,7 @@ impl App {
             forward_search: String::new(),
             forward_recipients: Vec::new(),
             forward_reviewing: false,
+            forward_limit: crate::model::FORWARD_LIMIT,
 
             location_draft: String::new(),
             group_name_edit: None,
@@ -1524,6 +1527,7 @@ impl App {
         self.invalidate_composer_undo();
         self.forward_recipients.clear();
         self.forward_reviewing = false;
+        self.forward_limit = crate::model::FORWARD_LIMIT;
         // The locked folder and the picker show the previous account's chats
         // and stickers.
         if self.locked_folder {
@@ -7516,6 +7520,7 @@ impl App {
                 self.forward_search.clear();
                 self.forward_recipients.clear();
                 self.forward_reviewing = false;
+                self.forward_limit = crate::model::FORWARD_LIMIT;
                 self.selection = None;
             }
             Action::ToggleForwardRecipient(id) => {
@@ -7525,7 +7530,9 @@ impl App {
                 {
                     if self.forward_recipients.contains(&id) {
                         self.forward_recipients.retain(|recipient| recipient != &id);
-                    } else {
+                    } else if self.forward_limit == 1 {
+                        self.forward_recipients = vec![id];
+                    } else if self.forward_recipients.len() < self.forward_limit {
                         self.forward_recipients.push(id);
                     }
                 }
@@ -7579,6 +7586,7 @@ impl App {
                 self.forward_search.clear();
                 self.forward_recipients.clear();
                 self.forward_reviewing = false;
+                self.forward_limit = crate::model::FORWARD_LIMIT;
                 self.selection = None;
             }
             Action::StartSelection => {
@@ -8493,6 +8501,7 @@ impl App {
                     self.forward_search.clear();
                     self.forward_recipients.clear();
                     self.forward_reviewing = false;
+                    self.forward_limit = crate::model::FORWARD_LIMIT;
                 }
                 if dialog == Dialog::PairWithPhone {
                     self.pair_phone.clear();
@@ -8518,6 +8527,7 @@ impl App {
                 self.forward_search.clear();
                 self.forward_recipients.clear();
                 self.forward_reviewing = false;
+                self.forward_limit = crate::model::FORWARD_LIMIT;
                 self.contact_edit = None;
                 self.group_name_edit = None;
                 // A group on its way still opens once WhatsApp makes it.
@@ -20447,9 +20457,9 @@ mod tests {
                 app.stage_files(vec!["Synthetic document.pdf".into()]);
             }
             assert_eq!(app.visible_chats()[0].id, "recent");
-            events_for(
-                &mut app,
+            app.apply_backend_event(
                 Event::Drafts(vec![("draft".into(), "Saved archive text".into())]),
+                false,
             );
             assert_eq!(app.composer, "Saved archive text");
             assert_eq!(app.pending.len(), usize::from(staged_attachment));
@@ -22316,7 +22326,7 @@ mod app_lock_tests {
         let mut app = unlocked_app();
         let message = incoming(&mut app);
         app.chats[0].notification_sound = Some(crate::settings::NotificationSound::Alert);
-        app.settings.notification_content = false;
+        app.account_mut().settings.notification_content = false;
         app.maybe_notify(CHAT, &message);
         let shown = app.notifications.shown.last().unwrap().clone();
         assert_eq!(shown.title, "ZapFastest");
@@ -22324,7 +22334,7 @@ mod app_lock_tests {
         assert_eq!(shown.picture, None);
         assert_eq!(shown.sound, app.settings.message_sound);
 
-        app.settings.notification_content = true;
+        app.account_mut().settings.notification_content = true;
         app.maybe_notify(CHAT, &message);
         let shown = app.notifications.shown.last().unwrap();
         assert_eq!(shown.title, "Ada Lovelace");

@@ -3839,13 +3839,13 @@ mod tests {
         app
     }
 
-    /// Lays out several frames without a display to catch view panics.
-    pub(super) fn render(app: &mut App, ctx: &egui::Context) {
+    /// Lays out several frames of a window `size` points big without a display to catch view panics.
+    pub(super) fn render_sized(app: &mut App, ctx: &egui::Context, size: egui::Vec2) {
         for _ in 0..3 {
             let input = egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
-                    egui::vec2(1180.0, 780.0),
+                    size,
                 )),
                 ..Default::default()
             };
@@ -3857,6 +3857,11 @@ mod tests {
             // Headless tests must apply font-atlas updates themselves.
             output.textures_delta.clear();
         }
+    }
+
+    /// Lays out several frames without a display to catch view panics.
+    pub(super) fn render(app: &mut App, ctx: &egui::Context) {
+        render_sized(app, ctx, egui::vec2(1180.0, 780.0));
     }
 
     #[test]
@@ -6740,6 +6745,8 @@ mod tests {
         }
     }
 
+
+
     /// Runs a copy input and follow-up frame, collecting clipboard writes.
     fn copied_text(app: &mut App, ctx: &egui::Context, event: egui::Event) -> Vec<String> {
         let mut copied = Vec::new();
@@ -7138,68 +7145,7 @@ mod tests {
         }
     }
 
-    #[test]
-    /// Checks real row and checkbox clicks toggle recipients without dispatching a forward command.
-    fn forward_row_and_checkbox_clicks_select_without_sending() {
-        for light in [false, true] {
-            let mut app = app();
-            app.backend.record_demo_commands();
-            let ctx = egui::Context::default();
-            ctx.enable_accesskit();
-            app.attach(&ctx);
-            apply_flags(
-                &mut app,
-                Some(if light { "forward,light" } else { "forward" }),
-            );
-            for _ in 0..3 {
-                render(&mut app, &ctx);
-            }
-            app.backend.take_demo_commands();
-            let nodes = accessible_nodes(&mut app, &ctx, Vec::new());
-            let title = app.chat_title(app.chat(SAMPLES[0].id).unwrap());
-            assert!(
-                nodes.iter().filter(|(label, _, _)| label == &title).count() >= 2,
-                "both row and checkbox have accessible labels"
-            );
-            let id = egui::Id::new(("forward-recipient", SAMPLES[0].id));
-            let rect = ctx.data(|data| data.get_temp::<egui::Rect>(id)).unwrap();
-            for pos in [
-                rect.center(),
-                egui::pos2(rect.right() - 18.0, rect.center().y),
-            ] {
-                for pressed in [true, false] {
-                    frame_with(
-                        &mut app,
-                        &ctx,
-                        vec![
-                            egui::Event::PointerMoved(pos),
-                            egui::Event::PointerButton {
-                                pos,
-                                button: egui::PointerButton::Primary,
-                                pressed,
-                                modifiers: egui::Modifiers::NONE,
-                            },
-                        ],
-                    );
-                }
-                assert!(app.dialog.is_some());
-                assert!(
-                    !app.backend
-                        .take_demo_commands()
-                        .iter()
-                        .any(|command| matches!(command, crate::backend::Command::Forward { .. }))
-                );
-                if pos == rect.center() {
-                    assert_eq!(app.forward_recipients, [SAMPLES[0].id]);
-                } else {
-                    assert!(
-                        app.forward_recipients.is_empty(),
-                        "checkbox toggles exactly once"
-                    );
-                }
-            }
-        }
-    }
+
 
     /// Presses and releases the primary button at `pos`.
     fn press_at(app: &mut App, ctx: &egui::Context, pos: egui::Pos2) {

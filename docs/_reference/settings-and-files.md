@@ -25,11 +25,23 @@ On Linux:
 | Crash log | `~/.local/state/zapfast/panic.log` | Safe to delete |
 
 Back up the archive if you need its history. WhatsApp sends only recent
-history to a new device, although Zap Faster can request some older messages from
-the phone. Clearing the media cache makes Zap Faster download attachments again.
+history to a new device, although ZapFastest can request some older messages from
+the phone. Clearing the media cache makes ZapFastest download attachments again.
 Expired attachments may still be available through the phone.
+
+A download is reported as complete only after its local path is recorded in
+the archive. If that write fails, the attachment shows a failure instead;
+the downloaded file is kept in its destination.
+**Settings > Files > Storage used** shows how much space the account on screen
+has in its media cache, split into images, videos and GIFs, stickers, and other
+files. **Clear…** there deletes that account's cached attachments after asking:
+its messages, its other caches, and the other accounts' files stay, and so do
+files in a download folder you chose.
 **Settings > Files > Change…** sends new downloads to another folder, leaving
-earlier ones in place.
+earlier ones in place. There, documents keep the name they were sent with; a
+file already in the folder is never replaced, and the download becomes
+`name (1).pdf`, `name (2).pdf`, and so on. Characters a file system refuses
+become `_`.
 
 On macOS, settings, state, and the logs are in
 `~/Library/Application Support/me.paolino.zapfast` and the caches in
