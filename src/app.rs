@@ -661,6 +661,7 @@ pub struct App {
     /// Text a link put in the composer, with the chat it belongs to. Text the
     /// reader never changed is not their draft, so a chat they leave does not
     /// store it in place of the one they wrote.
+    #[allow(dead_code)]
     prefilled: Option<(ChatId, String)>,
     /// Actions queued by a backend event, applied on that account after the frame.
     deferred_account_actions: Vec<(AccountId, Action)>,
@@ -3297,10 +3298,13 @@ impl App {
 
     /// Whether a closed chat has unsent text or attachments.
     fn parked_draft(&self, chat: &str) -> bool {
-        if self.open_chat.as_deref() == Some(chat) {
-            return false;
-        }
-        self.has_draft(chat)
+        self.drafts
+            .get(chat)
+            .is_some_and(|text| !text.trim().is_empty())
+            || self
+                .attachment_drafts
+                .get(chat)
+                .is_some_and(|draft| !draft.pending.is_empty())
     }
 
     /// Opening a draft keeps its priority until the reader leaves. New
@@ -6183,9 +6187,16 @@ impl App {
         (text, mentions)
     }
 
-    /// Parks attachments and reply quotes before leaving a chat or account.
+    /// Parks staged attachments, and the reply they carry, before leaving a
+    /// chat or account. A reply without attachments is not kept, as before,
+    /// except a private reply: its quote comes from a group and cannot be
+    /// picked again in this chat.
     fn save_attachment_draft(&mut self, chat: &str) {
-        if self.pending.is_empty() && self.reply_to.is_none() {
+        let private = self
+            .reply_to
+            .as_ref()
+            .is_some_and(|target| target.chat.is_some());
+        if self.pending.is_empty() && !private {
             self.attachment_drafts.remove(chat);
         } else {
             let draft = AttachmentDraft {
@@ -13178,14 +13189,14 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         app.drafts.insert("old".into(), "Unsent text".into());
-        assert_eq!(order(&app), ["old", "pin", "recent"]);
+        assert_eq!(order(&app), ["pin", "old", "recent"]);
         app.open_chat("old".into());
-        assert_eq!(order(&app), ["old", "pin", "recent"]);
+        assert_eq!(order(&app), ["pin", "old", "recent"]);
         app.composer = " \n ".into();
         assert_eq!(
             order(&app),
-            ["pin", "recent", "old"],
-            "active blank text overrides saved text"
+            ["pin", "old", "recent"],
+            "clearing the open composer does not demote the active chat"
         );
         app.composer = "Editing an existing message".into();
         app.editing = Some("sent-message".into());
@@ -13197,17 +13208,27 @@ mod tests {
             app.draft_preview("old").as_deref(),
             Some("Synthetic document.pdf")
         );
-        assert_eq!(order(&app), ["old", "pin", "recent"]);
+        assert_eq!(order(&app), ["pin", "old", "recent"]);
         app.open_chat("recent".into());
         assert!(
             app.has_draft("old"),
             "attachment-only draft survives switching"
         );
-        assert_eq!(order(&app), ["old", "pin", "recent"]);
+        assert_eq!(order(&app), ["pin", "old", "recent"]);
         app.open_chat("old".into());
         app.apply(Action::ClearPending, &egui::Context::default());
         assert!(!app.has_draft("old"));
-        assert_eq!(order(&app), ["pin", "recent", "old"]);
+        assert_eq!(
+            order(&app),
+            ["pin", "old", "recent"],
+            "clearing cannot demote the open chat"
+        );
+        app.open_chat("recent".into());
+        assert_eq!(
+            order(&app),
+            ["pin", "recent", "old"],
+            "leaving drops the cleared draft"
+        );
         assert_eq!(
             app.chat("old").unwrap().last_activity,
             1,
@@ -13234,7 +13255,7 @@ mod tests {
                 .iter()
                 .map(|chat| chat.id.as_str())
                 .collect::<Vec<_>>(),
-            ["second", "first"]
+            ["first", "second"]
         );
         app.drafts.remove("second");
         assert_eq!(app.visible_chats()[0].id, "first");
@@ -13249,8 +13270,18 @@ mod tests {
         );
         assert!(app.has_draft("second"));
         assert_eq!(app.draft_preview("second").as_deref(), Some("Image"));
-        assert_eq!(app.visible_chats()[0].id, "second");
+        app.chat_filter = ChatFilter::All;
+        assert_eq!(
+            app.visible_chats()[0].id,
+            "first",
+            "typing or pasting cannot promote the open chat"
+        );
         app.open_chat("first".into());
+        assert_eq!(
+            app.visible_chats()[0].id,
+            "second",
+            "leaving promotes the parked draft"
+        );
         assert_eq!(app.draft_preview("second").as_deref(), Some("Image"));
         app.search = "first".into();
         assert_eq!(
@@ -13385,22 +13416,32 @@ mod tests {
         )
         .unwrap();
         app.accounts.push(second);
+        let first_quote = crate::model::ReplyTarget {
+            id: "first-quote".into(),
+            chat: Some("group@g.us".into()),
+            destination_generation: 0,
+        };
+        let second_quote = crate::model::ReplyTarget {
+            id: "second-quote".into(),
+            chat: Some("group@g.us".into()),
+            destination_generation: 0,
+        };
         app.open_chat("synthetic-chat".into());
-        app.reply_to = Some("first-quote".into());
+        app.reply_to = Some(first_quote.clone());
         app.open_chat("other-chat".into());
         assert!(app.reply_to.is_none());
         app.open_chat("synthetic-chat".into());
-        assert_eq!(app.reply_to.as_deref(), Some("first-quote"));
+        assert_eq!(app.reply_to.as_ref(), Some(&first_quote));
         app.switch_account(&second_id);
         app.open_chat("synthetic-chat".into());
         assert!(app.reply_to.is_none());
-        app.reply_to = Some("second-quote".into());
+        app.reply_to = Some(second_quote.clone());
         app.switch_account(&first_id);
-        assert_eq!(app.reply_to.as_deref(), Some("first-quote"));
+        assert_eq!(app.reply_to.as_ref(), Some(&first_quote));
         app.apply(Action::CloseChat, &egui::Context::default());
         assert!(app.reply_to.is_none());
         app.open_chat("synthetic-chat".into());
-        assert_eq!(app.reply_to.as_deref(), Some("first-quote"));
+        assert_eq!(app.reply_to.as_ref(), Some(&first_quote));
         app.reply_to = None;
         app.open_chat("other-chat".into());
         app.open_chat("synthetic-chat".into());
@@ -13409,7 +13450,7 @@ mod tests {
             "cancelled quotes must stay cancelled"
         );
         app.switch_account(&second_id);
-        assert_eq!(app.reply_to.as_deref(), Some("second-quote"));
+        assert_eq!(app.reply_to.as_ref(), Some(&second_quote));
     }
 
     /// Late file and image refusals recover only into their originating account's draft.
@@ -20764,7 +20805,7 @@ mod tests {
             assert_eq!(app.visible_chats()[0].id, "recent");
             app.apply_backend_event(
                 Event::Drafts(vec![("draft".into(), "Saved archive text".into())]),
-                false,
+                true,
             );
             assert_eq!(app.composer, "Saved archive text");
             assert_eq!(app.pending.len(), usize::from(staged_attachment));

@@ -2125,12 +2125,10 @@ fn new_contact(app: &mut App, ui: &mut egui::Ui) {
             (first, last)
         })
         .inner;
-    let digits: String = app
-        .new_contact_phone
-        .chars()
-        .filter(char::is_ascii_digit)
-        .collect();
-    let ready = digits.len() >= 7 && !app.new_contact_pending;
+    // A leading plus, spaces, hyphens and brackets are formatting; anything
+    // else (an extension, a letter) would change the number, so it is refused.
+    let digits = crate::util::international_phone(&app.new_contact_phone).unwrap_or_default();
+    let ready = !digits.is_empty() && !app.new_contact_pending;
     let named = !app.new_contact_name.trim().is_empty() || !app.new_contact_last.trim().is_empty();
     let submitted =
         (phone_field.lost_focus() || first_field.lost_focus() || last_field.lost_focus())
