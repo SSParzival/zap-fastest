@@ -7,10 +7,35 @@ protocol. These notes are for coding agents and new contributors.
 ## Product boundaries
 
 - Keep it a small native client. No browser engine, no telemetry, no
-  hosted backend, no Zap Faster-operated account system. Features never send
+  hosted backend, no ZapFastest-operated account system. Features never send
   message content to a third party.
+- WhatsApp only. ZapFastest is a client for WhatsApp accounts and will not
+  speak other networks or protocols (Matrix, Signal, Telegram, IRC, XMPP)
+  or bridge to them.
+- No automation, ever. ZapFastest is for a person reading and writing their
+  own chats by hand. It will not have bots, an MCP server, or any API,
+  command-line, plugin or scripting interface that reads, exports or sends
+  messages for another program, nor scheduled, bulk or automatic replies.
+  WhatsApp's terms forbid automated use, and it bans accounts for it, so such
+  a feature would put every user's account at risk. Opening a chat from a
+  link or `zap-fastest <number>`, which only shows the chat to the person, is
+  not automation.
 - Do not vendor, fork, or patch upstream crates (egui, epaint, whatsapp-rust)
   in this repository. Fix them upstream.
+- Do not copy dependency source into this repository. For a dependency fix,
+  use a fork under `github.com/crmne/` pinned to a commit and contribute the
+  fix upstream; egui, winit and rodio already come from such
+  forks. Only the maintainer creates those forks; in a contributor's pull
+  request, send the fix upstream and ask for it to be carried. Use the fork
+  until a release includes the fix. The maintainer has explicitly approved
+  pinned commits from `github.com/oxidezap/whatsapp-rust` once our carried
+  fixes have merged upstream. Never point a dependency at any other fork
+  or source: `.github/scripts/check-dependency-sources.py` fails CI on one.
+- Screenshots, captures, comparison pages and recordings made for a review
+  go in the pull request, never the repository:
+  `.github/scripts/check-review-evidence.py` fails CI on any file under
+  `docs/assets/`, or image or video elsewhere under `docs/`, that no page,
+  top-level file or packaging metadata uses.
 - The protocol comes from whatsapp-rust. Do not reimplement pieces of it
   here, and do not advertise a capability merely because a protobuf field
   for it exists.
