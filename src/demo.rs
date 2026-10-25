@@ -2794,15 +2794,42 @@ pub fn apply_flags(app: &mut App, page: Option<&str>) {
                     app.group_saving.insert(group.to_owned());
                 }
             }
-            "forward" | "forward-selected" | "forward-review" => {
+            "forward"
+            | "forward-selected"
+            | "forward-review"
+            | "forward-full"
+            | "forward-once" => {
                 app.dialog = app.open_chat.clone().map(|chat| Dialog::Forward {
                     chat,
                     messages: vec!["ada-format".to_owned()],
                 });
-                if part != "forward" {
-                    app.forward_recipients =
-                        vec![SAMPLES[0].id.to_owned(), SAMPLES[1].id.to_owned()];
-                    app.forward_reviewing = part == "forward-review";
+                app.forward_limit = crate::model::FORWARD_LIMIT;
+                match part {
+                    "forward-selected" | "forward-review" => {
+                        app.forward_recipients =
+                            vec![SAMPLES[0].id.to_owned(), SAMPLES[1].id.to_owned()];
+                        app.forward_reviewing = part == "forward-review";
+                    }
+                    // As many recipients as WhatsApp allows, with the note
+                    // saying so.
+                    "forward-full" => {
+                        let writable: Vec<_> = app
+                            .chats
+                            .iter()
+                            .filter(|chat| crate::ui::dialogs::forwardable(chat))
+                            .map(|chat| chat.id.clone())
+                            .collect();
+                        app.forward_recipients = writable
+                            .into_iter()
+                            .take(crate::model::FORWARD_LIMIT)
+                            .collect();
+                    }
+                    // A message forwarded many times, which goes to one chat.
+                    "forward-once" => {
+                        app.forward_limit = 1;
+                        app.forward_recipients = vec![SAMPLES[0].id.to_owned()];
+                    }
+                    _ => {}
                 }
             }
             "unlink" => app.dialog = Some(Dialog::ConfirmUnlink),
@@ -5572,7 +5599,7 @@ mod tests {
     }
 
     #[test]
-    fn locked_folder_explains_its_read_only_state() {
+    fn locked_folder_chats_accept_messages() {
         let mut app = app();
         apply_flags(&mut app, Some("locked-open"));
         let ctx = egui::Context::default();
@@ -5583,7 +5610,7 @@ mod tests {
             "unlocking must not expose the code in search"
         );
         ctx.enable_accesskit();
-        assert!(!app.current_chat().unwrap().can_send());
+        assert!(app.current_chat().unwrap().can_send());
         let mut output = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
@@ -5602,7 +5629,7 @@ mod tests {
             .filter_map(|(_, node)| node.label().or_else(|| node.value()))
             .collect();
         assert!(
-            labels.contains(&"Locked chats are read-only in ZapFastest"),
+            !labels.contains(&"Locked chats are read-only in ZapFastest"),
             "{labels:?}"
         );
         assert!(!labels.contains(&"admins"));

@@ -2476,7 +2476,7 @@ fn context_menu_contents(app: &mut App, ui: &mut egui::Ui, chat: &Chat, palette:
         ui,
         palette,
         Some(Icon::Eraser),
-        &crate::i18n::gettext(locale, "Clear chat"),
+        &crate::i18n::gettext(app.locale, "Clear chat"),
         connected,
     ) {
         app.actions
@@ -2488,7 +2488,7 @@ fn context_menu_contents(app: &mut App, ui: &mut egui::Ui, chat: &Chat, palette:
         ui,
         palette,
         Some(Icon::Trash),
-        &crate::i18n::gettext(locale, "Delete chat"),
+        &crate::i18n::gettext(app.locale, "Delete chat"),
         connected,
     ) {
         app.actions

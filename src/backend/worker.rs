@@ -6424,8 +6424,12 @@ impl Worker {
             Command::Forward { to_chat, .. } => Some(to_chat),
             _ => None,
         };
+        let writable = |chat: &str| match &command {
+            Command::Forward { .. } => self.forward_writable(chat),
+            _ => self.destination_writable(chat),
+        };
         if let Some(chat) = destination
-            && !self.destination_writable(chat)
+            && !writable(chat)
         {
             let error = "This conversation is read-only in ZapFastest".to_owned();
             if matches!(&command, Command::CreatePoll { .. }) {
@@ -9074,6 +9078,13 @@ impl Worker {
         for (id, (chat, jid, message, expiration)) in jobs {
             self.queue_outgoing(chat, jid, id, message, expiration);
         }
+    }
+
+    /// A locked chat accepts messages written in it, but never a forward:
+    /// the picker does not list it, so one aimed there was locked meanwhile.
+    fn forward_writable(&self, chat: &str) -> bool {
+        self.destination_writable(chat)
+            && !matches!(self.archive.chat(chat), Ok(Some(chat)) if chat.locked)
     }
 
     /// Prepares one forwarded message: its stored row and the outgoing
@@ -17917,6 +17928,20 @@ mod receipt_tests {
         worker.handle_failed_group("busy@g.us".to_owned(), false);
         assert_eq!(worker.group_info_retry.len(), 1);
         assert_eq!(worker.group_info_tries.get("busy@g.us"), Some(&1));
+    }
+
+    /// A locked chat takes what is written in it, but never a forward.
+    #[test]
+    fn locked_chats_accept_sends_but_not_forwards() {
+        let (mut worker, _events, _inbox, _wa) = worker();
+        worker.privacy_ready = true;
+        worker
+            .archive
+            .upsert_chat(&Chat::new(PEER.to_owned(), "Fixture".to_owned()))
+            .unwrap();
+        worker.archive.set_locked(PEER, true).unwrap();
+        assert!(worker.destination_writable(PEER));
+        assert!(!worker.forward_writable(PEER));
     }
 
     /// Stale operations cannot mutate a new session or consume its pending
