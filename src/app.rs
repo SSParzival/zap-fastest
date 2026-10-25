@@ -22675,10 +22675,10 @@ mod app_lock_tests {
         app.account_mut().settings.notification_content = false;
         app.maybe_notify(CHAT, &message);
         let shown = app.notifications.shown.last().unwrap().clone();
-        assert_eq!(shown.title, "ZapFastest");
+        assert_eq!(shown.title, "Ada Lovelace");
         assert_eq!(shown.body, "New message");
         assert_eq!(shown.picture, None);
-        assert_eq!(shown.sound, app.settings.message_sound);
+        assert_eq!(shown.sound, NotificationSound::Alert);
 
         app.account_mut().settings.notification_content = true;
         app.maybe_notify(CHAT, &message);

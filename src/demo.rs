@@ -18245,7 +18245,10 @@ mod bubble_detail_tests {
             app.attach(&ctx);
             apply_flags(&mut app, Some(page));
             let shapes = frames(&mut app, &ctx, egui::vec2(1180.0, 780.0));
-            assert_eq!(app.visible_chats()[0].id, SAMPLES[3].id, "{page}");
+            if !page.starts_with("document") {
+                assert_eq!(app.visible_chats()[0].id, SAMPLES[0].id, "{page}");
+                assert_eq!(app.visible_chats()[1].id, SAMPLES[3].id, "{page}");
+            }
             let texts: Vec<_> = shapes
                 .iter()
                 .filter_map(|shape| match &shape.shape {
@@ -18270,7 +18273,8 @@ mod bubble_detail_tests {
                     app.draft_preview(SAMPLES[3].id).as_deref(),
                     Some("Synthetic itinerary.pdf")
                 );
-                assert_eq!(app.visible_chats()[0].id, SAMPLES[3].id);
+                assert_eq!(app.visible_chats()[0].id, SAMPLES[0].id);
+                assert_eq!(app.visible_chats()[1].id, SAMPLES[3].id);
             }
         }
     }

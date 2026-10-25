@@ -8486,15 +8486,7 @@ impl Worker {
                                 .map(|(root, destination)| (root.as_path(), destination.as_path())),
                         )
                     });
-                    match saved {
-                        Ok(false) => {
-                            result = Err("This attachment is no longer in the archive".to_owned());
-                        }
-                        Err(_) => {
-                            result = Err("Could not record the downloaded file in the archive. The file has been kept".to_owned());
-                        }
-                        _ => {}
-                    }
+                    result = confirmed_download(path.clone(), saved);
                 }
                 self.background_media_finished(&chat, &id, -2, &result);
                 self.emit(Event::Motion {
@@ -9870,46 +9862,6 @@ impl Worker {
             && self
                 .pending_transcriptions
                 .remove(&(chat.clone(), id.clone()));
-        if let Ok(path) = &result {
-            let job = crate::archive::MediaJob {
-                chat: chat.clone(),
-                id: id.clone(),
-                card: card.map_or(-1, |card| card as i64),
-            };
-            let background = self
-                .background_media
-                .contains(&(chat.clone(), id.clone(), job.card));
-            let automatic =
-                self.automatic_media_exports
-                    .remove(&(chat.clone(), id.clone(), job.card));
-            let export = if background || automatic {
-                self.managed_export_destination(&job)
-            } else {
-                Ok(None)
-            };
-            let saved = export.and_then(|export| {
-                self.archive.put_media_path_and_export(
-                    &job,
-                    path,
-                    export
-                        .as_ref()
-                        .map(|(root, destination)| (root.as_path(), destination.as_path())),
-                )
-            });
-            match saved {
-                Ok(false) => {
-                    result = Err("This attachment is no longer in the archive".to_owned());
-                }
-                Err(_) => {
-                    result = Err(
-                        "Could not record the downloaded file in the archive. The file has been kept"
-                            .to_owned(),
-                    );
-                }
-                _ => {}
-            }
-        }
-        self.background_media_finished(&chat, &id, card.map_or(-1, |card| card as i64), &result);
         self.downloads.remove(&(chat.clone(), id.clone(), card));
         self.automatic_media_exports.remove(&(
             chat.clone(),
@@ -9940,13 +9892,35 @@ impl Worker {
             }
         }
         let transferred = result.is_ok();
-        let result = result.and_then(|path| {
-            let saved = self
-                .archive
-                .put_media_path_at(&chat, &id, card, Some(&path))
-                .map(|message| message.is_some());
-            confirmed_download(path, saved)
-        });
+        if let Ok(path) = &result {
+            let job = crate::archive::MediaJob {
+                chat: chat.clone(),
+                id: id.clone(),
+                card: card.map_or(-1, |card| card as i64),
+            };
+            let background = self
+                .background_media
+                .contains(&(chat.clone(), id.clone(), job.card));
+            let automatic =
+                self.automatic_media_exports
+                    .remove(&(chat.clone(), id.clone(), job.card));
+            let export = if background || automatic {
+                self.managed_export_destination(&job)
+            } else {
+                Ok(None)
+            };
+            let saved = export.and_then(|export| {
+                self.archive.put_media_path_and_export(
+                    &job,
+                    path,
+                    export
+                        .as_ref()
+                        .map(|(root, destination)| (root.as_path(), destination.as_path())),
+                )
+            });
+            result = confirmed_download(path.clone(), saved);
+        }
+        self.background_media_finished(&chat, &id, card.map_or(-1, |card| card as i64), &result);
         if for_picker && transferred && result.is_err() {
             // A local write failure must not schedule a phone retry or another
             // automatic transfer of a file which has already arrived.
