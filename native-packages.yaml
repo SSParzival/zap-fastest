@@ -47,6 +47,8 @@ nfpm:
     dst: /usr/share/zap-faster/omarchy/zap-faster-theme
     file_info:
       mode: 493
+  # native-packages adds the C library (libc6, glibc) at the version the
+  # binary needs: 2.36, as the release builds run in Debian 12.
   overrides:
     deb:
       depends:
