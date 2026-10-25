@@ -1,0 +1,18 @@
+[Desktop Entry]
+Type=Application
+Name=ZapFastest
+GenericName=WhatsApp Client
+Comment=A native WhatsApp client for power users
+Exec=zap-fastest %u
+Icon=zap-fastest
+Terminal=false
+Categories=Network;InstantMessaging;Chat;
+Keywords=whatsapp;chat;messaging;
+StartupWMClass=zap-fastest
+MimeType=x-scheme-handler/whatsapp;
+SingleMainWindow=true
+Actions=quit;
+
+[Desktop Action quit]
+Name=Quit ZapFastest
+Exec=zap-fastest quit

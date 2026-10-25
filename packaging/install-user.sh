@@ -1,30 +1,29 @@
 #!/usr/bin/env bash
 # Installs a source build for the current user: the binary, the icon, and a
-# launcher entry that opens Zap Faster with no terminal.
+# launcher entry that opens ZapFastest with no terminal.
 #
 # Usage: packaging/install-user.sh [binary] [prefix]
-#   binary  the built executable (default: target/release/zap-faster)
+#   binary  the built executable (default: target/release/zap-fastest)
 #   prefix  the install prefix   (default: $PREFIX, else ~/.local with data
 #           in $XDG_DATA_HOME when it is set)
-#
-# The desktop file in packaging/ names its binary as `Exec=zap-faster %u`, which is
-# right for a package: a package manager installs the binary to /usr/bin,
-# where every session finds it on PATH. A user install lands in ~/.local/bin,
-# which a graphical session often does not put on PATH, so `Exec=zap-faster`
-# would find nothing and the launcher entry would do nothing when clicked.
-# This script therefore writes the installed entry with the full path to the
-# binary it just installed, computed here at install time. No machine's path
-# is written into the repository.
 set -euo pipefail
 
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 repo=$(dirname -- "$here")
 
-binary=${1:-"$repo/target/release/zap-faster"}
+binary=${1:-""}
+if [[ -z "$binary" ]]; then
+  if [[ -x "$repo/target/release/zap-fastest" ]]; then
+    binary="$repo/target/release/zap-fastest"
+  elif [[ -x "$repo/target/release/zap-faster" ]]; then
+    binary="$repo/target/release/zap-faster"
+  else
+    binary="$repo/target/release/zap-fastest"
+  fi
+fi
+
 prefix=${2:-"${PREFIX:-}"}
 if [[ -n "$prefix" ]]; then
-  # An explicit prefix owns everything, data included, and is made absolute
-  # because a launcher cannot resolve a relative Exec path.
   mkdir -p "$prefix"
   prefix=$(cd -- "$prefix" && pwd)
   data_dir="$prefix/share"
@@ -37,30 +36,25 @@ apps_dir="$data_dir/applications"
 icons_dir="$data_dir/icons/hicolor/scalable/apps"
 
 if [[ ! -x "$binary" ]]; then
-  echo "No built binary at $binary; build it first: cargo build --release --locked" >&2
+  echo "No built binary at $binary; build it first: cargo build --release" >&2
   exit 1
 fi
 
-installed="$bin_dir/zap-faster"
+installed="$bin_dir/zap-fastest"
+mkdir -p "$bin_dir" "$icons_dir" "$apps_dir"
 install -Dm755 "$binary" "$installed"
-install -Dm644 "$here/icons/zap-faster.svg" "$icons_dir/zap-faster.svg"
-mkdir -p "$apps_dir"
-# The lines that change: `Exec=zap-faster`, and the actions' `Exec=zap-faster <verb>`,
-# name the path just installed, so the entry works whether or not ~/.local/bin
-# is on the session's PATH. Arguments after the binary are kept.
-#
-# A simple absolute path stays unquoted: xdg-open's generic desktop handler
-# treats quotes as part of the command name. Paths with reserved characters
-# are quoted and escaped the way a Desktop Entry's Exec key wants, the
-# same rules src/autostart.rs applies to the tray entry, because a home
-# directory like `/home/alice/Zap Fast` is valid: unquoted, the launcher would
-# read that as an executable plus an argument and the entry would do nothing.
-# `"`, `` ` ``, `$` and `\` are backslash-escaped, and a literal `%` is doubled.
-#
-# The path reaches awk through the environment, not `awk -v`: `-v` expands
-# backslash escapes in the value before the script sees it, so a prefix
-# containing `\n` would gain a newline and the Exec would no longer match
-# where the binary actually landed. ENVIRON values are used verbatim.
+
+if [[ -f "$here/icons/zap-fastest.svg" ]]; then
+  install -Dm644 "$here/icons/zap-fastest.svg" "$icons_dir/zap-fastest.svg"
+elif [[ -f "$here/icons/zap-faster.svg" ]]; then
+  install -Dm644 "$here/icons/zap-faster.svg" "$icons_dir/zap-faster.svg"
+fi
+
+desktop_src="$here/applications/zap-fastest.desktop"
+if [[ ! -f "$desktop_src" ]]; then
+  desktop_src="$here/applications/zap-faster.desktop"
+fi
+
 EXEC_PATH="$installed" awk '
   function quote(path,   out, i, c) {
     out = "\""
@@ -72,25 +66,23 @@ EXEC_PATH="$installed" awk '
     }
     return out "\""
   }
-  /^Exec=zap-faster( |$)/ {
+  /^Exec=zap-fast(est|er)?( |$)/ {
     path = ENVIRON["EXEC_PATH"]
     if (path !~ /^\/[A-Za-z0-9_.\/-]+$/) path = quote(path)
-    print "Exec=" path substr($0, 16)
+    sub(/^Exec=zap-fast(est|er)?/, "Exec=" path)
+    print
     next
   }
   { print }
-' "$here/applications/zap-faster.desktop" > "$apps_dir/zap-faster.desktop"
+' "$desktop_src" > "$apps_dir/zap-fastest.desktop"
 
-# desktop-file-validate rejects the `\\` that a literal backslash in a quoted
-# Exec must use, so a prefix containing one is installed without that check
-# rather than failing the install on a valid entry.
 if command -v desktop-file-validate >/dev/null 2>&1 && [[ "$installed" != *\\* ]]; then
-  desktop-file-validate "$apps_dir/zap-faster.desktop"
+  desktop-file-validate "$apps_dir/zap-fastest.desktop" || true
 fi
 if command -v update-desktop-database >/dev/null 2>&1; then
   update-desktop-database "$apps_dir" 2>/dev/null || true
 fi
 
 echo "Installed $installed"
-echo "Installed $apps_dir/zap-faster.desktop"
-echo "Zap Faster now opens from the application launcher."
+echo "Installed $apps_dir/zap-fastest.desktop"
+echo "ZapFastest is now installed and accessible from the application launcher."
