@@ -32,3 +32,12 @@ announcement privacy. Native NVDA, VoiceOver and Orca acceptance still requires
 an attended session on their respective platforms. Windows' Applications key
 cannot currently reach this app: the pinned egui input API has no matching key
 variant. Supporting it requires an upstream input change; Shift+F10 is available.
+
+The transcript is one message list in the Tab order. With the list focused,
+Up and Down move between messages; Home, End, Page Up and Page Down move within
+the list. Alt+2 (Control+2 on macOS) reaches it directly. Screen readers hear the
+chat name, message position and count, sender, content, time and delivery state.
+Keyboard focus stays in the list across chat switches and returning from another
+window. The focus outline follows the current bubble only during keyboard use.
+Ctrl+End stays in a focused text field containing text; from an empty composer it
+jumps to the newest message. Chat mute durations are grouped in the Mute submenu.

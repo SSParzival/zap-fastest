@@ -10732,7 +10732,11 @@ impl App {
         {
             self.mark_read(&open);
         }
-        if regained_focus {
+        if regained_focus
+            && ctx
+                .memory(|memory| memory.focused())
+                .is_none_or(|id| id == egui::Id::new(crate::ui::lock::PASSWORD_ID))
+        {
             self.refocus_composer(ctx);
         }
         self.window_focused = focused;

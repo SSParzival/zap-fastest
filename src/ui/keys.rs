@@ -27,6 +27,12 @@ pub(crate) fn close_shortcut_action(app: &App, ctx: &egui::Context) -> Option<Ac
     .then_some(Action::CloseChat)
 }
 
+/// Whether Home, End and Ctrl+End scroll the open chat rather than move the
+/// cursor of the focused text field (#456).
+fn jump_keys_reach_chat(editing_text: bool, composer_focused: bool, composer_empty: bool) -> bool {
+    !editing_text || (composer_focused && composer_empty)
+}
+
 /// Routes keyboard commands to actions, respecting overlays and text focus.
 pub fn handle(app: &mut App, ctx: &egui::Context) {
     if app.picture_edit.is_some() {
@@ -51,6 +57,12 @@ pub fn handle(app: &mut App, ctx: &egui::Context) {
     let archive = archive_action(app);
     let next_account = next_account_action(app);
     let close = close_shortcut_action(app, ctx);
+    let composer_focused = ctx.memory(|memory| memory.has_focus(egui::Id::new("composer-text")));
+    // Home/End (and Ctrl+End) move the text cursor in a field with text in
+    // it, as in any editor; they scroll the chat only from an empty composer
+    // or with no field focused.
+    let jump_allowed =
+        jump_keys_reach_chat(editing_text, composer_focused, app.composer.is_empty());
     let mut actions = Vec::new();
     ctx.input_mut(|input| {
         let mut key = |modifiers: Modifiers, key: Key, action: Action| {
@@ -119,7 +131,9 @@ pub fn handle(app: &mut App, ctx: &egui::Context) {
         key(Modifiers::COMMAND, Key::Equals, Action::ZoomBy(0.1));
         key(Modifiers::COMMAND, Key::Minus, Action::ZoomBy(-0.1));
         key(Modifiers::COMMAND, Key::Num0, Action::ResetZoom);
-        key(Modifiers::COMMAND, Key::End, Action::ScrollToBottom);
+        if jump_allowed {
+            key(Modifiers::COMMAND, Key::End, Action::ScrollToBottom);
+        }
         key(
             Modifiers::COMMAND | Modifiers::SHIFT,
             Key::H,
@@ -129,7 +143,6 @@ pub fn handle(app: &mut App, ctx: &egui::Context) {
     // Escape cancels the topmost state. Menus handle Escape themselves.
     let menu_open = egui::Popup::is_any_open(ctx);
     let search_focused = ctx.memory(|memory| memory.has_focus(egui::Id::new("chat-search")));
-    let composer_focused = ctx.memory(|memory| memory.has_focus(egui::Id::new("composer-text")));
     if app.page == Page::Chats
         && app.selection.as_ref().is_some_and(|(chat, selected)| {
             app.open_chat.as_ref() == Some(chat) && !selected.is_empty()
@@ -167,8 +180,8 @@ pub fn handle(app: &mut App, ctx: &egui::Context) {
         && app.reaction_target.is_none()
         && !menu_open
         && !super::accessibility::list_focused(ctx)
+        && !ctx.memory(|memory| memory.has_focus(super::list_nav::messages_id()))
     {
-        let home_end_allowed = !editing_text || (composer_focused && app.composer.is_empty());
         ctx.input_mut(|input| {
             if take_plain(input, Key::PageUp) {
                 actions.push(Action::ScrollPage(Scroll::PageUp));
@@ -176,7 +189,7 @@ pub fn handle(app: &mut App, ctx: &egui::Context) {
             if take_plain(input, Key::PageDown) {
                 actions.push(Action::ScrollPage(Scroll::PageDown));
             }
-            if home_end_allowed {
+            if jump_allowed {
                 if take_plain(input, Key::Home) {
                     actions.push(Action::ScrollPage(Scroll::Top));
                 }
@@ -189,6 +202,7 @@ pub fn handle(app: &mut App, ctx: &egui::Context) {
     let escape = (!menu_open || app.reaction_target.is_some())
         && ctx.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Escape));
     if escape {
+        keep_focus_on_escape(app, ctx);
         #[cfg(target_os = "linux")]
         if super::conversation::stop_middle_scroll(ctx) {
             return;
@@ -291,6 +305,7 @@ pub fn handle(app: &mut App, ctx: &egui::Context) {
         None
     };
     if step != 0 || number.is_some() {
+        ctx.data_mut(|data| data.insert_temp(crate::theme::keyboard_focus_id(), true));
         let visible = app.visible_chats();
         if !visible.is_empty() {
             let current = app
@@ -388,7 +403,7 @@ fn accessibility_shortcuts(app: &mut App, ctx: &egui::Context) {
         };
         if let Some(message) = message {
             let id = message.id.clone();
-            super::accessibility::request_item(ctx, super::conversation::bubble_id(&chat, &id));
+            super::accessibility::request_item(ctx, super::list_nav::messages_id());
             app.actions.push(Action::OpenMessage { chat, message: id });
         }
     }
@@ -397,6 +412,37 @@ fn accessibility_shortcuts(app: &mut App, ctx: &egui::Context) {
         && ctx.input_mut(|input| take_exact(input, Modifiers::COMMAND | Modifiers::SHIFT, Key::R))
     {
         app.actions.push(Action::StartRecording);
+    }
+}
+
+fn keep_focus_on_escape(app: &App, ctx: &egui::Context) {
+    if app.dialog.is_some() || app.show_update || ctx.memory(|memory| memory.focused().is_some()) {
+        return;
+    }
+    let keyboard = ctx
+        .data(|data| data.get_temp::<bool>(crate::theme::keyboard_focus_id()))
+        .unwrap_or(false);
+    let screen_reader = ctx
+        .accesskit_node_builder(egui::accesskit_root_id(), |_| ())
+        .is_some();
+    if !keyboard && !screen_reader {
+        return;
+    }
+    let drawn: Vec<_> = ctx.viewport(|viewport| {
+        viewport
+            .prev_pass
+            .widgets
+            .layers()
+            .flat_map(|(_, widgets)| widgets.iter().map(|widget| widget.id))
+            .collect()
+    });
+    let previous = ctx.memory(|memory| {
+        drawn
+            .into_iter()
+            .find(|id| memory.had_focus_last_frame(*id))
+    });
+    if let Some(previous) = previous {
+        ctx.memory_mut(|memory| memory.request_focus(previous));
     }
 }
 
@@ -688,7 +734,10 @@ pub const SHORTCUTS: &[(&str, &str)] = &[
     ),
     ("Ctrl+B", "Collapse or expand the chat list"),
     ("Ctrl+Shift+H", "Toggle screen privacy"),
-    ("Ctrl+End", "Jump to the newest message"),
+    (
+        "Ctrl+End",
+        "Jump to the newest message (when the input is empty)",
+    ),
     ("PgUp / PgDn", "Scroll the open chat by a page"),
     (
         "Home / End",
@@ -1425,6 +1474,18 @@ mod tests {
         let survived = press(&mut app, &ctx, Key::End, Modifiers::COMMAND);
         assert!(!survived);
         assert_eq!(app.actions, [Action::ScrollToBottom]);
+    }
+
+    #[test]
+    fn ctrl_end_and_home_end_leave_a_field_with_text_alone() {
+        // No field focused, or an empty composer: the keys scroll the chat.
+        assert!(jump_keys_reach_chat(false, false, false));
+        assert!(jump_keys_reach_chat(true, true, true));
+        // A composer with text, or any other field (search, dialogs): the
+        // keys move the text cursor (#456).
+        assert!(!jump_keys_reach_chat(true, true, false));
+        assert!(!jump_keys_reach_chat(true, false, true));
+        assert!(!jump_keys_reach_chat(true, false, false));
     }
 
     #[test]

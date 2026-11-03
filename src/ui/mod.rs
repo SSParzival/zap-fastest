@@ -14,6 +14,7 @@ pub mod image_editor;
 pub mod image_preview;
 pub mod keys;
 pub mod labels;
+pub mod list_nav;
 pub mod locations;
 pub mod lock;
 pub mod login;
@@ -336,15 +337,18 @@ pub fn focus_ring_id() -> egui::Id {
 /// Tab shows where focus is; a pointer press hides it again. Widgets scroll
 /// themselves into view through `theme::reveal_focus`.
 fn track_keyboard_focus(ctx: &egui::Context) {
+    let in_list = ctx
+        .memory(|memory| memory.focused())
+        .is_some_and(|id| list_nav::was_outline_only(ctx, id));
     let (tab, pressed) = ctx.input(|input| {
         let tab = input.events.iter().any(|event| {
             matches!(
                 event,
                 egui::Event::Key {
-                    key: egui::Key::Tab,
+                    key,
                     pressed: true,
                     ..
-                }
+                } if *key == egui::Key::Tab || (in_list && matches!(key, egui::Key::ArrowUp | egui::Key::ArrowDown | egui::Key::Home | egui::Key::End | egui::Key::PageUp | egui::Key::PageDown))
             )
         });
         (tab, input.pointer.any_pressed())
@@ -382,6 +386,9 @@ fn focus_ring(app: &App, ctx: &egui::Context) {
         .data(|data| data.get_temp::<theme::FocusOutline>(response.id.with("focus-outline")))
         .filter(|outline| outline.frame == ctx.cumulative_frame_nr());
     if !keyboard && !ctx.text_edit_focused() {
+        return;
+    }
+    if custom.is_none() && list_nav::is_outline_only(ctx, response.id) {
         return;
     }
     let rect = custom.map_or(response.rect, |outline| outline.rect);

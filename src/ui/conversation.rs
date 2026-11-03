@@ -2330,6 +2330,79 @@ struct View<'a> {
     copy_rows: Option<&'a std::sync::Mutex<Vec<crate::transcript::Row>>>,
 }
 
+/// Spoken message labels are built only when AccessKit is active.
+fn spoken_message(view: &View<'_>, message: &Message, album: Option<&[Message]>) -> String {
+    let plain = |message: &Message| {
+        let text = match &message.content {
+            Content::Text { text, .. } | Content::Interactive { text, .. } => text.as_str(),
+            Content::Image { caption, .. }
+            | Content::Video { caption, .. }
+            | Content::Document { caption, .. }
+            | Content::StickerPack { caption, .. } => caption.as_deref().unwrap_or_default(),
+            _ => "",
+        };
+        let mentions: Vec<_> = message
+            .mentions
+            .iter()
+            .map(|mention| markup::Mention {
+                user: mention.user.clone(),
+                name: (view.mention_names)(&mention.id),
+            })
+            .collect();
+        markup::plain(text, &mentions)
+    };
+    let body = if let Some(album) = album {
+        let photos = album
+            .iter()
+            .filter(|message| matches!(message.content, Content::Image { .. }))
+            .count() as u32;
+        let captions = album
+            .iter()
+            .map(plain)
+            .filter(|text| !text.is_empty())
+            .collect::<Vec<_>>();
+        crate::a11y::album_description(view.locale, photos, album.len() as u32 - photos, &captions)
+    } else {
+        crate::a11y::content_description(view.locale, &message.content, &plain(message))
+    };
+    let sender = (view.names_or)(&message.sender, message.sender_name.as_deref());
+    let status = message
+        .from_me
+        .then(|| crate::a11y::status_word(view.locale, message.status))
+        .flatten();
+    let quoted = message.quoted.as_ref().map(|quote| {
+        (
+            (view.names_or)(&quote.sender, quote.sender_name.as_deref()),
+            quote.summary.as_str(),
+        )
+    });
+    let attachment =
+        crate::a11y::attachment_state(view.locale, &message.content, view.auto_download);
+    crate::a11y::message_label(
+        view.locale,
+        &crate::a11y::MessageLabel {
+            day: None,
+            notices: &[],
+            unread: false,
+            sender: &sender,
+            body: &body,
+            time: &crate::util::clock(message.timestamp),
+            status: status.as_deref(),
+            reply_to: quoted
+                .as_ref()
+                .map(|(name, summary)| (name.as_str(), *summary)),
+            forwarded: message.forwarded,
+            edited: message.edited,
+            starred: view
+                .starred
+                .is_some_and(|stars| stars.contains(&message.id)),
+            pinned: view.pins.is_some_and(|pins| pins.contains(&message.id)),
+            reactions: &crate::a11y::reaction_counts(&message.reactions),
+            attachment: attachment.as_deref(),
+        },
+    )
+}
+
 /// Protocol album parent carried by pictures and ordinary videos.
 fn album_id(message: &Message) -> Option<&str> {
     match &message.content {
@@ -2500,19 +2573,108 @@ fn messages(app: &mut App, ui: &mut egui::Ui, chat: &Chat, under: f32) {
             app.selection.is_some() || !album_continuation(&conversation.messages, *index)
         })
         .collect();
+    let list_id = super::list_nav::messages_id();
+    let route = (app.account().id.clone(), chat.id.clone());
+    let route_id = list_id.with("shown-chat");
+    let changed_chat = ui
+        .ctx()
+        .data(|data| data.get_temp::<(crate::model::AccountId, String)>(route_id))
+        .as_ref()
+        != Some(&route);
+    ui.ctx().data_mut(|data| data.insert_temp(route_id, route));
+    let cursor_id = egui::Id::new(("message-cursor", &app.account().id, &chat.id));
+    let saved = ui
+        .ctx()
+        .data(|data| data.get_temp::<(String, usize)>(cursor_id));
+    let mut current = saved
+        .as_ref()
+        .and_then(|(id, _)| {
+            accessible_rows
+                .iter()
+                .position(|index| conversation.messages[*index].id == *id)
+        })
+        .or_else(|| {
+            saved
+                .as_ref()
+                .map(|(_, index)| (*index).min(accessible_rows.len().saturating_sub(1)))
+        })
+        .or_else(|| accessible_rows.len().checked_sub(1));
+    if accessible_rows.is_empty() {
+        current = None;
+    }
+    if let Some(anchor) = app.scroll_anchor.as_deref()
+        && let Some(index) = accessible_rows
+            .iter()
+            .position(|index| conversation.messages[*index].id == anchor)
+    {
+        current = Some(index);
+    }
+    let title = app.chat_title(chat);
+    let list_rect = ui.available_rect_before_wrap();
+    let list_response = super::list_nav::container(
+        ui,
+        list_id,
+        list_rect,
+        || crate::a11y::messages_list_label(app.locale, &title, chat.is_group()),
+        accessible_rows.len(),
+    );
+    super::focus::TabStop::tab_stop(list_response.clone(), super::focus::Stop::Messages);
+    super::focus::section(&list_response, super::focus::Section::Messages);
+    let list_focused = list_response.has_focus();
+    let keyboard = ui
+        .ctx()
+        .data(|data| data.get_temp::<bool>(theme::keyboard_focus_id()))
+        .unwrap_or(false);
+    if list_focused && keyboard {
+        app.focus_composer = false;
+    } else if !chat.can_send() && app.focus_composer && app.dialog.is_none() {
+        app.focus_composer = false;
+        if keyboard {
+            list_response.request_focus();
+        }
+    }
     if ui.is_enabled()
+        && list_focused
         && (app.dialog.is_none() || super::dialogs::uses_side_panel(app, ui.ctx()))
         && app.picker.is_none()
         && !egui::Popup::is_any_open(ui.ctx())
+        && let Some(step) =
+            super::list_nav::take_step(ui.ctx(), || (list_rect.height() / 60.0).max(1.0) as usize)
     {
-        let ids: Vec<_> = accessible_rows
-            .iter()
-            .map(|index| bubble_id(&chat.id, &conversation.messages[*index].id))
-            .collect();
-        if let Some(index) = super::accessibility::navigate(ui.ctx(), &ids) {
-            app.scroll_anchor = Some(conversation.messages[accessible_rows[index]].id.clone());
-            app.scroll_to_bottom = false;
+        current = super::list_nav::step(current, accessible_rows.len(), step);
+        if let Some(index) = current {
+            let id = conversation.messages[accessible_rows[index]].id.clone();
+            if index + 1 == accessible_rows.len() {
+                app.scroll_to_bottom = true;
+                app.scroll_to_bottom_forced = true;
+            } else {
+                app.scroll_anchor = Some(id);
+                app.scroll_to_bottom = false;
+            }
+            if index == 0
+                && matches!(
+                    step,
+                    super::list_nav::Step::First | super::list_nav::Step::Previous
+                )
+            {
+                app.actions.push(Action::FetchOlder(chat.id.clone()));
+            }
         }
+    }
+    let current_message =
+        current.map(|index| conversation.messages[accessible_rows[index]].id.clone());
+    if list_focused
+        && keyboard
+        && !scroll_forced
+        && (changed_chat || list_response.gained_focus())
+        && let Some(message) = current_message.as_ref()
+    {
+        app.scroll_anchor = Some(message.clone());
+        app.scroll_to_bottom = false;
+    }
+    if let (Some(index), Some(id)) = (current, current_message.as_ref()) {
+        ui.ctx()
+            .data_mut(|data| data.insert_temp(cursor_id, (id.clone(), index)));
     }
     let typing = app.typing_in(&chat.id);
     // Keep transcript state independently borrowable while row measurements
@@ -3023,49 +3185,91 @@ fn messages(app: &mut App, ui: &mut egui::Ui, chat: &Chat, under: f32) {
                         let band = selection
                             .as_ref()
                             .map(|_| (ui.painter().add(egui::Shape::Noop), ui.cursor().top()));
-                        let response = if selection.is_some() {
-                            ui.horizontal_top(|ui| {
-                                ui.add_space(SELECT_GUTTER);
-                                ui.vertical(|ui| {
-                                    bubble(
-                                        ui,
-                                        &view,
-                                        message,
-                                        album,
-                                        MessageRun {
-                                            show_sender,
-                                            show_avatar,
-                                            tailed,
-                                        },
-                                        &mut actions,
-                                    )
-                                })
-                                .inner
-                            })
-                            .inner
-                        } else {
-                            bubble(
-                                ui,
-                                &view,
-                                message,
-                                album,
-                                MessageRun {
-                                    show_sender,
-                                    show_avatar,
-                                    tailed,
+                        let response = ui
+                            .scope_builder(
+                                super::list_nav::row_builder(ui, (cursor_id, &message.id), list_id),
+                                |ui| {
+                                    let row_id = ui.unique_id();
+                                    let response = if selection.is_some() {
+                                        ui.horizontal_top(|ui| {
+                                            ui.add_space(SELECT_GUTTER);
+                                            ui.vertical(|ui| {
+                                                bubble(
+                                                    ui,
+                                                    &view,
+                                                    message,
+                                                    album,
+                                                    MessageRun {
+                                                        show_sender,
+                                                        show_avatar,
+                                                        tailed,
+                                                    },
+                                                    &mut actions,
+                                                )
+                                            })
+                                            .inner
+                                        })
+                                        .inner
+                                    } else {
+                                        bubble(
+                                            ui,
+                                            &view,
+                                            message,
+                                            album,
+                                            MessageRun {
+                                                show_sender,
+                                                show_avatar,
+                                                tailed,
+                                            },
+                                            &mut actions,
+                                        )
+                                    };
+                                    if let Some(response) = &response {
+                                        let position = accessible_rows
+                                            .binary_search(&message_index)
+                                            .expect("drawn message row");
+                                        if ui.ctx().accesskit_node_builder(row_id, |_| ()).is_some()
+                                        {
+                                            let label = if view.screen_privacy.hides(
+                                                ScreenPrivacyWhat::Preview,
+                                                response.hovered(),
+                                            ) {
+                                                crate::i18n::gettext(view.locale, "Message")
+                                                    .into_owned()
+                                            } else {
+                                                spoken_message(&view, message, album)
+                                            };
+                                            super::list_nav::mark_row(
+                                                ui.ctx(),
+                                                row_id,
+                                                label,
+                                                position + 1,
+                                                accessible_rows.len(),
+                                                response.rect,
+                                                None,
+                                            );
+                                        }
+                                        if current_message.as_deref() == Some(message.id.as_str()) {
+                                            super::list_nav::set_active(
+                                                ui.ctx(),
+                                                list_id,
+                                                Some(row_id),
+                                            );
+                                            if list_focused && keyboard {
+                                                theme::focus_outline(
+                                                    ui,
+                                                    list_id,
+                                                    response.rect,
+                                                    10.0,
+                                                );
+                                                view.keyboard_navigation.set(true);
+                                            }
+                                        }
+                                    }
+                                    response
                                 },
-                                &mut actions,
                             )
-                        };
-                        if response.is_some()
-                            && let Some(item) =
-                                ui.ctx().read_response(bubble_id(&chat.id, &message.id))
-                        {
-                            let position = accessible_rows
-                                .binary_search(&message_index)
-                                .expect("drawn message row");
-                            super::accessibility::item(&item, position, accessible_rows.len());
-                        }
+                            .inner;
                         if let Some((slot, top)) = flash {
                             if row_is_anchor && response.is_some() {
                                 jump_since.set(Some(time));
@@ -11749,6 +11953,83 @@ mod reaction_tests {
             from_me,
             emoji: emoji.into(),
         }
+    }
+
+    #[test]
+    fn message_list_arrows_keep_one_focus_and_publish_a_drawn_active_row() {
+        let directory = tempfile::tempdir().unwrap();
+        let (mut app, _) = App::headless(
+            crate::paths::AppDirs::under(directory.path()),
+            crate::settings::Settings::default(),
+        );
+        let chat = Chat::new("a@s.whatsapp.net".into(), "Synthetic".into());
+        app.chats.push(chat.clone());
+        app.open_chat = Some(chat.id.clone());
+        app.conversations.insert(
+            chat.id.clone(),
+            Conversation {
+                messages: (0..3)
+                    .map(|index| {
+                        let mut row = with_reactions(Vec::new());
+                        row.id = format!("row-{index}");
+                        row
+                    })
+                    .collect(),
+                complete: true,
+                ..Default::default()
+            },
+        );
+        let ctx = egui::Context::default();
+        app.attach(&ctx);
+        ctx.enable_accesskit();
+        let draw = |app: &mut App, events| {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(640.0, 500.0))),
+                    events,
+                    ..Default::default()
+                },
+                |ui| messages(app, ui, &chat, 0.0),
+            );
+            output.textures_delta.clear();
+            output.platform_output.accesskit_update.unwrap()
+        };
+        draw(&mut app, Vec::new());
+        let list = super::super::list_nav::messages_id();
+        ctx.memory_mut(|memory| memory.request_focus(list));
+        ctx.data_mut(|data| data.insert_temp(theme::keyboard_focus_id(), true));
+        draw(&mut app, Vec::new());
+        let tree = draw(
+            &mut app,
+            vec![egui::Event::Key {
+                key: Key::ArrowUp,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: Modifiers::NONE,
+            }],
+        );
+        assert!(ctx.memory(|memory| memory.has_focus(list)));
+        let container = tree
+            .nodes
+            .iter()
+            .find(|(id, _)| *id == list.accesskit_id())
+            .unwrap();
+        assert_eq!(container.1.role(), egui::accesskit::Role::ListBox);
+        let active = container.1.active_descendant().expect("active row");
+        let row = tree
+            .nodes
+            .iter()
+            .find(|(id, _)| *id == active)
+            .expect("active row drawn in this pass");
+        assert_eq!(row.1.position_in_set(), Some(2));
+        assert_eq!(row.1.size_of_set(), Some(3));
+        app.conversations
+            .get_mut(&chat.id)
+            .unwrap()
+            .messages
+            .clear();
+        draw(&mut app, Vec::new()); // A stale cursor is safe when every row disappears.
     }
 
     #[test]

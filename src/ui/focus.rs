@@ -13,6 +13,7 @@ pub enum Stop {
     RecordCancel,
     RecordSend,
     PhoneLink(u32),
+    Messages,
     /// The chat header's Search, then the search pane's controls in reading
     /// order. The arrows walk its results from the field.
     ChatSearch,
@@ -93,7 +94,8 @@ fn stop_section(stop: Stop) -> Section {
         | Stop::Emoji
         | Stop::RecordCancel
         | Stop::RecordSend => Section::Composer,
-        Stop::PhoneLink(_)
+        Stop::Messages
+        | Stop::PhoneLink(_)
         | Stop::ChatSearch
         | Stop::ChatSearchClose
         | Stop::ChatSearchDate

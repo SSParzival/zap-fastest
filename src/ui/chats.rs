@@ -1976,9 +1976,6 @@ fn row(app: &mut App, ui: &mut egui::Ui, chat: &Chat) -> egui::Response {
             "Unarchive",
             &crate::i18n::gettext(app.locale, "Leave group"),
             &crate::i18n::gettext(app.locale, "Leave channel"),
-            "Mute for 8 hours",
-            "Mute for a week",
-            "Mute indefinitely",
             "Unlock chat",
             "Copy number",
             &crate::i18n::gettext(app.locale, "Clear chat"),
@@ -1991,6 +1988,7 @@ fn row(app: &mut App, ui: &mut egui::Ui, chat: &Chat) -> egui::Response {
         widgets::menu_width(
             ui,
             &[
+                &crate::i18n::gettext(app.locale, "Mute"),
                 "Notification sound",
                 "Voice message speed",
                 &crate::i18n::gettext(app.locale, "Labels"),
@@ -2415,15 +2413,7 @@ fn context_menu_contents(app: &mut App, ui: &mut egui::Ui, chat: &Chat, palette:
             app.actions.push(Action::SetMuted(chat.id.clone(), None));
         }
     } else {
-        for (label, until) in [
-            ("Mute for 8 hours", Some(now + 8 * 3600)),
-            ("Mute for a week", Some(now + 7 * 86_400)),
-            ("Mute indefinitely", Some(0)),
-        ] {
-            if widgets::menu_item(ui, palette, Some(Icon::BellOff), label) {
-                app.actions.push(Action::SetMuted(chat.id.clone(), until));
-            }
-        }
+        mute_menu(app, ui, palette, chat, now);
     }
     sound_menu(app, ui, palette, chat);
     voice_speed_menu(app, ui, palette, chat);
@@ -2591,6 +2581,32 @@ fn sound_menu(app: &mut App, ui: &mut egui::Ui, palette: &Palette, chat: &Chat) 
             }
         },
     );
+}
+
+/// Mute, with WhatsApp's choices of how long, in a submenu of its own.
+fn mute_menu(app: &mut App, ui: &mut egui::Ui, palette: &Palette, chat: &Chat, now: i64) {
+    let locale = app.locale;
+    let options = [
+        (
+            crate::i18n::gettext(locale, "8 hours"),
+            Some(now + 8 * 3600),
+        ),
+        (
+            crate::i18n::gettext(locale, "1 week"),
+            Some(now + 7 * 86_400),
+        ),
+        (crate::i18n::gettext(locale, "Always"), Some(0)),
+    ];
+    let items: Vec<&str> = options.iter().map(|(label, _)| label.as_ref()).collect();
+    let label = crate::i18n::gettext(locale, "Mute");
+    widgets::submenu(ui, palette, Icon::BellOff, &label, &items, |ui| {
+        for (label, until) in &options {
+            if widgets::menu_item(ui, palette, None, label.as_ref()) {
+                app.actions.push(Action::SetMuted(chat.id.clone(), *until));
+                ui.close();
+            }
+        }
+    });
 }
 
 /// A chat's own voice message speed, overriding Settings for this chat.
