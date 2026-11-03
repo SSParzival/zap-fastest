@@ -2794,11 +2794,7 @@ pub fn apply_flags(app: &mut App, page: Option<&str>) {
                     app.group_saving.insert(group.to_owned());
                 }
             }
-            "forward"
-            | "forward-selected"
-            | "forward-review"
-            | "forward-full"
-            | "forward-once" => {
+            "forward" | "forward-selected" | "forward-review" | "forward-full" | "forward-once" => {
                 app.dialog = app.open_chat.clone().map(|chat| Dialog::Forward {
                     chat,
                     messages: vec!["ada-format".to_owned()],
@@ -3876,10 +3872,7 @@ mod tests {
     pub(super) fn render_sized(app: &mut App, ctx: &egui::Context, size: egui::Vec2) {
         for _ in 0..3 {
             let input = egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(
-                    egui::Pos2::ZERO,
-                    size,
-                )),
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
                 ..Default::default()
             };
             let mut output = ctx.run_ui(input, |ui| {
@@ -6781,8 +6774,6 @@ mod tests {
         }
     }
 
-
-
     /// Runs a copy input and follow-up frame, collecting clipboard writes.
     fn copied_text(app: &mut App, ctx: &egui::Context, event: egui::Event) -> Vec<String> {
         let mut copied = Vec::new();
@@ -7180,8 +7171,6 @@ mod tests {
             }
         }
     }
-
-
 
     /// Presses and releases the primary button at `pos`.
     fn press_at(app: &mut App, ctx: &egui::Context, pos: egui::Pos2) {
@@ -8617,9 +8606,7 @@ mod tests {
                     app.pending[0] =
                         crate::app::Pending::Document(Box::new(crate::app::Pending::File(path)))
                 }
-                "video" => {
-                    app.pending[0] = crate::app::Pending::File("/fixture/clip.mp4".into())
-                }
+                "video" => app.pending[0] = crate::app::Pending::File("/fixture/clip.mp4".into()),
                 "batch" => {
                     app.stage(crate::app::Pending::File(path));
                 }
@@ -9429,6 +9416,64 @@ mod tests {
         assert_eq!(back, x, "and it scrolls back to its start");
     }
 
+    #[test]
+    fn sending_text_closes_the_emoji_picker() {
+        for enter_sends in [true, false] {
+            let mut app = app();
+            let ctx = egui::Context::default();
+            app.settings.enter_sends = enter_sends;
+            app.attach(&ctx);
+            app.backend.record_demo_commands();
+            apply_flags(&mut app, Some("picker"));
+            render(&mut app, &ctx);
+            app.actions
+                .push(crate::model::Action::InsertEmoji("😀".into()));
+            render(&mut app, &ctx);
+            render(&mut app, &ctx);
+            assert_eq!(app.picker, Some(crate::model::PickerTab::Emoji));
+            assert_eq!(app.composer, "😀");
+
+            frame_with(
+                &mut app,
+                &ctx,
+                vec![key(
+                    egui::Key::Enter,
+                    if enter_sends {
+                        egui::Modifiers::SHIFT
+                    } else {
+                        egui::Modifiers::NONE
+                    },
+                )],
+            );
+            assert_eq!(app.composer, "😀\n");
+            assert_eq!(app.picker, Some(crate::model::PickerTab::Emoji));
+            assert!(
+                !app.backend
+                    .take_demo_commands()
+                    .iter()
+                    .any(|command| { matches!(command, crate::backend::Command::SendText { .. }) })
+            );
+
+            frame_with(
+                &mut app,
+                &ctx,
+                vec![key(
+                    egui::Key::Enter,
+                    if enter_sends {
+                        egui::Modifiers::NONE
+                    } else {
+                        egui::Modifiers::COMMAND
+                    },
+                )],
+            );
+            assert!(app.composer.is_empty(), "the message was dispatched");
+            assert!(app.backend.take_demo_commands().iter().any(|command| {
+                matches!(command, crate::backend::Command::SendText { text, .. } if text == "😀")
+            }));
+            assert!(app.picker.is_none(), "sending closes the emoji picker");
+        }
+    }
+
     /// Opens the sample photo in the preview and waits for it to decode, so
     /// input meets a settled, fitted picture. Returns the fitted scale.
     fn open_sample_preview(app: &mut App, ctx: &egui::Context) -> f32 {
@@ -9468,6 +9513,36 @@ mod tests {
             .map(|clipped| clipped.shape.visual_bounding_rect())
             .max_by(|a, b| a.area().total_cmp(&b.area()))
             .expect("the preview draws its picture")
+    }
+
+    #[test]
+    fn clicking_the_viewer_margin_closes_it_but_the_picture_keeps_its_clicks() {
+        let mut app = app();
+        let ctx = egui::Context::default();
+        open_sample_preview(&mut app, &ctx);
+        let picture = preview_frame(&mut app, &ctx, vec![]);
+        let center = picture.center();
+        frame_with(
+            &mut app,
+            &ctx,
+            vec![egui::Event::PointerMoved(center), primary(center, true)],
+        );
+        frame_with(&mut app, &ctx, vec![primary(center, false)]);
+        assert!(
+            app.image_preview.is_some(),
+            "a picture click keeps the viewer open"
+        );
+
+        // The sample is fitted by height, leaving a margin on either side.
+        let margin = picture.left_center() - egui::vec2(12.0, 0.0);
+        assert!(!picture.contains(margin));
+        frame_with(
+            &mut app,
+            &ctx,
+            vec![egui::Event::PointerMoved(margin), primary(margin, true)],
+        );
+        frame_with(&mut app, &ctx, vec![primary(margin, false)]);
+        assert!(app.image_preview.is_none(), "the margin closes the viewer");
     }
 
     /// Moves the pointer to `pos` and turns the wheel with `modifiers` held;

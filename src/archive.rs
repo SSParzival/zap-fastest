@@ -1475,7 +1475,7 @@ impl Archive {
                 history_order = COALESCE(messages.history_order, excluded.history_order)",
             params![lid_chat, phone_chat],
         )?;
-        Self::move_message_metadata(&transaction, &lid_chat, &phone_chat)?;
+        Self::move_message_metadata(transaction, &lid_chat, &phone_chat)?;
         transaction.execute("INSERT OR IGNORE INTO pin_notices(chat,id,pinned_at,expires_at,by_me,sender) SELECT ?2,id,pinned_at,expires_at,by_me,sender FROM pin_notices WHERE chat=?1",params![lid_chat,phone_chat])?;
         transaction.execute("INSERT INTO media_jobs(chat,id,card,attempts,next_attempt,state) SELECT ?2,id,card,attempts,next_attempt,state FROM media_jobs WHERE chat=?1 ON CONFLICT(chat,id,card) DO UPDATE SET attempts=MAX(media_jobs.attempts,excluded.attempts),next_attempt=MAX(media_jobs.next_attempt,excluded.next_attempt),state=MAX(media_jobs.state,excluded.state)",params![lid_chat,phone_chat])?;
         transaction.execute("INSERT INTO managed_exports(chat,id,card,root,destination,attempts,next_attempt,state) SELECT ?2,id,card,root,destination,attempts,next_attempt,state FROM managed_exports WHERE chat=?1 ON CONFLICT(chat,id,card) DO NOTHING",params![lid_chat,phone_chat])?;

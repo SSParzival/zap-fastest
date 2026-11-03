@@ -318,14 +318,20 @@ pub fn selectable_rich_text(
             });
     }
     if ui.is_rect_visible(rect) {
-        egui::text_selection::LabelSelectionState::label_text_selection(
-            ui,
-            &response,
-            rect.min,
-            line.galley.clone(),
-            color,
-            egui::Stroke::NONE,
-        );
+        let draw = || {
+            egui::text_selection::LabelSelectionState::label_text_selection(
+                ui,
+                &response,
+                rect.min,
+                line.galley.clone(),
+                color,
+                egui::Stroke::NONE,
+            );
+        };
+        #[cfg(target_os = "linux")]
+        crate::primary_selection::with_label_copy(ui.ctx(), draw);
+        #[cfg(not(target_os = "linux"))]
+        draw();
         crate::emoji::paint(ui, &line.galley, rect.min, &line.placements);
     }
     response
@@ -807,22 +813,48 @@ pub fn search_field(
     } else {
         Align::LEFT
     };
-    let response = child.add(
-        egui::TextEdit::singleline(text)
-            .id(id)
-            .hint_text(
-                egui::RichText::new(hint)
-                    .color(palette.dim)
-                    .font(theme::regular(14.0)),
-            )
-            .font(theme::regular(14.0))
-            .text_color(palette.text)
-            .frame(egui::Frame::NONE)
-            .desired_width(field_rect.width())
-            .vertical_align(Align::Center)
-            .horizontal_align(align)
-            .layouter(&mut layouter),
-    );
+    let output = egui::TextEdit::singleline(text)
+        .id(id)
+        .hint_text(
+            egui::RichText::new(hint)
+                .color(palette.dim)
+                .font(theme::regular(14.0)),
+        )
+        .font(theme::regular(14.0))
+        .text_color(palette.text)
+        .frame(egui::Frame::NONE)
+        .desired_width(field_rect.width())
+        .vertical_align(Align::Center)
+        .horizontal_align(align)
+        .layouter(&mut layouter)
+        .show(&mut child);
+    let response = output.response.response.clone();
+    #[cfg(target_os = "linux")]
+    let response = {
+        let mut response = response;
+        if let Some(pasted) = crate::primary_selection::middle_paste(&child, &output) {
+            let pasted = pasted.replace(['\r', '\n'], " ");
+            let mut state = egui::TextEdit::load_state(ui.ctx(), id).unwrap_or_default();
+            let at = state
+                .cursor
+                .char_range()
+                .map_or(0, |range| range.primary.index.0);
+            let byte = text
+                .char_indices()
+                .nth(at)
+                .map_or(text.len(), |(byte, _)| byte);
+            text.insert_str(byte, &pasted);
+            state
+                .cursor
+                .set_char_range(Some(egui::text::CCursorRange::one(
+                    egui::text::CCursor::new(at + pasted.chars().count()),
+                )));
+            state.clear_undoer();
+            state.store(ui.ctx(), id);
+            response.mark_changed();
+        }
+        response
+    };
     theme::focus_outline(ui, response.id, rect, height / 2.0);
     ui.ctx()
         .accesskit_node_builder(response.id, |node| node.set_label(hint));

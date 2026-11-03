@@ -1692,6 +1692,18 @@ fn composer(app: &mut App, ui: &mut egui::Ui, chat: &Chat) {
                                     })
                                     .layouter(&mut layouter)
                                     .show(ui);
+                                #[cfg(target_os = "linux")]
+                                let output = {
+                                    let mut output = output;
+                                    if let Some(text) = crate::primary_selection::middle_paste(ui, &output) {
+                                        app.insert_in_composer(ui.ctx(), &text);
+                                        app.invalidate_composer_undo();
+                                        output.response.response.mark_changed();
+                                        output.cursor_range = egui::TextEdit::load_state(ui.ctx(), id)
+                                            .and_then(|state| state.cursor.char_range());
+                                    }
+                                    output
+                                };
                                 for (start, length, cluster) in &clusters {
                                     let Some(bounds) = crate::bidi::char_bounds(
                                         &output.galley,

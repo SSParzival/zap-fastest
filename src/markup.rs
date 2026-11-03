@@ -242,14 +242,20 @@ pub fn paint_selectable(
     galley.rect.max.x = column.span();
     galley.mesh_bounds = galley.mesh_bounds.translate(egui::vec2(offset, 0.0));
     let selection_pos = Pos2::new(snap_to_pixels(column.min, ppp), pos.y);
-    egui::text_selection::LabelSelectionState::label_text_selection(
-        ui,
-        response,
-        selection_pos,
-        Arc::new(galley),
-        fallback,
-        egui::Stroke::NONE,
-    );
+    let draw = || {
+        egui::text_selection::LabelSelectionState::label_text_selection(
+            ui,
+            response,
+            selection_pos,
+            Arc::new(galley),
+            fallback,
+            egui::Stroke::NONE,
+        );
+    };
+    #[cfg(target_os = "linux")]
+    crate::primary_selection::with_label_copy(ui.ctx(), draw);
+    #[cfg(not(target_os = "linux"))]
+    draw();
     if visible {
         emoji::paint(ui, &text.galley, pos, &text.placements);
     }

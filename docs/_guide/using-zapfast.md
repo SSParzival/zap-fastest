@@ -19,6 +19,8 @@ undo history. Saved drafts remain available when you return to their chat.
 
 Enter sends and Shift+Enter adds a line. Turn off **Enter sends** in Settings
 to make Enter add a line and send with Ctrl+Enter (Command+Enter on macOS).
+The emoji picker stays open while choosing emoji and closes when you send
+the text.
 `*bold*`, `_italic_`, `~strike~`, and ```` ```monospace ```` ```` format
 like WhatsApp, and a message of nothing but emoji shows large.
 Paste text with Ctrl+V (Command+V on macOS) or Shift+Insert, as in other
@@ -163,6 +165,9 @@ The sticker tab works like WhatsApp's: a row of tabs holds **Recent**
 (the clock), **Favorites** (the star), each of your packs, and **+** for
 adding more. Zap Faster adds **Received** (the speech bubble) after Favorites.
 Click a sticker to send it. Animated stickers play on hover.
+Stickers stored as a one-frame WebP animation show their single picture.
+GIF messages with reordered video frames play their full loop with the
+original presentation timing.
 
 Click a downloaded sticker in a conversation to see it on its own. Animated
 stickers play in the viewer. **Add to favorites** or **Remove from favorites**
@@ -430,7 +435,10 @@ photo instead loads a page around that photo. **Refresh** reloads the listing.
 Escape returns from the gallery to the profile before closing it. The gallery
 respects the account's screen privacy and authenticated locked-chat folder.
 
-The preview closes when its chat is removed, becomes locked outside the unlocked
+Click the empty margin beside a picture, press Escape, or use the close button
+to close its preview. Clicking the picture keeps it open; double-clicking it
+switches between fit and original size. Dragging a zoomed picture still pans it.
+The preview also closes when its chat is removed, becomes locked outside the unlocked
 folder, or when you close the locked folder.
 **Save as…** in a downloaded attachment's
 right-click menu keeps a copy wherever you choose.

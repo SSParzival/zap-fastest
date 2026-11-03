@@ -422,9 +422,16 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                                                     ));
                                                 }
                                             });
-                                        image_response
+                                        // Justified layouts expand the response into the
+                                        // margins; the painted image retains its own size.
+                                        let drawn = Rect::from_center_size(
+                                            image_response.rect.center(),
+                                            size,
+                                        );
+                                        let double_click = image_response
                                             .interact_pointer_pos()
-                                            .filter(|_| image_response.double_clicked())
+                                            .filter(|_| image_response.double_clicked());
+                                        (drawn, double_click)
                                     },
                                 )
                                 .inner
@@ -448,7 +455,9 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                         // The header's Fit/% toggle. The original size opens with the
                         // double-clicked point in the middle: the offset is stored for
                         // the next frame, which lays out the new size.
-                        if let Some(pos) = output.inner {
+                        let (drawn, double_click) = output.inner;
+                        field_click(ui, output.inner_rect, drawn, &mut app.actions);
+                        if let Some(pos) = double_click {
                             if app
                                 .image_preview
                                 .as_ref()
@@ -499,6 +508,34 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
     if response.should_close() {
         app.actions.push(Action::CloseImagePreview);
     }
+}
+
+/// The scroll area owns the canvas, so its uncovered margins need their own
+/// click targets. Pictures and scroll bars keep their existing interactions.
+fn field_click(ui: &mut egui::Ui, stage: Rect, drawn: Rect, actions: &mut Vec<Action>) {
+    for (index, panel) in field_panels(stage, drawn).into_iter().enumerate() {
+        if panel.is_positive()
+            && ui
+                .interact(
+                    panel,
+                    egui::Id::new(("image-preview-field", index)),
+                    egui::Sense::click(),
+                )
+                .clicked()
+        {
+            actions.push(Action::CloseImagePreview);
+        }
+    }
+}
+
+fn field_panels(stage: Rect, drawn: Rect) -> [Rect; 4] {
+    let drawn = drawn.intersect(stage);
+    [
+        Rect::from_x_y_ranges(stage.x_range(), stage.min.y..=drawn.min.y),
+        Rect::from_x_y_ranges(stage.x_range(), drawn.max.y..=stage.max.y),
+        Rect::from_x_y_ranges(stage.min.x..=drawn.min.x, drawn.y_range()),
+        Rect::from_x_y_ranges(drawn.max.x..=stage.max.x, drawn.y_range()),
+    ]
 }
 
 /// Thumbnails use only archive previews, never full attachment decoding.

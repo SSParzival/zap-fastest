@@ -8,6 +8,8 @@
 pub struct CopyAnnotator {
     /// Message bodies drawn during the frame, in order.
     pub rows: std::sync::Arc<std::sync::Mutex<Vec<Row>>>,
+    #[cfg(target_os = "linux")]
+    pub(crate) primary: crate::primary_selection::PrimarySelection,
 }
 
 impl egui::plugin::Plugin for CopyAnnotator {
@@ -15,10 +17,24 @@ impl egui::plugin::Plugin for CopyAnnotator {
         "zapfast-transcript"
     }
 
-    fn output_hook(&mut self, _ctx: &egui::Context, output: &mut egui::FullOutput) {
+    fn on_begin_pass(&mut self, ui: &mut egui::Ui) {
+        #[cfg(target_os = "linux")]
+        if ui.input(|i| i.pointer.button_pressed(egui::PointerButton::Primary)) {
+            // A new selection must reclaim PRIMARY even if another program
+            // took ownership and the user now selects the same text again.
+            self.primary.new_selection();
+        }
+        #[cfg(not(target_os = "linux"))]
+        let _ = ui;
+    }
+
+    fn output_hook(&mut self, ctx: &egui::Context, output: &mut egui::FullOutput) {
         let rows = self.rows.lock().unwrap_or_else(|p| p.into_inner());
-        if rows.is_empty() {
-            return;
+        #[cfg(not(target_os = "linux"))]
+        let _ = ctx;
+        #[cfg(target_os = "linux")]
+        if let Some(text) = crate::primary_selection::take_label_copy(ctx, output) {
+            self.primary.publish(refine(&text, &rows).unwrap_or(text));
         }
         for command in &mut output.platform_output.commands {
             if let egui::OutputCommand::CopyText(text) = command

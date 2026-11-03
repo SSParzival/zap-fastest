@@ -798,7 +798,6 @@ impl JumpHighlight {
     }
 }
 
-
 /// Localizes known number-lookup failures while preserving unknown failure details.
 fn contact_failure_message(locale: crate::i18n::Locale, error: &str) -> String {
     match error {
@@ -2436,6 +2435,8 @@ impl App {
         // Register transcript copy formatting once per egui context.
         ctx.add_plugin(crate::transcript::CopyAnnotator {
             rows: std::sync::Arc::clone(&self.copy_rows),
+            #[cfg(target_os = "linux")]
+            primary: Default::default(),
         });
         ctx.data_mut(|data| {
             data.insert_temp(
@@ -2797,7 +2798,7 @@ impl App {
         if chat.is_group() {
             return chat.name.clone();
         }
-        self.person_name(&chat.id, None)
+        self.person_name_of(&chat.id, None, Some(chat))
     }
 
     /// Our own chat's title, "Name (You)" as on the phone, so searching for
@@ -2841,6 +2842,11 @@ impl App {
     }
 
     fn person_name(&self, id: &str, hint: Option<&str>) -> String {
+        self.person_name_of(id, hint, None)
+    }
+
+    /// Resolves a title without looking up a chat the caller already has.
+    fn person_name_of(&self, id: &str, hint: Option<&str>, chat: Option<&Chat>) -> String {
         let contact = self.contacts.get(id);
         let present = |name: Option<&str>| name.filter(|name| !name.is_empty()).map(str::to_owned);
         let saved = present(contact.and_then(|contact| contact.full_name.as_deref()));
@@ -2850,7 +2856,7 @@ impl App {
         if let Some(name) = saved.or_else(|| called.map(|name| format!("~{name}"))) {
             return name;
         }
-        if let Some(chat) = self.chat(id)
+        if let Some(chat) = chat.or_else(|| self.chat(id))
             && !chat.name.is_empty()
             && !chat.name.chars().all(|c| c.is_ascii_digit())
         {
@@ -3184,12 +3190,13 @@ impl App {
         if needle.is_empty() {
             return Vec::new();
         }
+        let talked_to: HashSet<&str> = self.chats.iter().map(|chat| chat.id.as_str()).collect();
         let mut contacts: Vec<&Contact> = self
             .contacts
             .values()
             .filter(|contact| crate::model::phone_of(&contact.id).is_some())
             .filter(|contact| self.me.as_deref() != Some(contact.id.as_str()))
-            .filter(|contact| !self.chats.iter().any(|chat| chat.id == contact.id))
+            .filter(|contact| !talked_to.contains(contact.id.as_str()))
             .filter(|contact| {
                 contact
                     .display_name()
@@ -5283,7 +5290,10 @@ impl App {
                 caption,
             } => {
                 let pending: Vec<Pending> = if documents {
-                    paths.into_iter().map(|path| Pending::Document(Box::new(Pending::File(path)))).collect()
+                    paths
+                        .into_iter()
+                        .map(|path| Pending::Document(Box::new(Pending::File(path))))
+                        .collect()
                 } else {
                     paths.into_iter().map(Pending::File).collect()
                 };
@@ -6117,6 +6127,9 @@ impl App {
             text: text.clone(),
             mentions: self.composer_mentions.clone(),
         };
+        if self.picker == Some(PickerTab::Emoji) {
+            self.picker = None;
+        }
         let (text, mentions) = self.encode_composer_mentions(&chat, text);
         self.emoji_start = None;
         self.mention_start = None;
@@ -10768,7 +10781,7 @@ impl App {
     }
 
     /// Inserts text at the composer cursor or end.
-    fn insert_in_composer(&mut self, ctx: &egui::Context, text: &str) {
+    pub(crate) fn insert_in_composer(&mut self, ctx: &egui::Context, text: &str) {
         let id = egui::Id::new("composer-text");
         let at = egui::TextEdit::load_state(ctx, id)
             .and_then(|state| state.cursor.char_range())
@@ -10784,7 +10797,7 @@ impl App {
         self.set_composer_cursor(ctx, at + text.chars().count());
     }
 
-    fn invalidate_composer_undo(&mut self) {
+    pub(crate) fn invalidate_composer_undo(&mut self) {
         self.composer_undo_epoch = self.composer_undo_epoch.wrapping_add(1);
     }
 
@@ -19434,8 +19447,12 @@ mod tests {
             app.chats.push(Chat::new(chat.into(), "Fixture".into()));
             app.chats.push(Chat::new(other.into(), "Other".into()));
             app.open_chat(chat.into());
-            app.stage(Pending::Document(Box::new(Pending::File("notes.pdf".into()))));
-            app.stage(Pending::Document(Box::new(Pending::File("second.pdf".into()))));
+            app.stage(Pending::Document(Box::new(Pending::File(
+                "notes.pdf".into(),
+            ))));
+            app.stage(Pending::Document(Box::new(Pending::File(
+                "second.pdf".into(),
+            ))));
             if away {
                 app.open_chat(other.into());
             }
@@ -21800,6 +21817,30 @@ mod tests {
         assert_eq!(app.display_name("42@lid"), "~Bob");
         app.me = Some("42@lid".into());
         assert_eq!(app.display_name("42@lid"), "You");
+    }
+
+    #[test]
+    fn chat_titles_follow_contact_updates_while_searching() {
+        let mut app = app();
+        let id = "393331234567@s.whatsapp.net";
+        app.chats.push(Chat::new(id.into(), "Chat title".into()));
+        app.search = "title".into();
+        assert_eq!(app.chat_title(&app.chats[0]), "Chat title");
+
+        app.contacts.insert(
+            id.into(),
+            Contact {
+                id: id.into(),
+                full_name: None,
+                first_name: None,
+                push_name: Some("Profile name".into()),
+            },
+        );
+        assert_eq!(app.chat_title(&app.chats[0]), "~Profile name");
+        app.contacts.get_mut(id).unwrap().full_name = Some("Saved name".into());
+        assert_eq!(app.chat_title(&app.chats[0]), "Saved name");
+        app.contacts.remove(id);
+        assert_eq!(app.chat_title(&app.chats[0]), "Chat title");
     }
     /// Private-reply refusals preserve the owning account's quote, text and voice clip.
     #[test]

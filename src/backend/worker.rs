@@ -11039,13 +11039,7 @@ impl Worker {
         let mut quote = match self.quote_target(&chat, quoting.as_ref()) {
             Ok(quote) => quote,
             Err(reason) => {
-                self.refuse_with_mentions(
-                    chat,
-                    quoting,
-                    unsent(paths, caption),
-                    reason,
-                    mentions,
-                );
+                self.refuse_with_mentions(chat, quoting, unsent(paths, caption), reason, mentions);
                 return;
             }
         };
@@ -15949,12 +15943,12 @@ mod tests {
     /// the phone shows no message for, so it is not one here either (#595).
     #[test]
     fn a_group_status_mention_is_not_a_message() {
-        let mut proto = wa::Message::default();
-        proto.group_status_mention_message = MessageField::some({
-            let mut proto = wa::message::FutureProofMessage::default();
-            proto.message = MessageField::some(wa::Message::default());
-            proto
-        });
+        let proto = wa::Message {
+            group_status_mention_message: MessageField::some(wa::message::FutureProofMessage {
+                message: MessageField::some(wa::Message::default()),
+            }),
+            ..Default::default()
+        };
         assert_eq!(classify(&proto), None);
     }
 
@@ -15962,39 +15956,34 @@ mod tests {
     fn the_hd_copy_of_a_photo_or_video_is_not_a_message() {
         use wa::context_info::PairedMediaType;
         use wa::message_association::AssociationType;
-        let copy = |association_type: Option<AssociationType>, video: bool| {
-            let mut proto = wa::Message::default();
-            proto.associated_child_message = MessageField::some({
-                let mut proto = wa::message::FutureProofMessage::default();
-                proto.message = MessageField::some({
-                    let mut proto = wa::Message::default();
-                    if video {
-                        proto.video_message = MessageField::some({
-                            let mut proto = wa::message::VideoMessage::default();
-                            proto.mimetype = Some("video/mp4".into());
-                            proto
-                        });
-                    } else {
-                        proto.image_message = MessageField::some({
-                            let mut proto = wa::message::ImageMessage::default();
-                            proto.mimetype = Some("image/jpeg".into());
-                            proto
-                        });
+        let copy = |association_type: Option<AssociationType>, video: bool| wa::Message {
+            associated_child_message: MessageField::some(wa::message::FutureProofMessage {
+                message: MessageField::some(if video {
+                    wa::Message {
+                        video_message: MessageField::some(wa::message::VideoMessage {
+                            mimetype: Some("video/mp4".into()),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
                     }
-                    proto
-                });
-                proto
-            });
-            proto.message_context_info = MessageField::some({
-                let mut proto = wa::MessageContextInfo::default();
-                proto.message_association = MessageField::some({
-                    let mut proto = wa::MessageAssociation::default();
-                    proto.association_type = association_type;
-                    proto
-                });
-                proto
-            });
-            proto
+                } else {
+                    wa::Message {
+                        image_message: MessageField::some(wa::message::ImageMessage {
+                            mimetype: Some("image/jpeg".into()),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    }
+                }),
+            }),
+            message_context_info: MessageField::some(wa::MessageContextInfo {
+                message_association: MessageField::some(wa::MessageAssociation {
+                    association_type,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }),
+            ..Default::default()
         };
         assert_eq!(
             classify(&copy(Some(AssociationType::HD_IMAGE_DUAL_UPLOAD), false)),
@@ -16017,9 +16006,10 @@ mod tests {
             .and_then(|child| child.image_message.as_option_mut())
             .unwrap()
             .context_info = MessageField::some({
-            let mut context = wa::ContextInfo::default();
-            context.paired_media_type = Some(PairedMediaType::HD_IMAGE_CHILD);
-            context
+            wa::ContextInfo {
+                paired_media_type: Some(PairedMediaType::HD_IMAGE_CHILD),
+                ..Default::default()
+            }
         });
         assert_eq!(classify(&paired), None);
         assert!(matches!(
@@ -16569,23 +16559,23 @@ mod tests {
             summary: "Original".into(),
             mentions: vec![],
         };
-        let mut context = wa::ContextInfo::default();
-        context.stanza_id = Some(quote.id.clone());
-        context.participant = Some(quote.sender.clone());
-        context.quoted_message = MessageField::some(wa::Message::text("Original"));
+        let context = wa::ContextInfo {
+            stanza_id: Some(quote.id.clone()),
+            participant: Some(quote.sender.clone()),
+            quoted_message: MessageField::some(wa::Message::text("Original")),
+            ..Default::default()
+        };
         for view_once in [false, true] {
             let cache = directory
                 .path()
                 .join(if view_once { "once" } else { "ordinary" });
             let mut prepared = Prepared {
-                message: {
-                    let mut message = wa::Message::default();
-                    message.image_message = MessageField::some({
-                        let mut image = wa::message::ImageMessage::default();
-                        image.jpeg_thumbnail = Some(vec![1, 2, 3]);
-                        image
-                    });
-                    message
+                message: wa::Message {
+                    image_message: MessageField::some(wa::message::ImageMessage {
+                        jpeg_thumbnail: Some(vec![1, 2, 3]),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
                 },
                 content: Content::Image {
                     motion: None,

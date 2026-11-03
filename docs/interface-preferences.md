@@ -31,7 +31,12 @@ F6 and Shift+F6 move between major interface sections. Shift+F10 opens the
 focused message's action menu. Primary Tab navigation remains available.
 Touchscreen drags scroll the transcript, while mouse drags retain text/message
 selection. On Linux, a middle click in the empty strip beside message bubbles
-starts automatic scrolling; Escape or another input stops it.
+starts automatic scrolling; Escape or another input stops it. Selecting message
+text with the mouse also publishes it to Linux PRIMARY, with emoji restored and
+message headers when the selection spans messages. Middle-click in the composer
+or a search field to insert PRIMARY text at the clicked position. This preserves
+the ordinary Ctrl+C/Ctrl+V clipboard. Clearing a selection leaves PRIMARY available
+until another selection replaces it.
 
 Selected confirmed messages can be starred or unstarred together. Pending local
 messages, deleted messages and stale selections cannot enqueue star changes.
