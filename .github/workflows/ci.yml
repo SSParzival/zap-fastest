@@ -52,6 +52,8 @@ jobs:
       - uses: jdx/mr-boxington-action@v1
         with:
           cache-generation: quality-v1
+      - name: Dependency sources
+        run: python3 .github/scripts/check-dependency-sources.py
       - name: Formatting
         run: cargo fmt --all --check
       - name: Clippy (default features)
