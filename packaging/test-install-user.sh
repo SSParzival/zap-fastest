@@ -14,7 +14,7 @@ script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 work=$(mktemp -d)
 trap 'rm -rf -- "$work"' EXIT
 
-fake="$work/zap-faster-fake"
+fake="$work/zap-fastest-fake"
 cat > "$fake" <<'SCRIPT'
 #!/bin/sh
 if [ -n "${ZAPFAST_TEST_ARGS:-}" ]; then
@@ -43,16 +43,16 @@ check_prefix() {
   local style="${2:-quoted}"
   mkdir -p "$prefix"
   bash "$script_dir/install-user.sh" "$fake" "$prefix" >/dev/null
-  local entry="$prefix/share/applications/zap-faster.desktop"
+  local entry="$prefix/share/applications/zap-fastest.desktop"
   test -s "$entry"
   grep -qxF 'MimeType=x-scheme-handler/whatsapp;' "$entry"
-  test -s "$prefix/share/icons/hicolor/scalable/apps/zap-faster.svg"
+  test -s "$prefix/share/icons/hicolor/scalable/apps/zap-fastest.svg"
 
   local expected
   if [[ "$style" == plain ]]; then
-    expected=$(printf 'Exec=%s %%u' "${prefix}/bin/zap-faster")
+    expected=$(printf 'Exec=%s %%u' "${prefix}/bin/zap-fastest")
   else
-    expected=$(printf 'Exec="%s" %%u' "$(escape_exec "${prefix}/bin/zap-faster")")
+    expected=$(printf 'Exec="%s" %%u' "$(escape_exec "${prefix}/bin/zap-fastest")")
   fi
   grep -qxF "$expected" "$entry" || {
     echo "unexpected Exec for prefix: $prefix" >&2
@@ -80,7 +80,7 @@ check_prefix "$work/standard" plain
 uri='whatsapp://send/?phone=15550100123&text=Hola%2C+informaci%C3%B3n+%26+precio'
 if command -v gio >/dev/null 2>&1; then
   ZAPFAST_TEST_ARGS="$work/launched-args" gio launch \
-    "$work/with space/share/applications/zap-faster.desktop" "$uri"
+    "$work/with space/share/applications/zap-fastest.desktop" "$uri"
   for attempt in {1..50}; do
     [[ -f "$work/launched-args" ]] && break
     sleep 0.1
@@ -92,13 +92,19 @@ if command -v gio >/dev/null 2>&1; then
 fi
 if command -v xdg-open >/dev/null 2>&1 && command -v xdg-mime >/dev/null 2>&1; then
   mkdir -p "$work/protocol-config"
-  XDG_CONFIG_HOME="$work/protocol-config" XDG_DATA_HOME="$work/standard/share" \
-    xdg-mime default zap-faster.desktop x-scheme-handler/whatsapp
+  # Keep desktop-specific tools from consulting the host session.
+  XDG_CURRENT_DESKTOP=X-Generic \
+    XDG_CONFIG_HOME="$work/protocol-config" XDG_DATA_HOME="$work/standard/share" \
+    env -u KDE_SESSION_VERSION xdg-mime default zap-fastest.desktop x-scheme-handler/whatsapp
   # xdg-open only tries desktop MIME handlers when a display is declared.
   # The fake executable needs no display server, including on headless CI.
-  DISPLAY=:0 ZAPFAST_TEST_ARGS="$work/xdg-args" XDG_CURRENT_DESKTOP=Hyprland \
+  DISPLAY=:0 ZAPFAST_TEST_ARGS="$work/xdg-args" XDG_CURRENT_DESKTOP=X-Generic \
     XDG_CONFIG_HOME="$work/protocol-config" XDG_DATA_HOME="$work/standard/share" \
     xdg-open "$uri"
+  for attempt in {1..50}; do
+    [[ -f "$work/xdg-args" ]] && break
+    sleep 0.1
+  done
   [[ $(cat "$work/xdg-args") == "$uri" ]] || {
     echo "xdg-open did not forward the complete URI to the installed binary" >&2
     exit 1
@@ -116,7 +122,7 @@ test ! -e "$work/elsewhere" || { echo "wrote into XDG_DATA_HOME despite a prefix
 
 # A relative prefix becomes absolute, since a launcher cannot resolve it.
 (cd "$work" && bash "$script_dir/install-user.sh" "$fake" relative >/dev/null)
-grep -qxF "Exec=$work/relative/bin/zap-faster %u" "$work/relative/share/applications/zap-faster.desktop" || {
+grep -qxF "Exec=$work/relative/bin/zap-fastest %u" "$work/relative/share/applications/zap-fastest.desktop" || {
   echo "a relative prefix left a relative Exec" >&2
   exit 1
 }
