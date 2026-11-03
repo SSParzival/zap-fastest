@@ -11,8 +11,8 @@ import sys
 def check_abi(binary):
     versions = subprocess.check_output(["readelf", "--version-info", str(binary)], text=True)
     required = [tuple(map(int, match)) for match in re.findall(r"GLIBC_(\d+)\.(\d+)", versions)]
-    if not required or max(required) > (2, 35):
-        raise ValueError("Linux input exceeds the declared glibc 2.35 baseline; rebuild on Ubuntu 22.04")
+    if not required or max(required) > (2, 36):
+        raise ValueError("Linux input exceeds the Debian 12 glibc 2.36 baseline; rebuild on Debian 12")
 
 
 def update_section(data):
@@ -42,7 +42,7 @@ def update_section(data):
 def finalize(package, architecture):
     architecture = {"amd64": "x86_64", "arm64": "aarch64"}[architecture]
     # Update metadata is passive. The app's verified built-in updater is unchanged.
-    text = (f"gh-releases-zsync|eternalwaitt|zap-faster|latest|"
+    text = (f"gh-releases-zsync|SSParzival|zap-fastest|latest|"
             f"zap-faster-*-{architecture}.AppImage.zsync").encode("ascii")
     data = package.read_bytes()
     start, size = update_section(data)

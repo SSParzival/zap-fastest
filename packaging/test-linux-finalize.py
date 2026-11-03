@@ -5,6 +5,7 @@ from pathlib import Path
 import struct
 import tempfile
 import unittest
+from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location("finalize", Path(__file__).with_name("linux-finalize.py"))
 finalize = importlib.util.module_from_spec(spec)
@@ -28,6 +29,15 @@ def fixture():
 
 
 class FinalizeTests(unittest.TestCase):
+    def test_debian_12_abi_baseline(self):
+        for version in ["2.35", "2.36"]:
+            with patch.object(finalize.subprocess, "check_output", return_value=f"GLIBC_{version}"):
+                finalize.check_abi(Path("fixture"))
+        for versions in ["GLIBC_2.36 GLIBC_2.37", ""]:
+            with patch.object(finalize.subprocess, "check_output", return_value=versions):
+                with self.assertRaises(ValueError):
+                    finalize.check_abi(Path("fixture"))
+
     def test_architecture_and_offsets_survive_repeated_finalization(self):
         for architecture, name in [("amd64", "x86_64"), ("arm64", "aarch64")]:
             with tempfile.TemporaryDirectory() as root:
@@ -41,6 +51,7 @@ class FinalizeTests(unittest.TestCase):
                 self.assertEqual(first[:512], before[:512])
                 self.assertEqual(first[1536:], before[1536:])
                 self.assertIn(f"*-{name}.AppImage.zsync".encode(), first)
+                self.assertIn(b"gh-releases-zsync|SSParzival|zap-fastest|latest|", first)
 
     def test_invalid_or_conflicting_sections_fail_before_mutation(self):
         for corruption in ["bounds", "name", "conflict", "header"]:

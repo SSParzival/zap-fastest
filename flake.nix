@@ -203,7 +203,7 @@
                 sed "s/__VERSION__/''${version%%-*}/g" packaging/macos/Info.plist \
                   > "$app/Contents/Info.plist"
                 icnsify packaging/macos/icon-1024.png \
-                  --output "$app/Contents/Resources/zap-faster.icns"
+                  --output "$app/Contents/Resources/zap-fastest.icns"
               '';
 
             meta = {

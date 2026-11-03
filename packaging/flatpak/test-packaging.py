@@ -29,6 +29,19 @@ class FlatpakPackaging(unittest.TestCase):
         self.assertEqual(meta.findtext("id"), APP_ID)
         self.assertEqual(meta.findtext("launchable"), f"{APP_ID}.desktop")
 
+    def test_desktop_install_selects_one_entry_when_both_names_exist(self):
+        for manifest_name in [f"{APP_ID}.yml", f"{APP_ID}.bundle.yml"]:
+            manifest = yaml.safe_load((HERE / manifest_name).read_text())
+            commands = manifest["modules"][0]["build-commands"]
+            command = next(cmd for cmd in commands if "install -Dm644" in cmd and ".desktop" in cmd)
+            with tempfile.TemporaryDirectory() as directory:
+                destination = Path(directory) / "app"
+                subprocess.run(["bash", "-euc", command.replace("/app/", str(destination) + "/")],
+                               cwd=ROOT, check=True)
+                installed = destination / "share/applications" / f"{APP_ID}.desktop"
+                self.assertEqual(installed.read_bytes(),
+                                 (ROOT / "packaging/applications/zap-fastest.desktop").read_bytes())
+
     def test_generation_uses_the_requested_revisions_lockfile(self):
         revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
         lock = subprocess.check_output(["git", "show", f"{revision}:Cargo.lock"], cwd=ROOT)

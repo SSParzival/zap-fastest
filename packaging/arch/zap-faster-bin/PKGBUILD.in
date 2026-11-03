@@ -5,7 +5,7 @@ pkgver=@VERSION@
 pkgrel=@PKGREL@
 pkgdesc="Fast native WhatsApp client built with Rust and egui"
 arch=('x86_64' 'aarch64')
-url="https://github.com/eternalwaitt/zap-faster"
+url="https://github.com/SSParzival/zap-fastest"
 license=('MIT' 'GPL-2.0-only')
 install="${pkgname}.install"
 # Nothing beyond libc is linked directly; winit and glutin dlopen these at
@@ -19,7 +19,7 @@ provides=('zap-faster')
 conflicts=('zap-faster' 'zap-faster-git' 'zapfast' 'zapfast-bin' 'zapfast-git' 'fastsapp' 'fastsapp-bin' 'fastsapp-git')
 replaces=()
 options=('!debug' '!strip')
-_repo="https://github.com/eternalwaitt/zap-faster"
+_repo="https://github.com/SSParzival/zap-fastest"
 source_x86_64=("${_repo}/releases/download/v${pkgver}/zap-faster-v${pkgver}-x86_64-unknown-linux-gnu.tar.gz")
 source_aarch64=("${_repo}/releases/download/v${pkgver}/zap-faster-v${pkgver}-aarch64-unknown-linux-gnu.tar.gz")
 sha256sums_x86_64=('@AMD64_SHA256@')

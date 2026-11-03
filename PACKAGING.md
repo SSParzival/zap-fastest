@@ -10,8 +10,8 @@ packages for x86_64 and ARM64. The MSI uses the fork's own upgrade identity and
 only takes over an Inno installation registered under the fork's AppId. It
 preserves the profile/keyring and refuses changes while Zap Faster is running.
 The updater verifies the selected release package before installation. Building
-MSI packages needs WiX 5.0.2 and `WixToolset.Util.wixext`; the disposable Windows
-CI runner exercises installation, takeover, update and removal. Never run
+MSI packages needs WiX 5.0.2 and `WixToolset.Util.wixext`; tests run on Linux only. Windows and macOS CI build artifacts without
+executing application or installer tests. Never run
 `packaging/windows/test-installer.ps1` against a personal Windows installation;
 it refuses non-GitHub-runner invocation and changes the runner's installation.
 
@@ -41,9 +41,9 @@ builds the configured packages, and attaches them to the GitHub release.
 Configured recipes are attached as an archive. Package checksums are separate
 from the original binary checksums. PR validation never publishes.
 
-Linux package finalization rejects inputs requiring glibc newer than 2.35,
-matching the Ubuntu 22.04 build container. Older published binaries built on
-Ubuntu 24.04 must be rebuilt before using these lower dependency declarations.
+Linux package finalization rejects inputs requiring glibc newer than 2.36,
+matching the Debian 12 release build container. Binaries built on newer
+distributions must be rebuilt before packaging for that baseline.
 The AppImage hook writes passive stable-release update information into the
 runtime's reserved ELF section before package checksums are recorded. It keeps
 the appended filesystem and offsets intact. Packaging CI generates an
@@ -153,3 +153,18 @@ disclosure of generated material. Review the manifests and these changes before
 submitting. The manifests use the current Freedesktop 26.08 runtime; the CI builder
 container is 25.08 and installs the runtime and SDK named by the manifest. The GitHub release job includes the bundle
 in `checksums.txt`. No existing release files are replaced by this change.
+
+## ZapFastest release identity
+
+Releases are published to `SSParzival/zap-fastest`. Cargo builds `zap-fastest`;
+the release staging steps retain legacy `zap-faster` payload and package names
+for the existing native recipes. The macOS bundle uses the `zap-fastest` executable
+and icon declared in its plist. Linux finalization accepts glibc through 2.36,
+matching Debian 12. AppImage update metadata points to this repository.
+
+The `ZAPFASTER_UPDATE_SIGNING_KEY` Actions secret holds a private Ed25519 PKCS8
+PEM key. Its public key is committed in `assets/update-public-key.hex`; signing
+checks refuse a mismatched key. Never commit the private key. This first published
+ZapFastest release establishes a new key, so development installations trusting
+the earlier key require a manual install. AUR and Homebrew publication remain
+unconfigured.

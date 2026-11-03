@@ -2,10 +2,10 @@ cask "zap-faster" do
   version "@VERSION@"
   sha256 "@MACOS_SHA256@"
 
-  url "https://github.com/eternalwaitt/zap-faster/releases/download/v#{version}/zap-faster-v#{version}-macos-universal.dmg"
+  url "https://github.com/SSParzival/zap-fastest/releases/download/v#{version}/zap-faster-v#{version}-macos-universal.dmg"
   name "Zap Faster"
   desc "Native WhatsApp client"
-  homepage "https://github.com/eternalwaitt/zap-faster"
+  homepage "https://github.com/SSParzival/zap-fastest"
 
   livecheck do
     url :url

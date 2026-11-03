@@ -18,7 +18,7 @@ hdiutil attach "$dmg" -readonly -nobrowse -mountpoint "$mount" >/dev/null
 app="$mount/Zap Faster.app"
 codesign --verify --strict --deep "$app"
 spctl --assess --type execute --verbose=2 "$app"
-lipo "$app/Contents/MacOS/zap-faster" -verify_arch x86_64 arm64
+lipo "$app/Contents/MacOS/zap-fastest" -verify_arch x86_64 arm64
 codesign --display --entitlements - --xml "$app" > "$temporary/entitlements.plist"
 
 python3 - "$app/Contents/Info.plist" "$temporary/entitlements.plist" <<'PY'

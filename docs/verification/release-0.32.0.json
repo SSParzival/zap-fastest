@@ -1,0 +1,275 @@
+{
+  "version": "0.32.0",
+  "base_commit": "ea0260a08e38b0f3c6e2b5cffd79e0fca7369365",
+  "platform": "Linux x86_64",
+  "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13) (Arch Linux rust 1:1.99.1-1)",
+  "cargo": "cargo 1.99.1 (5f94df478 2026-08-27) (Arch Linux rust 1:1.99.1-1)",
+  "inputs_sha256": {
+    "Cargo.toml": "5f7e9da1364a152103d361261664db852010962bcaa45c062df88dd4f478ccf7",
+    "Cargo.lock": "14d0fa292b877bbc1a82d022e3496d7549aec93fe6e76a783a26db37f062e412",
+    "rust-toolchain.toml": "137d8b787d6c480233b1b4331da73a688a13a5860166ebf0675a7462cf44389a",
+    "build.rs": "17cf584a114a8613500f396c626db0d8b0c1748d469ed0e1b9f6cb2f72afe9b7",
+    "assets/update-public-key.hex": "35a910c2d382346598093b5452085a466c48605f9de289d3ea815f8c95a14828"
+  },
+  "checks": [
+    {
+      "name": "format",
+      "command": [
+        "cargo",
+        "fmt",
+        "--all",
+        "--check"
+      ],
+      "exit_code": 0,
+      "seconds": 1.54,
+      "test_summaries": []
+    },
+    {
+      "name": "sources",
+      "command": [
+        "python3",
+        ".github/scripts/check-dependency-sources.py"
+      ],
+      "exit_code": 0,
+      "seconds": 0.05,
+      "test_summaries": []
+    },
+    {
+      "name": "clippy-default",
+      "command": [
+        "cargo",
+        "clippy",
+        "--locked",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "seconds": 62.67,
+      "test_summaries": []
+    },
+    {
+      "name": "clippy-all",
+      "command": [
+        "cargo",
+        "clippy",
+        "--locked",
+        "--all-targets",
+        "--all-features",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "seconds": 17.12,
+      "test_summaries": []
+    },
+    {
+      "name": "tests-default",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--all-targets"
+      ],
+      "exit_code": 0,
+      "seconds": 1233.82,
+      "test_summaries": [
+        "test result: ok. 2001 passed; 0 failed; 14 ignored; 0 measured; 0 filtered out; finished in 47.53s",
+        "test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s"
+      ]
+    },
+    {
+      "name": "tests-all",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--all-targets",
+        "--all-features"
+      ],
+      "exit_code": 0,
+      "seconds": 891.3,
+      "test_summaries": [
+        "test result: ok. 2001 passed; 0 failed; 14 ignored; 0 measured; 0 filtered out; finished in 39.91s",
+        "test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s"
+      ]
+    },
+    {
+      "name": "docs",
+      "command": [
+        "cargo",
+        "doc",
+        "--locked",
+        "--all-features",
+        "--no-deps"
+      ],
+      "exit_code": 0,
+      "seconds": 19.45,
+      "test_summaries": []
+    },
+    {
+      "name": "demo-build",
+      "command": [
+        "cargo",
+        "build",
+        "--locked",
+        "--features",
+        "demo"
+      ],
+      "exit_code": 0,
+      "seconds": 0.85,
+      "test_summaries": []
+    },
+    {
+      "name": "clippy-default-final",
+      "command": [
+        "cargo",
+        "clippy",
+        "--locked",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "seconds": 11.89
+    },
+    {
+      "name": "clippy-all-final",
+      "command": [
+        "cargo",
+        "clippy",
+        "--locked",
+        "--all-targets",
+        "--all-features",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "seconds": 9.54
+    }
+  ],
+  "additional_checks": [
+    {
+      "command": "bash packaging/test-install-user.sh",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 packaging/test-linux-finalize.py",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 packaging/flatpak/test-packaging.py",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 packaging/test-icon-qt.py",
+      "exit_code": 0
+    },
+    {
+      "command": "native-packages validate",
+      "exit_code": 0
+    },
+    {
+      "command": "actionlint -shellcheck= -pyflakes= .github/workflows/release.yml .github/workflows/packaging.yml .github/workflows/ci.yml",
+      "exit_code": 0
+    },
+    {
+      "command": "native-packages release-checksums, sign-checksums and verify-checksums (synthetic fixture)",
+      "exit_code": 0
+    },
+    {
+      "command": "Arch recipe and packaging shell syntax",
+      "exit_code": 0
+    },
+    {
+      "command": "Release version normalization, workflow YAML, metainfo version and bundle path consistency",
+      "exit_code": 0
+    }
+  ],
+  "visual_checks": [
+    {
+      "page": "accounts-muted",
+      "exit_code": 0,
+      "file": "zap-fastest-accounts.png",
+      "sha256": "5b1e0f31d4bc71ea8f0a249e024e3dc0ec218c6a8558cca04631700279d3354f",
+      "review": "inspected",
+      "content": "synthetic offline demo",
+      "size": [
+        1100,
+        780
+      ]
+    },
+    {
+      "page": "voice",
+      "exit_code": 0,
+      "file": "zap-fastest-voice.png",
+      "sha256": "6c4fa1f44131b8f9d62372b8fe3247b76f9b707750fec07fa4845c47d0e6598e",
+      "review": "inspected",
+      "content": "synthetic offline demo",
+      "size": [
+        1100,
+        780
+      ]
+    },
+    {
+      "page": "starred",
+      "exit_code": 0,
+      "file": "zap-fastest-starred.png",
+      "sha256": "4dca4093b0cc6e0bf22ddf7068710406e6907d347fee5530defe936c9cd82969",
+      "review": "inspected",
+      "content": "synthetic offline demo",
+      "size": [
+        1100,
+        780
+      ]
+    },
+    {
+      "page": "stickers",
+      "exit_code": 0,
+      "file": "zap-fastest-stickers.png",
+      "sha256": "5305187375a75af116423084ab34bac8cc233453da8b860875b6639fa7af57bb",
+      "review": "inspected",
+      "content": "synthetic offline demo",
+      "size": [
+        1100,
+        780
+      ]
+    },
+    {
+      "page": "theme=Nord.json",
+      "exit_code": 0,
+      "file": "zap-fastest-theme.png",
+      "sha256": "1d28b881ec40a23dabe191544ff31bc90736b1404623a25c5b36985dbe3c28ae",
+      "review": "inspected",
+      "content": "synthetic offline demo",
+      "size": [
+        1100,
+        780
+      ]
+    },
+    {
+      "page": "about",
+      "exit_code": 0,
+      "file": "zap-fastest-about.png",
+      "sha256": "911620f2c6dd6efb1ef6a8274d691f7241d57a1977397f3406d334723d6395b9",
+      "review": "inspected",
+      "content": "synthetic offline demo",
+      "size": [
+        1100,
+        780
+      ]
+    }
+  ],
+  "limits": [
+    "Tests ran on Linux only. No application tests ran on Windows or macOS.",
+    "No personal archive, messages, contacts or production logs were inspected.",
+    "Live WhatsApp, device synchronization and physical audio/video acceptance were not performed."
+  ],
+  "scheduling": "Cargo invocations were serialized; later builds used a temporary local jobs=1 limit without changing profiles or compiler flags."
+}

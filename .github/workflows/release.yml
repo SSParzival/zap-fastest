@@ -104,9 +104,9 @@ jobs:
           name="zap-faster-${GITHUB_REF_NAME}-${{ matrix.target }}"
           mkdir -p "dist/$name"
           if [ "${{ runner.os }}" = "Windows" ]; then
-            cp "target/${{ matrix.target }}/release/zap-faster.exe" "dist/$name/"
+            cp "target/${{ matrix.target }}/release/zap-fastest.exe" "dist/$name/zap-faster.exe"
           else
-            cp "target/${{ matrix.target }}/release/zap-faster" "dist/$name/"
+            cp "target/${{ matrix.target }}/release/zap-fastest" "dist/$name/zap-faster"
           fi
           cp README.md LICENSE THIRD-PARTY-NOTICES.md packaging/zap-faster-portable.txt "dist/$name/"
           if [ "${{ runner.os }}" = "Linux" ]; then
@@ -132,7 +132,7 @@ jobs:
           if (-not $iscc) { $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
           $numericVersion = $version.Split("-")[0]
           & $iscc "/DVersion=$version" "/DNumericVersion=$numericVersion" "/DArch=$arch" `
-            "/DBinary=$PWD\target\${{ matrix.target }}\release\zap-faster.exe" `
+            "/DBinary=$PWD\target\${{ matrix.target }}\release\zap-fastest.exe" `
             "/DOutputDir=$PWD\dist" packaging\windows\zap-faster.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
@@ -156,7 +156,8 @@ jobs:
           $target = "${{ matrix.target }}"
           $payload = "dist\windows-input-$target"
           New-Item -ItemType Directory -Force $payload | Out-Null
-          Copy-Item "target\$target\release\zap-faster.exe", README.md, LICENSE, THIRD-PARTY-NOTICES.md, `
+          Copy-Item "target\$target\release\zap-fastest.exe" "$payload\zap-faster.exe"
+          Copy-Item README.md, LICENSE, THIRD-PARTY-NOTICES.md, `
             packaging\windows\zap-faster-installer.txt $payload
           $packageTarget = if ($target.StartsWith("aarch64")) { "windows-arm64" } else { "windows-amd64" }
           $version = $env:GITHUB_REF_NAME.TrimStart("v")
@@ -219,8 +220,8 @@ jobs:
         run: |
           mkdir -p universal
           lipo -create \
-            target/aarch64-apple-darwin/release/zap-faster \
-            target/x86_64-apple-darwin/release/zap-faster \
+            target/aarch64-apple-darwin/release/zap-fastest \
+            target/x86_64-apple-darwin/release/zap-fastest \
             -output universal/zap-faster
           # The two release builds fill most of the runner's disk; the DMG
           # and its notarization copy need room of their own.
@@ -256,12 +257,12 @@ jobs:
         run: |
           echo "This release is ad-hoc signed, without Apple notarization."
           codesign --verify --strict --deep "dist/macos-input/Zap Faster.app"
-          lipo "dist/macos-input/Zap Faster.app/Contents/MacOS/zap-faster" -verify_arch x86_64 arm64
+          lipo "dist/macos-input/Zap Faster.app/Contents/MacOS/zap-fastest" -verify_arch x86_64 arm64
           python3 - <<'PY'
           import plistlib
           with open('dist/macos-input/Zap Faster.app/Contents/Info.plist', 'rb') as source:
               info = plistlib.load(source)
-          assert info['CFBundleIdentifier'] == 'io.github.eternalwaitt.ZapFaster'
+          assert info['CFBundleIdentifier'] == 'io.github.eternalwaitt.ZapFastest'
           assert info.get('NSMicrophoneUsageDescription', '').strip()
           PY
 
@@ -375,7 +376,7 @@ jobs:
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           files: dist/*
-          name: Zap Faster ${{ github.ref_name }}
+          name: ZapFastest ${{ github.ref_name }}
           body_path: release-notes.md
           generate_release_notes: false
           draft: ${{ contains(github.ref_name, '-') }}

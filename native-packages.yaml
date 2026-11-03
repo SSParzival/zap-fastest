@@ -4,7 +4,7 @@ schema: 1
 tool:
   version: 0.9.0
   nfpm: 2.47.0
-# Ubuntu 22.04 build ABI also works with the t64 package's Provides alias.
+# The ALSA t64 package also provides this runtime library.
 libraries:
   libasound.so.2:
     deb: libasound2
@@ -12,7 +12,7 @@ libraries:
 nfpm:
   name: zap-faster
   maintainer: eternalwaitt
-  homepage: https://github.com/eternalwaitt/zap-faster
+  homepage: https://github.com/SSParzival/zap-fastest
   description: Fast native WhatsApp client
   license: MIT
   provides: [zap-faster]
@@ -52,7 +52,6 @@ nfpm:
   overrides:
     deb:
       depends:
-      - libc6 (>= 2.35)
       - libgl1
       - libegl1
       - libxkbcommon0
@@ -71,7 +70,6 @@ nfpm:
       - libstdc++6
     rpm:
       depends:
-      - glibc >= 2.35
       - libglvnd-glx
       - libglvnd-egl
       - libxkbcommon
@@ -148,7 +146,7 @@ targets:
       local: dist/zap-faster-v@VERSION@-aarch64-unknown-linux-gnu.tar.gz
       release_asset: zap-faster-v@VERSION@-aarch64-unknown-linux-gnu.tar.gz
 release:
-  repository: eternalwaitt/zap-faster
+  repository: SSParzival/zap-fastest
   checksums: checksums.txt
   prereleases: true
 assets:
@@ -163,7 +161,7 @@ assets:
     local: dist/zap-faster-v@VERSION@-macos-universal.dmg
   SOURCE:
     file: zap-faster-@VERSION@.tar.gz
-    url: https://github.com/eternalwaitt/zap-faster/archive/refs/tags/v@VERSION@.tar.gz
+    url: https://github.com/SSParzival/zap-fastest/archive/refs/tags/v@VERSION@.tar.gz
     checksummed: false
     local: dist/zap-faster-@VERSION@.tar.gz
 templates:
