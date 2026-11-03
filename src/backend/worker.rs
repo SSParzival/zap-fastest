@@ -14,7 +14,8 @@ use tokio::sync::mpsc;
 use whatsapp_rust::download::MediaType;
 use whatsapp_rust::features::PresencePolicy;
 use whatsapp_rust::features::message_edit::{
-    SecretEncKind, decrypt_secret_encrypted_with_fallback, extract_secret_encrypted,
+    SecretEncKind, decrypt_secret_encrypted_with_fallback, extract_envelope,
+    extract_secret_encrypted,
 };
 use whatsapp_rust::media::{
     AudioOptions, DocumentOptions, ImageOptions, VideoOptions, audio_message, document_message,
@@ -43,6 +44,7 @@ mod bot_replies;
 mod channel_pictures;
 mod contact_names;
 mod device_store;
+mod download_folders;
 mod download_organization;
 mod early_events;
 use early_events::WaitingReaction;
@@ -61,6 +63,7 @@ mod new_group;
 mod outgoing;
 mod poll_history;
 mod polls;
+mod star_recovery;
 mod statuses;
 mod sticker_pace;
 mod stickers;
@@ -656,6 +659,17 @@ pub async fn run(
                 .is_ok());
     let account_settings = crate::settings::AccountSettings::load(&dirs.settings_file());
     let sync_mode = account_settings.sync_mode;
+    // Only stars synced before ZapFast followed them were consumed unseen.
+    let stars_recovered = archive
+        .meta(star_recovery::STARS_RECOVERED)
+        .ok()
+        .flatten()
+        .as_deref()
+        == Some("complete")
+        || (archive.chats().is_ok_and(|chats| chats.is_empty())
+            && archive
+                .set_meta(star_recovery::STARS_RECOVERED, "complete")
+                .is_ok());
     let mut worker = Worker {
         privacy_ready: privacy_confirmed,
         privacy_confirmed,
@@ -745,6 +759,8 @@ pub async fn run(
         favorites_recovering: false,
         first_names_recovered,
         first_names_recovering: false,
+        stars_recovered,
+        stars_recovering: false,
         downloads: HashSet::new(),
         transfer_controls: HashMap::new(),
         motion_controls: HashMap::new(),
@@ -1345,6 +1361,10 @@ struct Worker {
     first_names_recovered: bool,
     /// That replay is running.
     first_names_recovering: bool,
+    /// The phone's stars from before ZapFast followed them were replayed.
+    stars_recovered: bool,
+    /// That replay is running.
+    stars_recovering: bool,
     /// Active attachment downloads by chat, message id, and carousel card.
     downloads: HashSet<(ChatId, String, Option<usize>)>,
     transfer_controls: HashMap<(ChatId, String, Option<usize>), transfers::Control>,
@@ -1501,6 +1521,19 @@ struct ParsedMessage {
     /// The phone's per-recipient receipts for one of our messages. A group's
     /// list may name only some of its members.
     receipts: Vec<wa::UserReceipt>,
+    /// An edit made before linking that history carries encrypted with the
+    /// original's secret (#582). The worker opens it before filing, and the
+    /// row's body comes from it; one it cannot open is not filed.
+    sealed_edit: Option<SealedEdit>,
+}
+
+/// An encrypted MESSAGE_EDIT from history, still to be opened. Its message
+/// is filed under the edited message's id, as a full snapshot.
+struct SealedEdit {
+    payload: Vec<u8>,
+    iv: Vec<u8>,
+    /// The history entry's own message secret, which may be the original's.
+    entry_secret: Option<Vec<u8>>,
 }
 
 /// Do not let reconnects or name syncs override the window's online state.
@@ -3650,6 +3683,7 @@ impl Worker {
                 WorkerTiming::run("recover-favorite-stickers", || self.recover_favorites());
                 WorkerTiming::run("recover-first-names", || self.recover_first_names());
                 let _ = WorkerTiming::run("retry-poll-votes", || self.archive.retry_poll_votes());
+                WorkerTiming::run("recover-stars", || self.recover_stars());
                 self.pump_poll_votes();
                 if let Some(client) = self.client.clone() {
                     let me = self.me_pn.clone().and_then(|pn| Self::jid_of(&pn));
@@ -4989,6 +5023,76 @@ impl Worker {
         read
     }
 
+    /// Opens an edit history carries encrypted (#582) with the secret of the
+    /// message it edits: from this chunk, the archive, or the history entry
+    /// itself. Only the author edits a message, so the author is both the
+    /// original's sender and the editor, by phone number or privacy id.
+    /// Returns the edited body and the secret that opened it.
+    fn open_history_edit(
+        &self,
+        chat: &str,
+        target: &str,
+        sender: Option<&str>,
+        from_me: bool,
+        edit: &SealedEdit,
+        secrets: &HashMap<String, Vec<u8>>,
+    ) -> Option<(wa::Message, Vec<u8>)> {
+        let (author, fallback) = if from_me {
+            let pn = self.me_pn.as_deref().and_then(Self::jid_of);
+            let lid = self.me_lid.as_deref().and_then(Self::jid_of);
+            match (pn, lid) {
+                (Some(pn), lid) => (pn, lid),
+                (None, Some(lid)) => (lid, None),
+                (None, None) => return None,
+            }
+        } else {
+            let author = Self::jid_of(sender.unwrap_or(chat))?;
+            let fallback = self.alt_jid(&author);
+            (author, fallback)
+        };
+        let archived = self
+            .archive
+            .raw(chat, target)
+            .ok()
+            .flatten()
+            .as_deref()
+            .and_then(message_secret_from_raw);
+        let mut tried: Vec<&[u8]> = Vec::new();
+        for secret in [
+            secrets.get(target).map(Vec::as_slice),
+            archived.as_deref(),
+            edit.entry_secret.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if secret.len() != 32 || tried.contains(&secret) {
+                continue;
+            }
+            tried.push(secret);
+            let Ok(inner) = decrypt_secret_encrypted_with_fallback(
+                &edit.payload,
+                &edit.iv,
+                secret,
+                SecretEncKind::MessageEdit,
+                target,
+                &author,
+                &author,
+                fallback.as_ref(),
+                fallback.as_ref(),
+            ) else {
+                continue;
+            };
+            let body = inner
+                .protocol_message
+                .into_option()?
+                .edited_message
+                .into_option()?;
+            return Some((body, secret.to_vec()));
+        }
+        None
+    }
+
     fn apply_history_reaction(
         &mut self,
         chat: &str,
@@ -5718,7 +5822,20 @@ impl Worker {
             let mut removed = 0;
             let mut failed = 0;
             let mut secrets = HashMap::new();
-            for message in chat.messages {
+            let mut sealed = 0;
+            let mut unopened = 0;
+            // The chunk's own secrets first: an encrypted edit may come
+            // before the original it was made with.
+            for message in &chat.messages {
+                if let Some(secret) = message
+                    .poll_secret
+                    .as_deref()
+                    .filter(|secret| secret.len() == 32)
+                {
+                    secrets.insert(message.id.clone(), secret.to_vec());
+                }
+            }
+            for mut message in chat.messages {
                 if let Some(starred) = message.starred
                     && !self.message_was_removed(&id, &message.id)
                 {
@@ -5728,6 +5845,26 @@ impl Worker {
                 if self.message_was_removed(&id, &message.id) {
                     removed += 1;
                     continue;
+                }
+                if let Some(edit) = message.sealed_edit.take() {
+                    sealed += 1;
+                    let Some((body, secret)) = self.open_history_edit(
+                        &id,
+                        &message.id,
+                        message.sender.as_deref(),
+                        message.from_me,
+                        &edit,
+                        &secrets,
+                    ) else {
+                        // Without the original's secret there is nothing
+                        // to show; the original, if filed, stays as it was.
+                        unopened += 1;
+                        continue;
+                    };
+                    if !fill_from_edit(&mut message, &body, secret) {
+                        unopened += 1;
+                        continue;
+                    }
                 }
                 if let Some(secret) = message
                     .poll_secret
@@ -5893,6 +6030,9 @@ impl Worker {
                 log::info!(
                     "history reload: archived added={added}, repeated={repeated}, removed={removed}, failed={failed}"
                 );
+            }
+            if sealed > 0 {
+                log::info!("history: encrypted edits={sealed}, not opened={unopened}");
             }
             for reaction in chat.reactions {
                 self.apply_history_reaction(&id, reaction, &secrets);
@@ -7079,6 +7219,7 @@ impl Worker {
             Command::FavoriteFetched { hash, result } => self.favorite_fetched(&hash, result),
             Command::FavoritesRecovered { complete } => self.favorites_recovered(complete),
             Command::FirstNamesRecovered { complete } => self.first_names_recovered(complete),
+            Command::StarsRecovered { complete } => self.stars_recovered(complete),
             Command::ImportStickerUrl { url } => {
                 let commands = self.commands.clone();
                 let packs = self.packs_dir();
@@ -9571,36 +9712,65 @@ impl Worker {
                     || self.descriptive_download_names
                     || self.automatic_exports.original_names)
         });
-        let export = organized.map(|folder| {
-            let chat_name = self
-                .archive
-                .chat(&chat)
-                .ok()
-                .flatten()
-                .map(|chat| chat.name);
-            let timestamp = self
-                .archive
-                .message(&chat, &id)
-                .ok()
-                .flatten()
-                .map_or(0, |message| message.timestamp);
-            let cache_id = card.map_or_else(|| id.clone(), |index| format!("{id}-card-{index}"));
-            download_organization::path_with_original_names(
-                folder,
-                self.download_organization,
-                self.descriptive_download_names,
-                self.automatic_exports.original_names,
-                download_organization::Metadata {
-                    account: self.dirs.id.as_str(),
-                    chat: &chat,
-                    chat_name: chat_name.as_deref().unwrap_or("Chat"),
-                    message: &cache_id,
-                    timestamp,
-                    mime: &mime,
-                    original_name: file_name.as_deref(),
-                },
-            )
-        });
+        let export = organized
+            .map(|folder| -> rusqlite::Result<PathBuf> {
+                let chat_name = self
+                    .archive
+                    .chat(&chat)
+                    .ok()
+                    .flatten()
+                    .map(|chat| chat.name);
+                let timestamp = self
+                    .archive
+                    .message(&chat, &id)
+                    .ok()
+                    .flatten()
+                    .map_or(0, |message| message.timestamp);
+                let cache_id =
+                    card.map_or_else(|| id.clone(), |index| format!("{id}-card-{index}"));
+                let account_folder = download_folders::account_folder(
+                    Path::new(""),
+                    &self.dirs.id,
+                    self.me_pn.as_deref(),
+                );
+                let chat_folder = download_folders::chat_folder(
+                    &self.archive,
+                    &account_folder,
+                    &chat,
+                    chat_name.as_deref().unwrap_or("Chat"),
+                )?;
+                Ok(download_organization::path_with_original_names(
+                    folder,
+                    self.download_organization,
+                    self.descriptive_download_names,
+                    self.automatic_exports.original_names,
+                    download_organization::Metadata {
+                        account: account_folder.to_str().unwrap_or("Account"),
+                        chat: &chat,
+                        chat_name: chat_folder
+                            .file_name()
+                            .and_then(|name| name.to_str())
+                            .unwrap_or("Chat"),
+                        message: &cache_id,
+                        timestamp,
+                        mime: &mime,
+                        original_name: file_name.as_deref(),
+                    },
+                ))
+            })
+            .transpose();
+        let export = match export {
+            Ok(export) => export,
+            Err(_) => {
+                self.downloaded(
+                    chat,
+                    id,
+                    card,
+                    Err("Could not reserve the download folder".into()),
+                );
+                return;
+            }
+        };
         let dir = if export.is_some() {
             self.dirs.media_cache_dir()
         } else {
@@ -13327,6 +13497,40 @@ fn parse_history(compressed: &[u8]) -> Result<ParsedHistory, String> {
     })
 }
 
+/// Gives a history row opened from an encrypted edit the edited body, as a
+/// full snapshot: its content, reply, mentions and raw message, keeping the
+/// history entry's time and order. False when the body shows nothing.
+fn fill_from_edit(message: &mut ParsedMessage, body: &wa::Message, secret: Vec<u8>) -> bool {
+    let Some(content) = classify(body) else {
+        return false;
+    };
+    let base = body.get_base_message();
+    message.content = content;
+    message.quoted = history_quote(base);
+    message.mentions = mentioned_of(base);
+    message.forwarded = forwarded_of(base);
+    message.thumbnail = thumbnail_of(base);
+    message.raw = body.encode_to_vec();
+    message.poll_secret = Some(secret);
+    message.edited = true;
+    true
+}
+
+/// The message a history message replies to, as its context names it.
+fn history_quote(base: &wa::Message) -> Option<Quoted> {
+    let context = context_of(base)?;
+    let id = context.stanza_id.clone().filter(|id| !id.is_empty())?;
+    let content = context.quoted_message.as_option().and_then(classify);
+    Some(Quoted {
+        chat: context.remote_jid.clone(),
+        mentions: Vec::new(),
+        id,
+        sender: context.participant.clone().unwrap_or_default(),
+        sender_name: None,
+        summary: content.as_ref().map(Content::summary).unwrap_or_default(),
+    })
+}
+
 /// Converts supported protocol message content into local display types, retaining quoted source metadata.
 fn parse_conversation(conversation: wa::Conversation) -> ParsedChat {
     let mut diagnostics = HistoryDiagnostics {
@@ -13404,6 +13608,7 @@ fn parse_conversation(conversation: wa::Conversation) -> ParsedChat {
                     poll_secret: None,
                     poll_votes: Vec::new(),
                     receipts: Vec::new(),
+                    sealed_edit: None,
                 });
                 continue;
             }
@@ -13575,7 +13780,37 @@ fn parse_conversation(conversation: wa::Conversation) -> ParsedChat {
             });
             continue;
         }
-        let Some(mut content) = classify(message) else {
+        // An edit WhatsApp encrypted with the original's secret: the worker
+        // opens it, and it is filed under the original's id like the plain
+        // snapshots above (#582).
+        let sealed = snapshot
+            .is_none()
+            .then(|| extract_envelope(original.get_base_message()))
+            .flatten()
+            .and_then(|envelope| {
+                let target = envelope.target_id().filter(|id| !id.is_empty())?;
+                Some((
+                    target.to_owned(),
+                    SealedEdit {
+                        payload: envelope.enc_payload.to_vec(),
+                        iv: envelope.enc_iv.to_vec(),
+                        entry_secret: info.message_secret.clone(),
+                    },
+                ))
+            });
+        let (id, edited, sealed) = match sealed {
+            Some((target, sealed)) => (target, true, Some(sealed)),
+            None => (id, edited, None),
+        };
+        let content = match classify(message) {
+            Some(content) => Some(content),
+            // A placeholder the opened edit replaces.
+            None if sealed.is_some() => Some(Content::Unsupported {
+                what: "edited message".into(),
+            }),
+            None => None,
+        };
+        let Some(mut content) = content else {
             diagnostics.unclassified += 1;
             continue;
         };
@@ -13631,22 +13866,7 @@ fn parse_conversation(conversation: wa::Conversation) -> ParsedChat {
                 status = Delivery::Delivered;
             }
         }
-        let quoted = context_of(base).and_then(|context| {
-            let id = context.stanza_id.clone().filter(|id| !id.is_empty())?;
-            Some(Quoted {
-                chat: context.remote_jid.clone(),
-                mentions: Vec::new(),
-                id,
-                sender: context.participant.clone().unwrap_or_default(),
-                sender_name: None,
-                summary: context
-                    .quoted_message
-                    .as_option()
-                    .and_then(classify)
-                    .map(|content| content.summary())
-                    .unwrap_or_default(),
-            })
-        });
+        let quoted = history_quote(base);
         let reactions = info
             .reactions
             .iter()
@@ -13683,25 +13903,31 @@ fn parse_conversation(conversation: wa::Conversation) -> ParsedChat {
                 message
             }
             .encode_to_vec(),
-            poll_secret: info.message_secret.clone().or_else(|| {
-                original
-                    .message_context_info
-                    .as_option()
-                    .and_then(|context| context.message_secret.clone())
-                    .or_else(|| {
-                        original
-                            .get_base_message()
-                            .message_context_info
-                            .as_option()
-                            .and_then(|context| context.message_secret.clone())
-                    })
-            }),
+            // An opened edit's secret is the one that opened it.
+            poll_secret: if sealed.is_some() {
+                None
+            } else {
+                info.message_secret.clone().or_else(|| {
+                    original
+                        .message_context_info
+                        .as_option()
+                        .and_then(|context| context.message_secret.clone())
+                        .or_else(|| {
+                            original
+                                .get_base_message()
+                                .message_context_info
+                                .as_option()
+                                .and_then(|context| context.message_secret.clone())
+                        })
+                })
+            },
             poll_votes: info.poll_updates.clone(),
             receipts: if from_me {
                 info.user_receipt.clone()
             } else {
                 Vec::new()
             },
+            sealed_edit: sealed,
         });
     }
     let last_activity = conversation
@@ -17187,6 +17413,8 @@ fn offline_worker(
         favorites_recovering: false,
         first_names_recovered: true,
         first_names_recovering: false,
+        stars_recovered: true,
+        stars_recovering: false,
         downloads: HashSet::new(),
         transfer_controls: HashMap::new(),
         motion_controls: HashMap::new(),
@@ -19464,6 +19692,211 @@ mod receipt_tests {
         assert_eq!(parsed.messages[0].content, Content::text("Updated fixture"));
         assert!(parsed.messages[0].edited);
         assert_eq!(parsed.messages[0].timestamp, 100);
+    }
+
+    /// An edit WhatsApp sealed with the original's secret, as history carries
+    /// one made before linking (#582). The author edits, so the author is
+    /// both the original's sender and the editor.
+    fn sealed_edit(target: &str, author: &str, secret: &[u8], text: &str) -> wa::Message {
+        use whatsapp_rust::wacore::message_edit::{MessageEditContext, encrypt_message_edit};
+        let inner = {
+            let mut proto = wa::Message::default();
+            proto.protocol_message = MessageField::some({
+                let mut proto = wa::message::ProtocolMessage::default();
+                proto.r#type = Some(wa::message::protocol_message::Type::MESSAGE_EDIT);
+                proto.key = MessageField::some({
+                    let mut proto = wa::MessageKey::default();
+                    proto.id = Some(target.into());
+                    proto
+                });
+                proto.edited_message = MessageField::some(wa::Message::text(text));
+                proto
+            });
+            proto
+        };
+        let (payload, iv) = encrypt_message_edit(
+            &inner,
+            secret,
+            &MessageEditContext {
+                original_msg_id: target,
+                original_sender_jid: author,
+                editor_jid: author,
+            },
+        )
+        .unwrap();
+        let mut proto = wa::Message::default();
+        proto.secret_encrypted_message = MessageField::some({
+            let mut proto = wa::message::SecretEncryptedMessage::default();
+            proto.secret_enc_type =
+                Some(wa::message::secret_encrypted_message::SecretEncType::MESSAGE_EDIT);
+            proto.target_message_key = MessageField::some({
+                let mut proto = wa::MessageKey::default();
+                proto.id = Some(target.into());
+                proto.remote_jid = Some(author.into());
+                proto
+            });
+            proto.enc_payload = Some(payload);
+            proto.enc_iv = Some(iv.to_vec());
+            proto
+        });
+        proto
+    }
+
+    #[test]
+    fn history_parses_a_sealed_edit_under_its_original() {
+        let secret = [7u8; 32];
+        let parsed = parse_conversation({
+            let mut proto = wa::Conversation::default();
+            proto.id = PEER.into();
+            proto.messages = vec![history_entry(
+                PEER,
+                "edit-envelope",
+                false,
+                None,
+                sealed_edit("original-id", PEER, &secret, "Edited fixture"),
+                Vec::new(),
+                None,
+            )];
+            proto
+        });
+        assert_eq!(parsed.diagnostics.unclassified, 0);
+        assert_eq!(parsed.diagnostics.encrypted_edits, 1);
+        assert_eq!(parsed.messages.len(), 1);
+        assert_eq!(parsed.messages[0].id, "original-id");
+        assert!(parsed.messages[0].edited);
+        assert!(parsed.messages[0].sealed_edit.is_some());
+        assert!(parsed.messages[0].poll_secret.is_none());
+    }
+
+    #[test]
+    fn history_files_a_sealed_edit_without_its_original() {
+        let (mut worker, _events, _inbox, _wa) = worker();
+        let secret = vec![9u8; 32];
+        // The phone's entry for the edited message names its secret.
+        file_history_entries(
+            &mut worker,
+            vec![history_entry(
+                PEER,
+                "edit-envelope",
+                false,
+                None,
+                sealed_edit("original-id", PEER, &secret, "Edited fixture"),
+                Vec::new(),
+                Some(secret.clone()),
+            )],
+        );
+        let row = worker
+            .archive
+            .message(PEER, "original-id")
+            .unwrap()
+            .expect("the edited message is filed under its own id");
+        assert_eq!(row.content, Content::text("Edited fixture"));
+        assert!(row.edited);
+        assert_eq!(row.timestamp, 100);
+        assert!(
+            worker
+                .archive
+                .message(PEER, "edit-envelope")
+                .unwrap()
+                .is_none()
+        );
+        // Its secret stays with it, so later reactions to it can be opened.
+        let raw = worker.archive.raw(PEER, "original-id").unwrap().unwrap();
+        assert_eq!(message_secret_from_raw(&raw), Some(secret));
+    }
+
+    #[test]
+    fn history_applies_a_sealed_edit_with_the_archived_originals_secret() {
+        let (mut worker, _events, _inbox, _wa) = worker();
+        let secret = vec![5u8; 32];
+        file_history_entries(
+            &mut worker,
+            vec![history_entry(
+                PEER,
+                "original-id",
+                false,
+                None,
+                wa::Message::text("Before editing"),
+                Vec::new(),
+                Some(secret.clone()),
+            )],
+        );
+        // A later chunk carries the edit alone, without a secret of its own.
+        file_history_entries(
+            &mut worker,
+            vec![history_entry(
+                PEER,
+                "edit-envelope",
+                false,
+                None,
+                sealed_edit("original-id", PEER, &secret, "Edited fixture"),
+                Vec::new(),
+                None,
+            )],
+        );
+        let row = worker
+            .archive
+            .message(PEER, "original-id")
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.content, Content::text("Edited fixture"));
+        assert!(row.edited);
+        // A replay of the original does not undo it.
+        file_history_entries(
+            &mut worker,
+            vec![history_entry(
+                PEER,
+                "original-id",
+                false,
+                None,
+                wa::Message::text("Before editing"),
+                Vec::new(),
+                Some(secret),
+            )],
+        );
+        let row = worker
+            .archive
+            .message(PEER, "original-id")
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.content, Content::text("Edited fixture"));
+    }
+
+    #[test]
+    fn history_leaves_a_sealed_edit_it_cannot_open() {
+        let (mut worker, _events, _inbox, _wa) = worker();
+        file_history_entries(
+            &mut worker,
+            vec![history_entry(
+                PEER,
+                "original-id",
+                false,
+                None,
+                wa::Message::text("Before editing"),
+                Vec::new(),
+                None,
+            )],
+        );
+        // Sealed with a secret nobody here knows.
+        file_history_entries(
+            &mut worker,
+            vec![history_entry(
+                PEER,
+                "edit-envelope",
+                false,
+                None,
+                sealed_edit("original-id", PEER, &[3u8; 32], "Edited fixture"),
+                Vec::new(),
+                Some(vec![4u8; 32]),
+            )],
+        );
+        let row = worker
+            .archive
+            .message(PEER, "original-id")
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.content, Content::text("Before editing"));
+        assert!(!row.edited);
     }
 
     // WA Web 2.3000.1045368834, whatspec 1a441f0329c941fcdb238490a6c604550d8a9939:
@@ -22423,6 +22856,7 @@ mod chat_removal_tests {
                         poll_secret: None,
                         poll_votes: Vec::new(),
                         receipts: Vec::new(),
+                        sealed_edit: None,
                     })
                     .collect(),
                 revoked: Vec::new(),

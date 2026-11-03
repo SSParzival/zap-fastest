@@ -239,6 +239,29 @@ impl Recovery {
 mod tests {
     use super::*;
     #[test]
+    fn timeout_of_one_chat_keeps_other_chats_at_the_normal_pace() {
+        let mut recovery = Recovery {
+            enabled: true,
+            ..Default::default()
+        };
+        let candidates = vec!["slow".into(), "other".into()];
+        let now = Instant::now();
+        assert_eq!(recovery.next(&candidates, now).as_deref(), Some("slow"));
+        recovery.started("slow", now);
+        recovery.stop("slow");
+        assert_eq!(
+            recovery.next(&candidates, now + PACE).as_deref(),
+            Some("other")
+        );
+        assert!(
+            recovery.owns("slow"),
+            "a late reply retains its original chat owner"
+        );
+        recovery.answered("slow", true);
+        assert!(!recovery.owns("slow"));
+    }
+
+    #[test]
     fn history_response_reports_observations_without_inferring_phone_availability() {
         use crate::model::HistoryResponseState as State;
         let mut recovery = Recovery::default();

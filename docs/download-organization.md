@@ -18,8 +18,11 @@ file, so moving the exported copy does not break message playback. The copy
 reserves its destination without overwriting an existing file; duplicate names
 gain a numbered suffix. If saving
 the organized copy fails, the download reports the failure and keeps the verified
-private file. Chat names are sanitized and bounded; hashed identities separate
-chats with the same name without exposing their WhatsApp addresses in paths.
+private file. Organized copies use the account's phone number and the chat's
+readable name, for example `+15550001111/Family/photo.jpg`. Folder names are
+sanitized for Linux, Windows and macOS. Chats with equal names receive numeric
+suffixes, and the encrypted archive remembers each assignment across restarts
+and chat renames. Existing copies and pending export destinations stay in place.
 
 Background archive recovery always retains attachments with the account archive.
 When you enable archival downloads, explicitly choose an export folder, and

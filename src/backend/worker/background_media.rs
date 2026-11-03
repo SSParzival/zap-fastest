@@ -114,15 +114,22 @@ impl Worker {
         } else {
             job.id.clone()
         };
+        let account_folder =
+            download_folders::account_folder(Path::new(""), &self.dirs.id, self.me_pn.as_deref());
+        let chat_folder =
+            download_folders::chat_folder(&self.archive, &account_folder, &job.chat, &chat.name)?;
         let destination = download_organization::path_with_original_names(
             root,
             self.download_organization,
             self.descriptive_download_names,
             self.automatic_exports.original_names,
             download_organization::Metadata {
-                account: self.dirs.id.as_str(),
+                account: account_folder.to_str().unwrap_or("Account"),
                 chat: &job.chat,
-                chat_name: &chat.name,
+                chat_name: chat_folder
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("Chat"),
                 message: &cache_id,
                 timestamp: message.timestamp,
                 mime: &mime,

@@ -1476,6 +1476,17 @@ impl Archive {
             params![lid_chat, phone_chat],
         )?;
         Self::move_message_metadata(transaction, &lid_chat, &phone_chat)?;
+        transaction.execute(
+            "INSERT OR IGNORE INTO meta(key,value) SELECT ?2,value FROM meta WHERE key=?1",
+            params![
+                format!("download_folder:{lid_chat}"),
+                format!("download_folder:{phone_chat}")
+            ],
+        )?;
+        transaction.execute(
+            "UPDATE meta SET value=?2 WHERE key LIKE 'download_folder_owner:%' AND value=?1",
+            params![lid_chat, phone_chat],
+        )?;
         transaction.execute("INSERT OR IGNORE INTO pin_notices(chat,id,pinned_at,expires_at,by_me,sender) SELECT ?2,id,pinned_at,expires_at,by_me,sender FROM pin_notices WHERE chat=?1",params![lid_chat,phone_chat])?;
         transaction.execute("INSERT INTO media_jobs(chat,id,card,attempts,next_attempt,state) SELECT ?2,id,card,attempts,next_attempt,state FROM media_jobs WHERE chat=?1 ON CONFLICT(chat,id,card) DO UPDATE SET attempts=MAX(media_jobs.attempts,excluded.attempts),next_attempt=MAX(media_jobs.next_attempt,excluded.next_attempt),state=MAX(media_jobs.state,excluded.state)",params![lid_chat,phone_chat])?;
         transaction.execute("INSERT INTO managed_exports(chat,id,card,root,destination,attempts,next_attempt,state) SELECT ?2,id,card,root,destination,attempts,next_attempt,state FROM managed_exports WHERE chat=?1 ON CONFLICT(chat,id,card) DO NOTHING",params![lid_chat,phone_chat])?;
@@ -2939,6 +2950,47 @@ impl Archive {
             ],
         )?;
         Ok(unarchive)
+    }
+
+    /// Atomically reserves a readable folder for this chat for the archive's lifetime.
+    /// Reservations are account-local and case-insensitive on every platform.
+    pub fn reserve_download_folder(&self, chat: &str, source: &str) -> Result<String> {
+        let transaction = self.connection.unchecked_transaction()?;
+        let key = format!("download_folder:{chat}");
+        if let Some(folder) = transaction
+            .query_row("SELECT value FROM meta WHERE key=?1", [&key], |row| {
+                row.get::<_, String>(0)
+            })
+            .optional()?
+        {
+            return Ok(folder);
+        }
+        for number in 1.. {
+            let folder = if number == 1 {
+                source.to_owned()
+            } else {
+                format!("{source} ({number})")
+            };
+            let owner_key = format!("download_folder_owner:{}", folder.to_lowercase());
+            let owner: Option<String> = transaction
+                .query_row("SELECT value FROM meta WHERE key=?1", [&owner_key], |row| {
+                    row.get(0)
+                })
+                .optional()?;
+            if owner.as_deref().is_none_or(|owner| owner == chat) {
+                transaction.execute(
+                    "INSERT OR REPLACE INTO meta(key,value) VALUES(?1,?2)",
+                    params![owner_key, chat],
+                )?;
+                transaction.execute(
+                    "INSERT INTO meta(key,value) VALUES(?1,?2)",
+                    params![key, folder],
+                )?;
+                transaction.commit()?;
+                return Ok(folder);
+            }
+        }
+        unreachable!("folder suffixes are unbounded")
     }
 
     pub fn set_meta(&self, key: &str, value: &str) -> Result<()> {

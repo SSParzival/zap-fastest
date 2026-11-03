@@ -178,7 +178,26 @@ fn path(
     descriptive: bool,
     metadata: Metadata<'_>,
 ) -> PathBuf {
-    path_with_original_names(root, organization, descriptive, false, metadata)
+    let archive = crate::archive::Archive::in_memory().unwrap();
+    let account = super::download_folders::account_folder(
+        Path::new(""),
+        &crate::model::AccountId::first(),
+        Some(metadata.account),
+    );
+    let chat =
+        super::download_folders::chat_folder(&archive, &account, metadata.chat, metadata.chat_name)
+            .unwrap();
+    path_with_original_names(
+        root,
+        organization,
+        descriptive,
+        false,
+        Metadata {
+            account: account.to_str().unwrap(),
+            chat_name: chat.file_name().unwrap().to_str().unwrap(),
+            ..metadata
+        },
+    )
 }
 
 pub(super) fn path_with_original_names(
@@ -198,12 +217,7 @@ pub(super) fn path_with_original_names(
         .map(|timestamp| timestamp.to_zoned(jiff::tz::TimeZone::UTC));
     let mut folder = root.to_path_buf();
     if organization != DownloadOrganization::Flat {
-        folder = folder
-            .join(format!(
-                "Account-{}",
-                component(metadata.account, "Unknown")
-            ))
-            .join(&chat);
+        folder = folder.join(metadata.account).join(metadata.chat_name);
         if organization == DownloadOrganization::ByChatMonth {
             folder = folder.join(date.as_ref().map_or_else(
                 || "Unknown-date".into(),
