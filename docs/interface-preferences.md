@@ -42,3 +42,9 @@ Selected confirmed messages can be starred or unstarred together. Pending local
 messages, deleted messages and stale selections cannot enqueue star changes.
 Reactions retain their full list behind an overflow control. Fresh live reactions
 can advance chat activity; history replay and reaction removal do not.
+
+Each account in the avatar switcher has a bell to mute its desktop notifications
+without changing accounts. This uses the same per-account notification preference
+as Settings. Muted accounts keep their unread counts in grey in the switcher,
+but do not add to the avatar dot or taskbar, dock and tray badges. Screen readers
+announce the change as Muted or Unmuted.

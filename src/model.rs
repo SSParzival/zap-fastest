@@ -2669,6 +2669,9 @@ pub enum Action {
     CancelAddAccount,
     /// Unlinks an account and deletes what is stored here for it.
     RemoveAccount(AccountId),
+    /// Turns one account's desktop notifications on or off, from the account
+    /// switcher, without showing that account. It stays linked either way.
+    SetAccountNotifications(AccountId, bool),
     /// Mutes until Unix time, indefinitely with `Some(0)`, or unmutes with `None`.
     SetMuted(ChatId, Option<i64>),
     SetDisappearingTimer(ChatId, u32),

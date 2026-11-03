@@ -1436,21 +1436,23 @@ impl App {
         self.accounts.len() >= 2
     }
 
-    /// Unread chats across every account, for the taskbar and the tray.
+    /// Unread chats across every account, for the taskbar and the tray. A
+    /// muted account is left out, as a muted chat is.
     pub fn unread_chat_count_everywhere(&self) -> u32 {
         self.accounts
             .iter()
+            .filter(|account| account.settings.notifications)
             .map(Account::unread_chat_count)
             .fold(0, u32::saturating_add)
     }
 
-    /// Unread chats in the accounts that are not on screen, for the mark on
-    /// the account switcher.
+    /// Unread chats in the accounts that are not on screen and not muted, for
+    /// the mark on the account switcher.
     pub fn unread_chat_count_elsewhere(&self) -> u32 {
         self.accounts
             .iter()
             .enumerate()
-            .filter(|(index, _)| *index != self.active)
+            .filter(|(index, account)| *index != self.active && account.settings.notifications)
             .map(|(_, account)| account.unread_chat_count())
             .fold(0, u32::saturating_add)
     }
@@ -9623,6 +9625,18 @@ impl App {
                 }
             }
             Action::RemoveAccount(id) => self.remove_account(id),
+            Action::SetAccountNotifications(id, on) => {
+                if let Some(account) = self.accounts.iter_mut().find(|known| known.id == id)
+                    && account.settings.notifications != on
+                {
+                    account.settings.notifications = on;
+                    account.mark_settings_dirty();
+                    self.accessibility_announcements.push(
+                        crate::i18n::gettext(self.locale, if on { "Unmuted" } else { "Muted" })
+                            .into_owned(),
+                    );
+                }
+            }
         }
     }
 
@@ -14240,6 +14254,26 @@ mod tests {
         assert_eq!(app.unread_chat_count(), 1);
         assert_eq!(app.unread_chat_count_everywhere(), 3);
         assert_eq!(app.unread_chat_count_elsewhere(), 2);
+        let ctx = egui::Context::default();
+        let second = app.accounts[1].id.clone();
+        app.apply(Action::SetAccountNotifications(second.clone(), false), &ctx);
+        assert_eq!(app.active, 0, "muting keeps the current account on screen");
+        assert!(!app.accounts[1].settings.notifications);
+        assert!(app.accounts[0].settings.notifications);
+        assert_eq!(
+            app.accounts[1].unread_chat_count(),
+            2,
+            "the switcher keeps the muted count"
+        );
+        assert_eq!(app.unread_chat_count_everywhere(), 1);
+        assert_eq!(app.unread_chat_count_elsewhere(), 0);
+        assert_eq!(app.accessibility_announcements.last().unwrap(), "Muted");
+        app.apply(Action::SetAccountNotifications(second, true), &ctx);
+        assert_eq!(app.unread_chat_count_everywhere(), 3);
+        assert_eq!(app.accessibility_announcements.last().unwrap(), "Unmuted");
+        app.accounts[0].settings.notifications = false;
+        app.accounts[1].settings.notifications = false;
+        assert_eq!(app.unread_chat_count_everywhere(), 0);
     }
 
     #[test]
