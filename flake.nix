@@ -113,6 +113,9 @@
             version = (pkgs.lib.importTOML ./Cargo.toml).package.version;
             src = self;
 
+            # Test execution is Linux-only, including implicit package checks.
+            doCheck = isLinux;
+
             # Import registry dependencies directly from Cargo.lock so ordinary
             # lock-file updates do not require refreshing a vendor hash. Git
             # dependencies remain pinned to their exact locked revisions.

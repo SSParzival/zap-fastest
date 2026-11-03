@@ -547,9 +547,14 @@ A release is not finished when the tag is pushed. Do these in order:
 
 ## Verification cadence
 
+- Run tests on Linux only. Never run Windows or macOS tests in this
+  repository, locally or in CI. Keep platform support and compilation
+  checks separate from test execution.
+
 - During development, run formatting, focused tests and compilation/lints
   relevant to the change. Keep required hooks and per-commit checks intact.
-  Check an affected platform early when platform code or dependencies change.
+  Check compilation for an affected platform early when platform code or
+  dependencies change; execute tests only on Linux.
 - Batch expensive full-platform CI, Docker/Nix builds, package installation
   matrices and broad visual checks at the final checkpoint. Freeze application,
   dependency and packaging inputs first; do not run the full matrix per edit.
