@@ -7308,6 +7308,56 @@ impl App {
                 }
             }
             Action::PreviewMedia { chat, message } => self.preview_media(chat, message, ctx),
+            Action::UnreadableMedia {
+                chat,
+                message,
+                path,
+            } => {
+                let Some(media) = self
+                    .conversations
+                    .get_mut(&chat)
+                    .and_then(|conversation| conversation.message_mut(&message))
+                    .and_then(|message| message.content.media_at_mut(None))
+                    .filter(|media| media.path.as_ref() == Some(&path))
+                else {
+                    return;
+                };
+                media.path = None;
+                crate::animation::forget(ctx, &path);
+                crate::image_cache::forget(ctx, &crate::util::image_uri(&path));
+                let retry_id = egui::Id::new((
+                    "unreadable-media-retried",
+                    &self.account().id,
+                    &chat,
+                    &message,
+                ));
+                let retry = ctx.data(|data| data.get_temp::<bool>(retry_id)) != Some(true);
+                ctx.data_mut(|data| data.insert_temp(retry_id, true));
+                // One automatic recovery per account/message per session. A fresh
+                // file that still fails decoding offers a manual retry.
+                if let Some(media) = self
+                    .conversations
+                    .get_mut(&chat)
+                    .and_then(|conversation| conversation.message_mut(&message))
+                    .and_then(|message| message.content.media_at_mut(None))
+                {
+                    media.state = if retry {
+                        MediaState::Idle
+                    } else {
+                        MediaState::Failed("Could not display this file".into())
+                    };
+                }
+                if retry {
+                    self.apply(
+                        Action::Download {
+                            chat,
+                            message,
+                            card: None,
+                        },
+                        ctx,
+                    );
+                }
+            }
             Action::PreviewImage(path) => {
                 if crate::safety::can_preview_image(&path) && path.is_file() {
                     let chat = self.open_chat.clone();
@@ -10529,7 +10579,8 @@ impl App {
         else {
             return;
         };
-        if row.from_me {
+        // Played on another device: the phone already told the sender.
+        if row.from_me || row.status == Delivery::Played {
             return;
         }
         let sender = row.sender.clone();
@@ -10603,7 +10654,11 @@ impl App {
         conversation.messages[position + 1..]
             .iter()
             .take_while(|message| voice_note(message))
-            .find(|message| !message.from_me && !self.played_told.contains(&message.id))
+            .find(|message| {
+                !message.from_me
+                    && message.status != Delivery::Played
+                    && !self.played_told.contains(&message.id)
+            })
             .map(|message| message.id.clone())
     }
 
@@ -18348,6 +18403,9 @@ mod tests {
         app.open_chat = Some(chat.into());
         let mut own = voice(chat, "own", 2, None);
         own.from_me = true;
+        // Played on the phone.
+        let mut heard = voice(chat, "heard", 3, None);
+        heard.status = Delivery::Played;
         let mut song = voice(chat, "song", 6, None);
         if let Content::Audio { voice_note, .. } = &mut song.content {
             *voice_note = false;
@@ -18356,7 +18414,7 @@ mod tests {
             vec![
                 voice(chat, "played", 1, None),
                 own,
-                voice(chat, "heard", 3, None),
+                heard,
                 voice(chat, "waiting", 4, None),
                 message(chat, "text", 5),
                 voice(chat, "after text", 6, None),
@@ -18366,7 +18424,6 @@ mod tests {
             false,
         );
         app.played_told.insert("played".into());
-        app.played_told.insert("heard".into());
 
         assert_eq!(
             app.next_voice_after(chat, "played").as_deref(),

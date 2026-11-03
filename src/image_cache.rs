@@ -145,6 +145,16 @@ pub fn sweep(ctx: &egui::Context) {
     }
 }
 
+/// Drops both the local registration and egui's cached decode failure.
+pub fn forget(ctx: &egui::Context, uri: &str) {
+    registry(ctx)
+        .0
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .remove(uri);
+    ctx.forget_image(uri);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

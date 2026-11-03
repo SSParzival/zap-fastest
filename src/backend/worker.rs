@@ -454,6 +454,42 @@ async fn receipts_allowed(
     }
 }
 
+/// Whether a played receipt for a direct message goes out. With read
+/// receipts on it goes to the sender. With them off WhatsApp still tells our
+/// own devices, as `played-self`, so the phone stops marking the voice message
+/// unheard (#501); whatsapp-rust sends that form when it knows they are off
+/// (`library_hides`). While it does not know yet, nothing goes, so the sender
+/// never learns of a play the account hides.
+fn played_receipt_goes(account_allows: bool, library_hides: bool) -> bool {
+    account_allows || library_hides
+}
+
+/// Like `receipts_allowed`, for a played receipt: see `played_receipt_goes`.
+async fn played_receipt_allowed(
+    client: &Client,
+    jid: &Jid,
+    commands: &mpsc::UnboundedSender<Command>,
+) -> bool {
+    if jid.is_group() {
+        return true;
+    }
+    match client.fetch_privacy_settings().await {
+        Ok(settings) => {
+            let allowed = account_allows_receipts(&settings);
+            let _ = commands.send(Command::ReceiptsPrivacy { disabled: !allowed });
+            let hides = client
+                .persistence_manager()
+                .get_device_snapshot()
+                .read_receipts_disabled;
+            played_receipt_goes(allowed, hides)
+        }
+        Err(error) => {
+            log::debug!("played receipt withheld: account privacy unavailable: {error}");
+            false
+        }
+    }
+}
+
 /// A sticker file's size and modification time, with the emojis read from it.
 type EmojiStamp = ((u64, Option<std::time::SystemTime>), Vec<String>);
 
@@ -4257,17 +4293,21 @@ impl Worker {
             ReceiptType::Read => Delivery::Read,
             ReceiptType::Played => Delivery::Played,
             ReceiptType::ReadSelf | ReceiptType::PlayedSelf => {
+                let played = receipt.r#type == ReceiptType::PlayedSelf;
                 // The receipt time is when the phone read, not the position
                 // it read through. A delayed receipt must leave newer messages.
                 for id in &receipt.message_ids {
                     match self.archive.message(&chat, id) {
                         Ok(Some(message)) if !message.from_me => {
                             let _ = self.archive.mark_read_to(&chat, id);
+                            if played {
+                                self.store_played(&chat, id);
+                            }
                         }
                         // Offline, messages are filed in batches after their
                         // receipts: the read applies once the message is.
                         Ok(None) if !receipt.source.chat.is_status_broadcast() => {
-                            self.early.wait_read(&chat, id);
+                            self.early.wait_read(&chat, id, played);
                         }
                         _ => {}
                     }
@@ -5004,9 +5044,12 @@ impl Worker {
         let Some(Some(message)) = self.history_write(self.archive.message(chat, id)) else {
             return false;
         };
-        let read = self.early.take_read(chat, id) && !message.from_me;
-        if read {
+        let read = self.early.take_read(chat, id).filter(|_| !message.from_me);
+        if read.is_some() {
             self.history_write(self.archive.mark_read_to(chat, id));
+        }
+        if read == Some(true) {
+            self.store_played(chat, id);
         }
         for waiting in self.early.take_reactions(chat, id) {
             // The sender's privacy id may have been mapped since.
@@ -5020,7 +5063,15 @@ impl Worker {
                 waiting.live_activity.then_some(waiting.sent_at),
             );
         }
-        read
+        read.is_some()
+    }
+
+    fn store_played(&self, chat: &str, id: &str) {
+        match self.archive.mark_played(chat, id) {
+            Ok(true) => self.emit_message(chat, id),
+            Ok(false) => {}
+            Err(_) => log::warn!("could not store a played voice message"),
+        }
     }
 
     /// Opens an edit history carries encrypted (#582) with the secret of the
@@ -5976,9 +6027,11 @@ impl Worker {
                 let mut keep_raw = false;
                 let mut existed = false;
                 let mut live_location_changed = false;
+                let mut status_advanced = false;
                 if let Some(Some(existing)) = self.history_write(self.archive.message(&id, &row.id))
                 {
                     existed = true;
+                    status_advanced = existing.status < row.status;
                     row.content.keep_local_paths(&existing.content);
                     keep_live_location_notice(&mut row.content, &existing);
                     // A repeated original must not undo a later edit or revoke.
@@ -6005,7 +6058,7 @@ impl Worker {
                     self.history_storage_ok.set(false);
                     log::warn!("could not store a history message: {error}");
                 } else {
-                    if live_location_changed {
+                    if live_location_changed || status_advanced {
                         self.emit_message(&id, &row.id);
                     }
                     if existed {
@@ -7846,6 +7899,7 @@ impl Worker {
                 sender,
                 receipts,
             } => {
+                self.store_played(&chat, &message);
                 if receipts {
                     self.mark_played(chat, message, sender);
                 }
@@ -11501,7 +11555,7 @@ impl Worker {
         };
         let commands = self.commands.clone();
         self.spawn_upload(chat.clone(), async move {
-            if !receipts_allowed(&client, &jid, &commands).await {
+            if !played_receipt_allowed(&client, &jid, &commands).await {
                 return;
             }
             if let Err(error) = client
@@ -12915,6 +12969,17 @@ fn whatsapp_audio_mime(mime: &str) -> Option<&'static str> {
     }
 }
 
+/// Whether an attached video goes as a video message. Phones play only MP4
+/// inline, and WhatsApp drops a video message in another container (a
+/// QuickTime `.mov`, WebM, MKV, AVI) without telling either side, so the
+/// recipient gets nothing (#553). Those go as documents and arrive as the
+/// original file; ZapFast does not transcode.
+fn whatsapp_video_mime(mime: &str, bytes: &[u8]) -> bool {
+    mime == "video/mp4"
+        && mp4::Mp4Reader::read_header(std::io::Cursor::new(bytes), bytes.len() as u64)
+            .is_ok_and(|reader| reader.major_brand().to_string() != "qt  ")
+}
+
 /// Uploads a file and builds its message. Images are encoded as JPEG.
 async fn prepare_media(
     client: &Client,
@@ -12923,7 +12988,6 @@ async fn prepare_media(
     file_name: Option<&str>,
     gif: bool,
 ) -> Result<Prepared, String> {
-    let kind = mime.split('/').next().unwrap_or_default();
     let is_picture = matches!(
         mime,
         "image/jpeg" | "image/png" | "image/webp" | "image/bmp" | "image/tiff"
@@ -12974,7 +13038,7 @@ async fn prepare_media(
     }
     let size = bytes.len() as u64;
     let mime_owned = mime.to_owned();
-    if kind == "video" {
+    if whatsapp_video_mime(mime, &bytes) {
         // The picture, size, and length phones show before downloading it.
         // Reading a second of frames takes a moment, so off the runtime.
         let poster = {
@@ -13840,6 +13904,9 @@ fn parse_conversation(conversation: wa::Conversation) -> ParsedChat {
                 Some(Status::ERROR) => Delivery::Failed,
                 _ => Delivery::Sent,
             }
+        } else if info.status == Some(Status::PLAYED) {
+            // We played their voice message on another device.
+            Delivery::Played
         } else {
             Delivery::None
         };
@@ -14806,6 +14873,40 @@ mod tests {
         // phone, not as the file that was attached (#162).
         for document in ["take.wav", "album.flac", "loop.aiff", "old.wma", "x.weba"] {
             assert_eq!(sent_as(document), None, "{document}");
+        }
+    }
+
+    #[test]
+    fn a_played_receipt_reaches_our_own_devices_with_read_receipts_off() {
+        // Read receipts on: the sender is told.
+        assert!(played_receipt_goes(true, false));
+        // Off, and whatsapp-rust knows: it sends played-self, to our own
+        // devices only, so the phone marks the message heard (#501).
+        assert!(played_receipt_goes(false, true));
+        // Off, but the library does not know yet: it would tell the sender.
+        assert!(!played_receipt_goes(false, false));
+    }
+
+    #[test]
+    fn only_mp4_video_is_sent_as_a_video_message() {
+        let video = |name: &str| {
+            let mime = mime_guess2::from_path(name)
+                .first_or_octet_stream()
+                .to_string();
+            whatsapp_video_mime(
+                &mime,
+                include_bytes!("../../tests/fixtures/video/sample.mp4"),
+            )
+        };
+        assert!(video("clip.mp4"));
+        assert!(!whatsapp_video_mime("video/mp4", b"not an MP4 container"));
+        let mut quicktime = include_bytes!("../../tests/fixtures/video/sample.mp4").to_vec();
+        quicktime[8..12].copy_from_slice(b"qt  ");
+        assert!(!whatsapp_video_mime("video/mp4", &quicktime));
+        // WhatsApp drops these as video messages, so the recipient got
+        // nothing (#553); they go as documents instead.
+        for document in ["clip.mov", "clip.webm", "clip.mkv", "clip.avi", "clip.wmv"] {
+            assert!(!video(document), "{document}");
         }
     }
 
@@ -20352,6 +20453,86 @@ mod receipt_tests {
     }
 
     #[test]
+    fn history_keeps_their_voice_message_played_on_the_phone() {
+        use wa::web_message_info::Status;
+        let parsed = |status| {
+            parse_conversation({
+                let mut proto = wa::Conversation::default();
+                proto.id = PEER.into();
+                proto.messages = vec![{
+                    let mut proto = wa::HistorySyncMsg::default();
+                    proto.message = MessageField::some({
+                        let mut proto = wa::WebMessageInfo::default();
+                        proto.key = MessageField::some({
+                            let mut proto = wa::MessageKey::default();
+                            proto.id = Some("voice".into());
+                            proto.from_me = Some(false);
+                            proto
+                        });
+                        proto.message = MessageField::some({
+                            let mut proto = wa::Message::default();
+                            proto.audio_message = MessageField::some({
+                                let mut proto = wa::message::AudioMessage::default();
+                                proto.ptt = Some(true);
+                                proto
+                            });
+                            proto
+                        });
+                        proto.status = Some(status);
+                        proto
+                    });
+                    proto
+                }];
+                proto
+            })
+            .messages[0]
+                .status
+        };
+        assert_eq!(parsed(Status::PLAYED), Delivery::Played);
+        assert_eq!(parsed(Status::READ), Delivery::None);
+        assert_eq!(parsed(Status::DELIVERY_ACK), Delivery::None);
+    }
+
+    #[test]
+    fn history_tells_the_transcript_of_a_voice_message_played_since() {
+        use wa::web_message_info::Status;
+        let (mut worker, events, _inbox, _wa) = worker();
+        let entry = |status| {
+            let mut entry = history_entry(
+                PEER,
+                "voice",
+                false,
+                None,
+                {
+                    let mut proto = wa::Message::default();
+                    proto.audio_message = MessageField::some({
+                        let mut proto = wa::message::AudioMessage::default();
+                        proto.ptt = Some(true);
+                        proto
+                    });
+                    proto
+                },
+                Vec::new(),
+                None,
+            );
+            entry.message.as_option_mut().unwrap().status = Some(status);
+            entry
+        };
+        file_history_entries(&mut worker, vec![entry(Status::DELIVERY_ACK)]);
+        while events.try_recv().is_ok() {}
+        // A replay that says the phone played it updates the row on screen.
+        file_history_entries(&mut worker, vec![entry(Status::PLAYED)]);
+        let told = std::iter::from_fn(|| events.try_recv().ok()).any(|event| {
+            matches!(event, Event::MessageUpdated(message)
+                if message.id == "voice" && message.status == Delivery::Played)
+        });
+        assert!(
+            told,
+            "the played voice message was not sent to the transcript"
+        );
+    }
+
+    #[test]
     fn history_receipts_date_direct_ticks_and_fill_group_message_info() {
         use wa::web_message_info::Status;
         let conversation = |chat: &str, status| {
@@ -21458,6 +21639,54 @@ mod receipt_tests {
         );
         worker.on_receipt(&receipt(PEER_LID, &["new"], ReceiptType::ReadSelf));
         assert_eq!(unread(&worker), 0);
+    }
+
+    #[tokio::test]
+    async fn a_voice_message_played_here_or_on_the_phone_is_kept_as_heard() {
+        let (mut worker, events, _inbox, _wa) = worker();
+        let status =
+            |worker: &Worker, id: &str| worker.archive.message(PEER, id).unwrap().unwrap().status;
+        worker.store_message(incoming("phone", 100), None, None);
+        worker.store_message(incoming("here", 200), None, None);
+        worker.store_message(own_message("ours", 300), None, None);
+        while events.try_recv().is_ok() {}
+
+        worker.on_receipt(&receipt(PEER, &["phone"], ReceiptType::PlayedSelf));
+        assert_eq!(status(&worker, "phone"), Delivery::Played);
+        assert!(events.try_iter().any(|event| matches!(
+            event,
+            Event::MessageUpdated(message) if message.id == "phone"
+        )));
+
+        worker
+            .handle_command(Command::MarkPlayed {
+                chat: PEER.into(),
+                message: "here".into(),
+                sender: PEER.into(),
+                receipts: false,
+            })
+            .await;
+        assert_eq!(
+            status(&worker, "here"),
+            Delivery::Played,
+            "heard here even without sending receipts"
+        );
+
+        worker.on_receipt(&receipt(PEER, &["ours"], ReceiptType::PlayedSelf));
+        assert_eq!(
+            status(&worker, "ours"),
+            Delivery::Sent,
+            "our own keeps its ticks"
+        );
+
+        // Offline, the phone's play can come before its message.
+        worker.on_receipt(&receipt(PEER, &["early"], ReceiptType::PlayedSelf));
+        worker.store_message(incoming("early", 400), None, None);
+        assert_eq!(status(&worker, "early"), Delivery::Played);
+
+        // A replay of the message does not undo it.
+        worker.store_message(incoming("phone", 100), None, None);
+        assert_eq!(status(&worker, "phone"), Delivery::Played);
     }
 
     #[test]

@@ -979,3 +979,14 @@ The sticker picker shares two background download slots across recent and chat
 stickers, resumes after rate limits, and refreshes its shelves in small batches.
 An explicit click during a picker fetch is remembered and can request a re-upload
 if that background fetch fails.
+
+Voice notes show an accent dot until heard here or on another device. Playing a
+note stores its heard state locally even when Send read receipts is disabled.
+When that preference permits receipts but WhatsApp account privacy hides them,
+only a private played-self receipt reaches your other devices.
+
+Only files identified as MP4 containers are sent as inline video. QuickTime,
+Matroska, AVI and other video containers are sent as documents with their original
+filename and MIME type. Missing or unreadable cached stickers get one automatic
+re-download per session; a fresh file that still cannot be drawn offers a manual
+retry in its bubble.
