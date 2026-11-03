@@ -1,0 +1,169 @@
+{
+  "source_commit": "366dde2e835f3b6cd4dcbc6ef7e76c7450c8916a",
+  "upstream_commit": "92f5ecac34814a77042ceea5827aa8964c3d0c1d",
+  "platform": "Linux x86_64",
+  "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13) (Arch Linux rust 1:1.99.1-1)",
+  "cargo": "cargo 1.99.1 (5f94df478 2026-08-27) (Arch Linux rust 1:1.99.1-1)",
+  "cargo_target_dir": "/tmp/cargo-target",
+  "target_storage": "symlink to dedicated disk-backed cache",
+  "scheduling": "all-feature builds serialized without changing profiles or compiler flags",
+  "checks": [
+    {
+      "name": "format",
+      "command": [
+        "cargo",
+        "fmt",
+        "--all",
+        "--check"
+      ],
+      "exit_code": 0,
+      "seconds": 1.64,
+      "log": "/home/ssparzival/.cache/zap-fastest-integration/format.log"
+    },
+    {
+      "name": "sources",
+      "command": [
+        "python3",
+        ".github/scripts/check-dependency-sources.py"
+      ],
+      "exit_code": 0,
+      "seconds": 0.08,
+      "log": "/home/ssparzival/.cache/zap-fastest-integration/sources.log"
+    },
+    {
+      "name": "check",
+      "command": [
+        "cargo",
+        "check",
+        "--locked",
+        "--all-targets"
+      ],
+      "exit_code": 0,
+      "seconds": 6.81,
+      "log": "/home/ssparzival/.cache/zap-fastest-integration/check.log"
+    },
+    {
+      "name": "clippy-default",
+      "command": [
+        "cargo",
+        "clippy",
+        "--locked",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "seconds": 5.11,
+      "log": "/home/ssparzival/.cache/zap-fastest-integration/clippy-default.log"
+    },
+    {
+      "name": "clippy-all",
+      "command": [
+        "cargo",
+        "clippy",
+        "--locked",
+        "--all-targets",
+        "--all-features",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "seconds": 5.52,
+      "log": "/home/ssparzival/.cache/zap-fastest-integration/clippy-all.log"
+    },
+    {
+      "name": "tests-default",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--all-targets"
+      ],
+      "exit_code": 0,
+      "seconds": 426.08,
+      "log": "/home/ssparzival/.cache/zap-fastest-integration/tests-default.log",
+      "test_summaries": [
+        "test result: ok. 2001 passed; 0 failed; 14 ignored; 0 measured; 0 filtered out; finished in 39.06s",
+        "test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.16s"
+      ]
+    },
+    {
+      "name": "tests-all",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--all-targets",
+        "--all-features"
+      ],
+      "exit_code": 0,
+      "seconds": 865.68,
+      "log": "/home/ssparzival/.cache/zap-fastest-integration/tests-all.log",
+      "test_summaries": [
+        "test result: ok. 2001 passed; 0 failed; 14 ignored; 0 measured; 0 filtered out; finished in 39.19s",
+        "test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+      ]
+    },
+    {
+      "name": "docs",
+      "command": [
+        "cargo",
+        "doc",
+        "--locked",
+        "--all-features",
+        "--no-deps"
+      ],
+      "exit_code": 0,
+      "seconds": 16.41,
+      "log": "/home/ssparzival/.cache/zap-fastest-integration/docs.log"
+    },
+    {
+      "name": "tests-lib",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--lib"
+      ],
+      "exit_code": 0,
+      "test_summaries": [
+        "test result: ok. 2001 passed; 0 failed; 14 ignored; 0 measured; 0 filtered out; finished in 41.20s"
+      ]
+    }
+  ],
+  "visual_checks": [
+    {
+      "page": "accounts-muted",
+      "exit_code": 0,
+      "size": [
+        1100,
+        780
+      ],
+      "sha256": "13aedf88cbeecba1e6be88f53d3a9688b7c9f99f7ae3f5e34cf60f8047643ecb",
+      "path": "/home/ssparzival/.cache/zap-fastest-integration/accounts-muted.png",
+      "content": "synthetic offline demo",
+      "review": "inspected"
+    },
+    {
+      "page": "voice",
+      "exit_code": 0,
+      "size": [
+        1100,
+        780
+      ],
+      "sha256": "59f515dd6f6a7da0c5e478394ac961920446ed0029ab71376569fdfc643d54a6",
+      "path": "/home/ssparzival/.cache/zap-fastest-integration/voice.png",
+      "content": "synthetic offline demo",
+      "review": "inspected"
+    }
+  ],
+  "not_run": [
+    "Windows builds/runtime",
+    "macOS builds/runtime",
+    "live WhatsApp/device acceptance"
+  ]
+}

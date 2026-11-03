@@ -1,5 +1,7 @@
 # Upstream Integration Review: ZapFast v0.20.0
 
+For the next integration, see the [0.20.1 and 0.21 integration record](upstream-integration-v0.20.1-v0.21.md).
+
 - Upstream HEAD: `c56a631` (ZapFast v0.20.0)
 - Fork Baseline: `3792246` (ZapFaster v0.30.0)
 - Common Ancestor: `df01459f` (7 October 2026)
