@@ -12,8 +12,8 @@ pub enum Stop {
     Emoji,
     RecordCancel,
     RecordSend,
-    PhoneLink(u32),
     Messages,
+    PhoneLink(u32),
     /// The chat header's Search, then the search pane's controls in reading
     /// order. The arrows walk its results from the field.
     ChatSearch,
