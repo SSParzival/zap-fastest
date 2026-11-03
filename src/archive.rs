@@ -1484,7 +1484,7 @@ impl Archive {
             ],
         )?;
         transaction.execute(
-            "UPDATE meta SET value=?2 WHERE key LIKE 'download_folder_owner:%' AND value=?1",
+            "UPDATE meta SET value=?2 WHERE key GLOB 'download_folder_owner:*' AND value=?1",
             params![lid_chat, phone_chat],
         )?;
         transaction.execute("INSERT OR IGNORE INTO pin_notices(chat,id,pinned_at,expires_at,by_me,sender) SELECT ?2,id,pinned_at,expires_at,by_me,sender FROM pin_notices WHERE chat=?1",params![lid_chat,phone_chat])?;
@@ -5587,6 +5587,61 @@ pub(crate) mod tests {
         let stored = archive.message(chat, "m1").expect("read").expect("exists");
         assert_eq!(stored.reactions.len(), 1);
         assert_eq!(stored.reactions[0].sender, "3@s.whatsapp.net");
+    }
+
+    /// A receipt for a later send is no proof that a still-pending send went out.
+    #[test]
+    fn later_receipts_leave_unacknowledged_sends_and_other_chats_alone() {
+        for receipt in [Delivery::Delivered, Delivery::Read, Delivery::Played] {
+            let archive = Archive::in_memory().unwrap();
+            let chat = "1@s.whatsapp.net";
+            let other = "2@s.whatsapp.net";
+            archive.ensure_chat(chat, "Fixture").unwrap();
+            archive.ensure_chat(other, "Other fixture").unwrap();
+            for (id, status) in [
+                ("queued", Delivery::Queued),
+                ("unconfirmed", Delivery::Unconfirmed),
+                ("pending", Delivery::Pending),
+                ("failed", Delivery::Failed),
+                ("sent", Delivery::Sent),
+            ] {
+                let mut row = message(chat, id, 100, true);
+                row.status = status;
+                archive.insert_message(&row, None).unwrap();
+            }
+            let mut other_row = message(other, "other", 100, true);
+            other_row.status = Delivery::Sent;
+            archive.insert_message(&other_row, None).unwrap();
+            assert_eq!(
+                archive.advance_statuses(chat, 200, receipt, 300).unwrap(),
+                ["sent"]
+            );
+            for (id, expected) in [
+                ("queued", Delivery::Queued),
+                ("unconfirmed", Delivery::Unconfirmed),
+                ("pending", Delivery::Pending),
+                ("failed", Delivery::Failed),
+            ] {
+                let row = archive.message(chat, id).unwrap().unwrap();
+                assert_eq!(row.status, expected);
+                assert_eq!(row.delivered_at, None);
+                assert_eq!(row.read_at, None);
+            }
+            assert_eq!(
+                archive.message(chat, "sent").unwrap().unwrap().status,
+                receipt
+            );
+            assert_eq!(
+                archive.message(other, "other").unwrap().unwrap().status,
+                Delivery::Sent
+            );
+            assert!(
+                archive
+                    .advance_statuses(chat, 200, Delivery::Delivered, 400)
+                    .unwrap()
+                    .is_empty()
+            );
+        }
     }
 
     #[test]

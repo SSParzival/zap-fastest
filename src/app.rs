@@ -7349,7 +7349,7 @@ impl App {
                 }
                 if retry {
                     self.apply(
-                        Action::Download {
+                        Action::DownloadAutomatic {
                             chat,
                             message,
                             card: None,
@@ -10368,15 +10368,19 @@ impl App {
         let private = self.app_lock.is_locked() || self.settings.screen_privacy.enabled;
         let vip = !private
             && self.settings.tray_vip
-            && self.accounts.iter().any(|account| {
-                account.chats.iter().any(|chat| {
-                    account.settings.vip_chats.contains(&chat.id)
-                        && !chat.locked
-                        && !chat.archived
-                        && !chat.muted(crate::util::now())
-                        && chat.looks_unread()
-                })
-            });
+            && self
+                .accounts
+                .iter()
+                .filter(|account| account.settings.notifications)
+                .any(|account| {
+                    account.chats.iter().any(|chat| {
+                        account.settings.vip_chats.contains(&chat.id)
+                            && !chat.locked
+                            && !chat.archived
+                            && !chat.muted(crate::util::now())
+                            && chat.looks_unread()
+                    })
+                });
         let count = if private { 0 } else { count };
         if crate::tray_indicator::publish(count, vip, self.settings.tray_unread_numbers)
             && let Some(tray) = &mut self.tray
@@ -18129,6 +18133,86 @@ mod tests {
         assert!(app.search_hits.is_empty());
         // The chat itself stays open.
         assert_eq!(app.open_chat.as_deref(), Some(chat));
+    }
+
+    #[test]
+    fn unreadable_stickers_retry_once_with_the_automatic_limit() {
+        for size in [128, crate::model::ATTACHMENT_DOWNLOAD_LIMIT + 1] {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("broken.webp");
+            std::fs::write(&path, b"synthetic corrupt sticker").unwrap();
+            let mut app = app();
+            let (backend, mut commands) = Backend::recording();
+            app.backend = backend;
+            let chat = "fixture@s.whatsapp.net";
+            app.open_chat = Some(chat.into());
+            let mut row = message(chat, "sticker", 100);
+            row.content = crate::model::Content::Sticker {
+                animated: false,
+                media: crate::model::Media {
+                    mime: "image/webp".into(),
+                    size,
+                    width: None,
+                    height: None,
+                    path: Some(path.clone()),
+                    state: crate::model::MediaState::Idle,
+                    album: None,
+                },
+            };
+            app.conversations
+                .entry(chat.into())
+                .or_default()
+                .merge(vec![row], false);
+            let ctx = egui::Context::default();
+            let failure = || Action::UnreadableMedia {
+                chat: chat.into(),
+                message: "sticker".into(),
+                path: path.clone(),
+            };
+            app.apply(failure(), &ctx);
+            let sent: Vec<_> = std::iter::from_fn(|| commands.try_recv().ok()).collect();
+            let downloads: Vec<_> = sent
+                .iter()
+                .filter_map(|command| match command {
+                    Command::Download { explicit, .. } => Some(*explicit),
+                    _ => None,
+                })
+                .collect();
+            if size <= crate::model::ATTACHMENT_DOWNLOAD_LIMIT {
+                assert_eq!(downloads, [false]);
+            } else {
+                assert!(
+                    downloads.is_empty(),
+                    "automatic recovery never takes the explicit 2 GiB path"
+                );
+            }
+            let media = app
+                .conversations
+                .get_mut(chat)
+                .unwrap()
+                .message_mut("sticker")
+                .unwrap()
+                .content
+                .media_at_mut(None)
+                .unwrap();
+            media.path = Some(path.clone());
+            media.state = crate::model::MediaState::Idle;
+            app.apply(failure(), &ctx);
+            assert!(
+                !std::iter::from_fn(|| commands.try_recv().ok())
+                    .any(|command| matches!(command, Command::Download { .. }))
+            );
+            let media = app
+                .conversations
+                .get_mut(chat)
+                .unwrap()
+                .message_mut("sticker")
+                .unwrap()
+                .content
+                .media_at_mut(None)
+                .unwrap();
+            assert!(matches!(media.state, crate::model::MediaState::Failed(_)));
+        }
     }
 
     #[test]

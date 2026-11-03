@@ -9,8 +9,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DownloadOrganization {
-    #[default]
     Flat,
+    #[default]
     ByChat,
     ByChatMonth,
 }
@@ -695,7 +695,7 @@ impl Default for Settings {
             mention_sound: NotificationSound::Alert,
             group_sounds: true,
             download_folder: None,
-            download_organization: DownloadOrganization::Flat,
+            download_organization: DownloadOrganization::ByChat,
             descriptive_download_names: false,
             keep_chats_archived: true,
             proxy: String::new(),
@@ -1213,6 +1213,18 @@ impl AccountRoster {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn organized_download_default_preserves_an_explicit_flat_preference() {
+        assert_eq!(
+            Settings::default().download_organization,
+            DownloadOrganization::ByChat
+        );
+        let missing: Settings = serde_json::from_str("{}").unwrap();
+        assert_eq!(missing.download_organization, DownloadOrganization::ByChat);
+        let flat: Settings = serde_json::from_str(r#"{"download_organization":"flat"}"#).unwrap();
+        assert_eq!(flat.download_organization, DownloadOrganization::Flat);
+    }
 
     #[test]
     fn theme_defaults_to_follow_system_for_new_and_missing_settings() {

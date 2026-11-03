@@ -2972,7 +2972,7 @@ pub fn apply_flags(app: &mut App, page: Option<&str>) {
             "account-menu" => app.account_menu = true,
             // A second number linked beside the first, with unread chats of
             // its own, and the switcher under our avatar open.
-            "accounts" | "accounts-closed" => {
+            "accounts" | "accounts-closed" | "accounts-muted" => {
                 if app.accounts.len() < 2 {
                     let id = crate::model::AccountId::parse("2").expect("demo account");
                     if let Ok((mut work, _)) = crate::account::Account::detached(
@@ -2995,7 +2995,10 @@ pub fn apply_flags(app: &mut App, page: Option<&str>) {
                         app.accounts.push(work);
                     }
                 }
-                app.account_menu = part == "accounts";
+                if part == "accounts-muted" {
+                    app.accounts[1].settings.notifications = false;
+                }
+                app.account_menu = part != "accounts-closed";
             }
             "message-number" => app.dialog = Some(Dialog::MessageNumber),
 
@@ -4674,7 +4677,7 @@ mod tests {
         );
         let phone = phone_links[0];
         let phone_last = *phone_links.last().unwrap();
-        let previous = crate::ui::focus::control(&ctx, crate::ui::focus::Stop::Emoji).unwrap();
+        let previous = crate::ui::focus::control(&ctx, crate::ui::focus::Stop::Messages).unwrap();
         let next = crate::ui::focus::control(&ctx, crate::ui::focus::Stop::ChatSearch).unwrap();
         let open_menu = |app: &mut App, from: egui::Id, target: egui::Id, tab: egui::Modifiers| {
             ctx.memory_mut(|memory| memory.request_focus(from));
@@ -6403,6 +6406,8 @@ mod tests {
             "new-contact",
             "accounts",
             "accounts,light",
+            "accounts-muted",
+            "accounts-muted,light",
             "accounts-closed",
             "account-menu",
             "light",
@@ -11515,7 +11520,9 @@ mod tests {
                     app.attach(&ctx);
                     app.backend.record_demo_commands();
                     let chat = sample_ids()[0].to_owned();
-                    let path = std::path::PathBuf::from("demo/photo.jpg");
+                    let directory = tempfile::tempdir().unwrap();
+                    let path = directory.path().join("photo.jpg");
+                    image::RgbImage::new(8, 8).save(&path).unwrap();
                     let content = if image {
                         let mut photo = media("image/jpeg", 120_000, Some(800), Some(600));
                         photo.path = Some(path.clone());
@@ -11620,7 +11627,9 @@ mod tests {
         let ctx = egui::Context::default();
         ctx.enable_accesskit();
         let chat = sample_ids()[0].to_owned();
-        let path = std::path::PathBuf::from("demo/photo.jpg");
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("photo.jpg");
+        image::RgbImage::new(8, 8).save(&path).unwrap();
         for downloaded in [true, false] {
             let mut app = app();
             app.attach(&ctx);
@@ -16515,6 +16524,7 @@ mod tests {
                 Stop::Send,
                 Stop::Attach,
                 Stop::Emoji,
+                Stop::Messages,
                 Stop::ChatSearch,
                 Stop::Profile,
                 Stop::Sidebar,
@@ -16600,6 +16610,7 @@ mod tests {
             let expected = [
                 Stop::Composer,
                 Stop::Send,
+                Stop::Messages,
                 Stop::ChatSearch,
                 Stop::Sidebar,
                 Stop::Search,
@@ -16696,6 +16707,7 @@ mod tests {
                         Stop::Send,
                         Stop::Attach,
                         Stop::Emoji,
+                        Stop::Messages,
                         Stop::ChatSearch,
                         Stop::Sidebar
                     ]

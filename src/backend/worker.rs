@@ -19800,20 +19800,17 @@ mod receipt_tests {
     /// both the original's sender and the editor.
     fn sealed_edit(target: &str, author: &str, secret: &[u8], text: &str) -> wa::Message {
         use whatsapp_rust::wacore::message_edit::{MessageEditContext, encrypt_message_edit};
-        let inner = {
-            let mut proto = wa::Message::default();
-            proto.protocol_message = MessageField::some({
-                let mut proto = wa::message::ProtocolMessage::default();
-                proto.r#type = Some(wa::message::protocol_message::Type::MESSAGE_EDIT);
-                proto.key = MessageField::some({
-                    let mut proto = wa::MessageKey::default();
-                    proto.id = Some(target.into());
-                    proto
-                });
-                proto.edited_message = MessageField::some(wa::Message::text(text));
-                proto
-            });
-            proto
+        let inner = wa::Message {
+            protocol_message: MessageField::some(wa::message::ProtocolMessage {
+                r#type: Some(wa::message::protocol_message::Type::MESSAGE_EDIT),
+                key: MessageField::some(wa::MessageKey {
+                    id: Some(target.into()),
+                    ..Default::default()
+                }),
+                edited_message: MessageField::some(wa::Message::text(text)),
+                ..Default::default()
+            }),
+            ..Default::default()
         };
         let (payload, iv) = encrypt_message_edit(
             &inner,
@@ -19825,40 +19822,41 @@ mod receipt_tests {
             },
         )
         .unwrap();
-        let mut proto = wa::Message::default();
-        proto.secret_encrypted_message = MessageField::some({
-            let mut proto = wa::message::SecretEncryptedMessage::default();
-            proto.secret_enc_type =
-                Some(wa::message::secret_encrypted_message::SecretEncType::MESSAGE_EDIT);
-            proto.target_message_key = MessageField::some({
-                let mut proto = wa::MessageKey::default();
-                proto.id = Some(target.into());
-                proto.remote_jid = Some(author.into());
-                proto
-            });
-            proto.enc_payload = Some(payload);
-            proto.enc_iv = Some(iv.to_vec());
-            proto
-        });
-        proto
+        wa::Message {
+            secret_encrypted_message: MessageField::some(wa::message::SecretEncryptedMessage {
+                secret_enc_type: Some(
+                    wa::message::secret_encrypted_message::SecretEncType::MESSAGE_EDIT,
+                ),
+                target_message_key: MessageField::some(wa::MessageKey {
+                    id: Some(target.into()),
+                    remote_jid: Some(author.into()),
+                    ..Default::default()
+                }),
+                enc_payload: Some(payload),
+                enc_iv: Some(iv.to_vec()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
     }
 
     #[test]
     fn history_parses_a_sealed_edit_under_its_original() {
         let secret = [7u8; 32];
         let parsed = parse_conversation({
-            let mut proto = wa::Conversation::default();
-            proto.id = PEER.into();
-            proto.messages = vec![history_entry(
-                PEER,
-                "edit-envelope",
-                false,
-                None,
-                sealed_edit("original-id", PEER, &secret, "Edited fixture"),
-                Vec::new(),
-                None,
-            )];
-            proto
+            wa::Conversation {
+                id: PEER.into(),
+                messages: vec![history_entry(
+                    PEER,
+                    "edit-envelope",
+                    false,
+                    None,
+                    sealed_edit("original-id", PEER, &secret, "Edited fixture"),
+                    Vec::new(),
+                    None,
+                )],
+                ..Default::default()
+            }
         });
         assert_eq!(parsed.diagnostics.unclassified, 0);
         assert_eq!(parsed.diagnostics.encrypted_edits, 1);
@@ -20456,34 +20454,28 @@ mod receipt_tests {
     fn history_keeps_their_voice_message_played_on_the_phone() {
         use wa::web_message_info::Status;
         let parsed = |status| {
-            parse_conversation({
-                let mut proto = wa::Conversation::default();
-                proto.id = PEER.into();
-                proto.messages = vec![{
-                    let mut proto = wa::HistorySyncMsg::default();
-                    proto.message = MessageField::some({
-                        let mut proto = wa::WebMessageInfo::default();
-                        proto.key = MessageField::some({
-                            let mut proto = wa::MessageKey::default();
-                            proto.id = Some("voice".into());
-                            proto.from_me = Some(false);
-                            proto
-                        });
-                        proto.message = MessageField::some({
-                            let mut proto = wa::Message::default();
-                            proto.audio_message = MessageField::some({
-                                let mut proto = wa::message::AudioMessage::default();
-                                proto.ptt = Some(true);
-                                proto
-                            });
-                            proto
-                        });
-                        proto.status = Some(status);
-                        proto
-                    });
-                    proto
-                }];
-                proto
+            parse_conversation(wa::Conversation {
+                id: PEER.into(),
+                messages: vec![wa::HistorySyncMsg {
+                    message: MessageField::some(wa::WebMessageInfo {
+                        key: MessageField::some(wa::MessageKey {
+                            id: Some("voice".into()),
+                            from_me: Some(false),
+                            ..Default::default()
+                        }),
+                        message: MessageField::some(wa::Message {
+                            audio_message: MessageField::some(wa::message::AudioMessage {
+                                ptt: Some(true),
+                                ..Default::default()
+                            }),
+                            ..Default::default()
+                        }),
+                        status: Some(status),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }],
+                ..Default::default()
             })
             .messages[0]
                 .status
@@ -20503,14 +20495,12 @@ mod receipt_tests {
                 "voice",
                 false,
                 None,
-                {
-                    let mut proto = wa::Message::default();
-                    proto.audio_message = MessageField::some({
-                        let mut proto = wa::message::AudioMessage::default();
-                        proto.ptt = Some(true);
-                        proto
-                    });
-                    proto
+                wa::Message {
+                    audio_message: MessageField::some(wa::message::AudioMessage {
+                        ptt: Some(true),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
                 },
                 Vec::new(),
                 None,

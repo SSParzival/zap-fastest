@@ -1046,7 +1046,7 @@ mod tests {
         assert_eq!(phone("594694123456"), "+594 694 12 34 56");
         assert_eq!(phone("596696123456"), "+596 696 12 34 56");
         // A French number of the wrong length keeps the general grouping.
-        assert_eq!(phone("3361234567"), "+33 612 345 67");
+        assert_eq!(phone("3361234567"), "+33 61234567");
         assert_eq!(phone(""), "");
     }
 

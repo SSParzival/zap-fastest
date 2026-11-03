@@ -212,6 +212,11 @@ pub fn take_step(ctx: &egui::Context, page: impl FnOnce() -> usize) -> Option<St
     })
 }
 
+/// The process-wide message list retains focus while its account/chat changes.
+pub fn messages_id() -> egui::Id {
+    egui::Id::new("message-list")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -331,9 +336,4 @@ mod tests {
             "a stale index is clamped first"
         );
     }
-}
-
-/// The process-wide message list retains focus while its account/chat changes.
-pub fn messages_id() -> egui::Id {
-    egui::Id::new("message-list")
 }

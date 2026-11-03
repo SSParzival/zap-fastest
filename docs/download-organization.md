@@ -1,6 +1,9 @@
 # Organizing downloaded attachments
 
-Settings, Files lets you choose a download folder and organize future files:
+Settings, Files lets you choose a download folder and organize future files.
+New configurations default to Account and chat. An explicitly saved One folder
+preference remains in effect:
+
 
 - **One folder** preserves the existing layout.
 - **Account and chat** separates each linked account and conversation.

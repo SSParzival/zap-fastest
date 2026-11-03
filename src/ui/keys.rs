@@ -403,7 +403,11 @@ fn accessibility_shortcuts(app: &mut App, ctx: &egui::Context) {
         };
         if let Some(message) = message {
             let id = message.id.clone();
-            super::accessibility::request_item(ctx, super::list_nav::messages_id());
+            ctx.data_mut(|data| data.insert_temp(crate::theme::keyboard_focus_id(), true));
+            ctx.memory_mut(|memory| {
+                memory.move_focus(egui::FocusDirection::None);
+                memory.request_focus(super::list_nav::messages_id());
+            });
             app.actions.push(Action::OpenMessage { chat, message: id });
         }
     }

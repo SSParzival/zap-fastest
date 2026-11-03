@@ -2603,11 +2603,17 @@ fn messages(app: &mut App, ui: &mut egui::Ui, chat: &Chat, under: f32) {
         current = None;
     }
     if let Some(anchor) = app.scroll_anchor.as_deref()
-        && let Some(index) = accessible_rows
+        && let Some(message_index) = conversation
+            .messages
             .iter()
-            .position(|index| conversation.messages[*index].id == anchor)
+            .position(|message| message.id == anchor)
     {
-        current = Some(index);
+        current = accessible_rows
+            .partition_point(|index| *index <= message_index)
+            .checked_sub(1);
+    }
+    if scroll_forced {
+        current = accessible_rows.len().checked_sub(1);
     }
     let title = app.chat_title(chat);
     let list_rect = ui.available_rect_before_wrap();
@@ -2669,9 +2675,22 @@ fn messages(app: &mut App, ui: &mut egui::Ui, chat: &Chat, under: f32) {
         && (changed_chat || list_response.gained_focus())
         && let Some(message) = current_message.as_ref()
     {
-        app.scroll_anchor = Some(message.clone());
-        app.scroll_to_bottom = false;
+        let visible = ui
+            .ctx()
+            .read_response(bubble_id(&chat.id, message))
+            .is_some_and(|response| list_rect.contains_rect(response.rect));
+        if !visible {
+            app.scroll_anchor = Some(message.clone());
+            app.scroll_to_bottom = false;
+        }
     }
+    ui.ctx().data_mut(|data| {
+        if let Some(message) = current_message.as_ref() {
+            data.insert_temp(list_id.with("current-bubble"), bubble_id(&chat.id, message));
+        } else {
+            data.remove::<egui::Id>(list_id.with("current-bubble"));
+        }
+    });
     if let (Some(index), Some(id)) = (current, current_message.as_ref()) {
         ui.ctx()
             .data_mut(|data| data.insert_temp(cursor_id, (id.clone(), index)));
@@ -5105,15 +5124,20 @@ fn bubble_frame(
                 .layer_id_at(pos)
                 .is_none_or(|layer| layer == bubble.layer_id)
         });
+    let list_current = ui.memory(|memory| memory.has_focus(super::list_nav::messages_id()))
+        && ui.ctx().data(|data| {
+            data.get_temp::<egui::Id>(super::list_nav::messages_id().with("current-bubble"))
+        }) == Some(bubble.id);
     let focused_inside = ui
         .memory(|memory| memory.focused())
         .and_then(|id| ui.ctx().read_response(id))
         .is_some_and(|focused| {
             focused.id == bubble.id || inner.response.rect.contains(focused.rect.center())
-        });
+        })
+        || list_current;
     let keyboard_menu =
         focused_inside && ui.input_mut(|input| input.consume_key(Modifiers::SHIFT, Key::F10));
-    if bubble.has_focus()
+    if (bubble.has_focus() || list_current)
         && !ui.ctx().text_edit_focused()
         && !egui::Popup::is_any_open(ui.ctx())
         && view.reaction.is_none()
