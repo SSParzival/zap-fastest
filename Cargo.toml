@@ -1,6 +1,6 @@
 [package]
 name = "zap-fastest"
-version = "0.32.0"
+version = "0.33.0"
 edition = "2024"
 rust-version = "1.98"
 license = "MIT"
@@ -36,8 +36,10 @@ aes = "0.9"
 cbc = { version = "0.2", features = ["alloc", "block-padding"] }
 hkdf = "0.13"
 hmac = "0.13"
-# Reads .wastickers zip archives.
+# Reads .wastickers and WhatsApp Lottie (.was) archives.
 zip = { version = "9", default-features = false, features = ["deflate"] }
+# In-process Lottie rasterizer; no GIF encoder or native rendering dependency.
+rasterlottie = { version = "0.2.4", default-features = false, features = ["images", "text"] }
 clap = { version = "4.5", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -116,7 +118,11 @@ notify-rust = { version = "4", default-features = false, features = ["z"] }
 openh264 = "0.9"
 # Native camera capture only, encoded locally by the existing OpenH264 codec.
 nokhwa = { version = "0.10.11", default-features = false, features = ["input-native"] }
-mp4 = "0.14"
+# crmne/mp4-rust is upstream's master, which reads a sample entry whose
+# avcC follows another box (pasp first, as some encoders write it); 0.14.0,
+# the last release, refuses such a video. Back to crates.io once a release
+# has it.
+mp4 = { git = "https://github.com/crmne/mp4-rust", rev = "35560e94f5e871a2b2d88bfe964013b39af131e8" }
 # The 0.22 release ends the sound of an interleaved MP4 at the first packet of
 # another track, so a video that has a picture and a sound track plays a tenth
 # of a second of audio and the listener hears silence. This revision is the

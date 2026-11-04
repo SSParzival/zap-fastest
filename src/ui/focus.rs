@@ -10,6 +10,12 @@ pub enum Stop {
     Send,
     Attach,
     Emoji,
+    /// Staged-file review: the file strip and its controls.
+    ReviewFile(usize),
+    ReviewRemove(usize),
+    ReviewAdd,
+    ReviewEdit,
+    ReviewClose,
     RecordCancel,
     RecordSend,
     Messages,

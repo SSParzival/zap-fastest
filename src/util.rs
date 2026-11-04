@@ -577,6 +577,29 @@ pub fn search_key(text: &str) -> String {
         .collect()
 }
 
+/// Whether a contact search finds `name`. The whole `needle` may appear
+/// anywhere in it, or each of its words may start a word of `name`, in
+/// order: "will shak" finds "William Shakespeare", and "j d" finds
+/// "John Doe". Both are search keys.
+pub fn search_matches(name: &str, needle: &str) -> bool {
+    if name.contains(needle) {
+        return true;
+    }
+    let mut parts = search_words(needle).peekable();
+    if parts.peek().is_none() {
+        return false;
+    }
+    let mut words = search_words(name);
+    parts.all(|part| words.any(|word| word.starts_with(part)))
+}
+
+/// The words of a name or query. Spaces and ASCII punctuation separate them,
+/// so "~John Doe" and "John-Doe" both have "john" and "doe".
+fn search_words(text: &str) -> impl Iterator<Item = &str> {
+    text.split(|c: char| c.is_whitespace() || c.is_ascii_punctuation())
+        .filter(|word| !word.is_empty())
+}
+
 /// Duration such as "0:12".
 pub fn duration(seconds: u32) -> String {
     format!("{}:{:02}", seconds / 60, seconds % 60)
@@ -784,6 +807,160 @@ pub fn tray_template_rgba(size: usize) -> Vec<u8> {
     rgba
 }
 
+/// Whether the Windows taskbar is dark, when Windows says.
+#[cfg(windows)]
+pub fn windows_taskbar_dark() -> Option<bool> {
+    use windows_sys::Win32::Foundation::ERROR_SUCCESS;
+    use windows_sys::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueW};
+    let wide = |text: &str| text.encode_utf16().chain([0]).collect::<Vec<u16>>();
+    let key = wide(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
+    let value = wide("SystemUsesLightTheme");
+    let mut light = 0u32;
+    let mut size = std::mem::size_of::<u32>() as u32;
+    // SAFETY: both names end in NUL and `light` holds the `size` bytes asked for.
+    let status = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            key.as_ptr(),
+            value.as_ptr(),
+            RRF_RT_REG_DWORD,
+            std::ptr::null_mut(),
+            std::ptr::from_mut(&mut light).cast(),
+            &mut size,
+        )
+    };
+    (status == ERROR_SUCCESS).then_some(light == 0)
+}
+
+/// The largest count the tray icon spells out; more reads "9+".
+const TRAY_BADGE_MAX: u32 = 9;
+
+/// A tray icon: the app's, or its monochrome shape.
+type TrayIcon = fn(usize) -> Vec<u8>;
+
+/// The tray icon and its monochrome template for `count` unread chats: the
+/// base icons at 0, badges with the count from 1 to 9, and 9+ above that.
+pub fn tray_icons(count: u32) -> (TrayIcon, TrayIcon) {
+    match tray_badge_level(count) {
+        0 => (app_icon_rgba, tray_template_rgba),
+        1 => (
+            |size| badged(app_icon_rgba(size), size, 1, false),
+            |size| badged(tray_template_rgba(size), size, 1, true),
+        ),
+        2 => (
+            |size| badged(app_icon_rgba(size), size, 2, false),
+            |size| badged(tray_template_rgba(size), size, 2, true),
+        ),
+        3 => (
+            |size| badged(app_icon_rgba(size), size, 3, false),
+            |size| badged(tray_template_rgba(size), size, 3, true),
+        ),
+        4 => (
+            |size| badged(app_icon_rgba(size), size, 4, false),
+            |size| badged(tray_template_rgba(size), size, 4, true),
+        ),
+        5 => (
+            |size| badged(app_icon_rgba(size), size, 5, false),
+            |size| badged(tray_template_rgba(size), size, 5, true),
+        ),
+        6 => (
+            |size| badged(app_icon_rgba(size), size, 6, false),
+            |size| badged(tray_template_rgba(size), size, 6, true),
+        ),
+        7 => (
+            |size| badged(app_icon_rgba(size), size, 7, false),
+            |size| badged(tray_template_rgba(size), size, 7, true),
+        ),
+        8 => (
+            |size| badged(app_icon_rgba(size), size, 8, false),
+            |size| badged(tray_template_rgba(size), size, 8, true),
+        ),
+        9 => (
+            |size| badged(app_icon_rgba(size), size, 9, false),
+            |size| badged(tray_template_rgba(size), size, 9, true),
+        ),
+        _ => (
+            |size| badged(app_icon_rgba(size), size, 10, false),
+            |size| badged(tray_template_rgba(size), size, 10, true),
+        ),
+    }
+}
+
+/// The tray-icon badge a count asks for: 0 for none, 1..=9, or 10 for "9+".
+pub fn tray_badge_level(count: u32) -> u32 {
+    match count {
+        0 => 0,
+        1..=TRAY_BADGE_MAX => count,
+        _ => TRAY_BADGE_MAX + 1,
+    }
+}
+
+const BADGE_DIGITS: [[u8; 5]; 9] = [
+    [0b010, 0b110, 0b010, 0b010, 0b111],
+    [0b111, 0b001, 0b111, 0b100, 0b111],
+    [0b111, 0b001, 0b011, 0b001, 0b111],
+    [0b101, 0b101, 0b111, 0b001, 0b001],
+    [0b111, 0b100, 0b111, 0b001, 0b111],
+    [0b111, 0b100, 0b111, 0b101, 0b111],
+    [0b111, 0b001, 0b010, 0b010, 0b010],
+    [0b111, 0b101, 0b111, 0b101, 0b111],
+    [0b111, 0b101, 0b111, 0b001, 0b111],
+];
+const BADGE_PLUS: [u8; 5] = [0b000, 0b010, 0b111, 0b010, 0b000];
+
+/// Draws the unread badge on the top right of an icon: a disc with a clear
+/// ring around it and the count inside. In a `template`, which is one colour
+/// the panel may repaint, the digits are holes in the disc; otherwise they
+/// are white on red. `level` comes from [`tray_badge_level`].
+fn badged(mut rgba: Vec<u8>, size: usize, level: u32, template: bool) -> Vec<u8> {
+    const RED: [u8; 3] = [0xe5, 0x39, 0x35];
+    let radius = size as f32 * 0.3;
+    let center = (size as f32 - radius, radius);
+    let ring = size as f32 / 20.0;
+    // The glyphs, in columns, with a column between two.
+    let more = level > TRAY_BADGE_MAX;
+    let digit = BADGE_DIGITS[(level.clamp(1, TRAY_BADGE_MAX) - 1) as usize];
+    let columns = if more { 7 } else { 3 };
+    let cell = (size / 16).max(1);
+    let left = (center.0 - (columns * cell) as f32 / 2.0).round() as isize;
+    let top = (center.1 - (5 * cell) as f32 / 2.0).round() as isize;
+    let inked = |x: usize, y: usize| {
+        let (x, y) = (x as isize - left, y as isize - top);
+        if x < 0 || y < 0 {
+            return false;
+        }
+        let (column, row) = (x as usize / cell, y as usize / cell);
+        if row >= 5 || column >= columns {
+            return false;
+        }
+        match column {
+            0..=2 => digit[row] >> (2 - column) & 1 == 1,
+            3 => false,
+            _ => BADGE_PLUS[row] >> (6 - column) & 1 == 1,
+        }
+    };
+    for (index, pixel) in rgba.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+        let (x, y) = (index % size, index / size);
+        let distance =
+            ((x as f32 + 0.5 - center.0).powi(2) + (y as f32 + 0.5 - center.1).powi(2)).sqrt();
+        if distance >= radius + ring + 0.5 {
+            continue;
+        }
+        let disc = (radius - distance + 0.5).clamp(0.0, 1.0);
+        let colour = if template { [0, 0, 0] } else { RED };
+        pixel[..3].copy_from_slice(&colour);
+        pixel[3] = (disc * 255.0) as u8;
+        if inked(x, y) {
+            if template {
+                pixel[3] = 0;
+            } else {
+                pixel[..4].copy_from_slice(&[255, 255, 255, 255]);
+            }
+        }
+    }
+    rgba
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -874,6 +1051,52 @@ mod tests {
         for pattern in ["HH:mm:ss", "H:mm", "%T", "%H:%M:%S", "HH 'h' mm", "HH"] {
             assert!(!super::pattern_is_twelve_hour(pattern), "{pattern}");
         }
+    }
+
+    #[test]
+    fn a_contact_search_matches_words_in_order() {
+        let name = search_key("William Shakespeare");
+        assert!(search_matches(&name, "will shak"));
+        assert!(search_matches(&name, "w s"));
+        assert!(search_matches(&name, "shake"));
+        assert!(
+            search_matches(&name, "liam"),
+            "a plain substring still finds"
+        );
+        assert!(search_matches(&name, ""));
+        assert!(
+            !search_matches(&name, "-"),
+            "a query with no words matches nothing"
+        );
+        assert!(
+            !search_matches(&name, "shak will"),
+            "words keep their order"
+        );
+        assert!(!search_matches(&name, "will x"));
+        assert!(!search_matches(&name, "w w"), "one word cannot start two");
+        let name = search_key("Ângela Ávila");
+        assert!(search_matches(&name, "ang avi"), "accents are ignored");
+        let name = search_key("John-Doe");
+        assert!(search_matches(&name, "j d"), "a hyphen starts a new word");
+        assert!(
+            search_matches(&name, "-"),
+            "punctuation alone still matches as a plain substring"
+        );
+        assert!(
+            !search_matches(&search_key("Ada Lovelace"), "-"),
+            "but never a name without it"
+        );
+        let name = search_key("~John Doe");
+        assert!(
+            search_matches(&name, "j d"),
+            "a profile name's tilde is no word"
+        );
+        assert!(search_matches(&name, "jo"));
+        let name = search_key("O'Brien");
+        assert!(
+            search_matches(&name, "o b"),
+            "an apostrophe starts a new word"
+        );
     }
 
     #[test]
@@ -1229,6 +1452,40 @@ mod tests {
         assert_eq!(icon[3], 0);
         let middle = (16 * 32 + 16) * 4;
         assert_eq!(icon[middle + 3], 255);
+    }
+
+    #[test]
+    fn the_tray_icon_counts_unread_chats_up_to_nine_and_more() {
+        use super::{app_icon_rgba, tray_icons, tray_template_rgba};
+        let size = 32;
+        assert_eq!(tray_icons(0).0(size), app_icon_rgba(size));
+        assert_eq!(tray_icons(0).1(size), tray_template_rgba(size));
+        assert_eq!(tray_icons(10).0(size), tray_icons(250).0(size));
+        let icons: Vec<_> = (1..=10).map(|count| tray_icons(count).0(size)).collect();
+        for (index, icon) in icons.iter().enumerate() {
+            assert_ne!(*icon, app_icon_rgba(size));
+            for other in &icons[index + 1..] {
+                assert_ne!(icon, other, "each count draws differently");
+            }
+        }
+        // The digits are white on the colour icon and holes in the template,
+        // so they survive being painted one colour.
+        let white = |rgba: &[u8]| rgba.as_chunks::<4>().0.contains(&[255, 255, 255, 255]);
+        assert!(white(&tray_icons(5).0(size)));
+        let template = tray_icons(5).1(size);
+        let pixel = |x: usize, y: usize| template[(y * size + x) * 4 + 3];
+        let (radius, centre) = (size as f32 * 0.3, size as f32 * 0.7);
+        let (x, y) = (centre as usize, radius as usize);
+        assert_ne!(tray_template_rgba(size), template);
+        assert!((0..size).any(|column| pixel(column, y) == 255));
+        assert!(
+            (x - 4..x + 4).any(|column| pixel(column, y) == 0),
+            "a hole inside the disc"
+        );
+        for size in [16, 22, 36, 64] {
+            assert_eq!(tray_icons(12).0(size).len(), size * size * 4);
+            assert_eq!(tray_icons(12).1(size).len(), size * size * 4);
+        }
     }
 
     /// The menu-bar template is the disc with the bubble cut out: solid in

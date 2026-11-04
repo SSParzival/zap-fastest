@@ -12,7 +12,7 @@ use egui::{
 };
 
 use crate::animation;
-use crate::app::{App, Conversation, JumpHighlight, KeyScroll, RowHeight};
+use crate::app::{App, Conversation, JumpHighlight, KeyScroll, LinkPreviewState, RowHeight};
 use crate::geo::Spot;
 use crate::markup;
 use crate::model::{
@@ -44,10 +44,16 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         if super::narrow(ui.ctx()) {
             super::banner(app, ui);
         }
+        super::voice_bar::show(app, ui);
         empty(app, ui);
         return;
     };
-    wallpaper::paint(ui, &app.wallpaper());
+    if reviewing_attachments(app, &chat) {
+        ui.painter()
+            .rect_filled(ui.available_rect_before_wrap(), 0.0, app.palette.surface);
+    } else {
+        wallpaper::paint(ui, &app.wallpaper());
+    }
     // On a vibrant window the messages scroll on under the header, as in
     // Messages: the header and any banner go on a layer above them.
     if app.palette.vibrant() {
@@ -62,6 +68,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                 if super::narrow(ui.ctx()) {
                     super::banner(app, ui);
                 }
+                super::voice_bar::show(app, ui);
                 pin_banner(app, ui, &chat);
                 let bar = ui.min_rect();
                 // Strongest at the top, both ease off from within the bar to
@@ -74,7 +81,12 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                 bar
             })
             .inner;
-        composer(app, ui, &chat);
+        let review = attachment_review(app, ui, &chat);
+        composer(app, ui, &chat, review);
+        if review.is_some() {
+            super::attachment_preview::show(app, ui);
+            return;
+        }
         let list = ui.available_rect_before_wrap().with_min_y(bar.top());
         ui.scope_builder(egui::UiBuilder::new().max_rect(list), |ui| {
             messages(app, ui, &chat, bar.height());
@@ -87,9 +99,15 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     if super::narrow(ui.ctx()) {
         super::banner(app, ui);
     }
+    super::voice_bar::show(app, ui);
     pin_banner(app, ui, &chat);
-    composer(app, ui, &chat);
-    messages(app, ui, &chat, 0.0);
+    let review = attachment_review(app, ui, &chat);
+    composer(app, ui, &chat, review);
+    if review.is_some() {
+        super::attachment_preview::show(app, ui);
+    } else {
+        messages(app, ui, &chat, 0.0);
+    }
     // Over the messages, which scroll under the header.
     widgets::paint_shadow_below(
         ui,
@@ -371,6 +389,23 @@ fn glass(palette: &Palette, rect: Rect, radius: f32) -> egui::Shape {
     ])
 }
 
+/// How wide `buttons` of the chat header are together.
+fn controls_width(buttons: f32, vibrant: bool) -> f32 {
+    if vibrant {
+        buttons * 36.0 + (buttons - 0.5) * BUTTON_GAP + (BUTTON_GLASS - 30.0)
+    } else {
+        buttons * 36.0
+    }
+}
+
+/// Whether a vibrant header `width` wide holds the avatar, a readable name
+/// and `buttons` and `extra` more on their right.
+fn header_fits(width: f32, buttons: f32, extra: f32) -> bool {
+    const AVATAR: f32 = 40.0 + 14.0;
+    const NAME: f32 = 140.0;
+    width >= AVATAR + NAME + controls_width(buttons, true) + extra
+}
+
 fn header(app: &mut App, ui: &mut egui::Ui, chat: &Chat) -> Rect {
     let palette = app.palette;
     let title = app.chat_title(chat);
@@ -407,12 +442,15 @@ fn header(app: &mut App, ui: &mut egui::Ui, chat: &Chat) -> Rect {
                 // More and Search, and Back in a narrow window, each on its
                 // own glass with room around it on a vibrant window.
                 let calls = chat.kind == crate::model::ChatKind::Direct && !chat.locked;
-                let buttons = if narrow { 3.0 } else { 2.0 } + if calls { 2.0 } else { 0.0 };
-                let right_controls = if palette.vibrant() {
-                    buttons * 36.0 + (buttons - 0.5) * BUTTON_GAP + (BUTTON_GLASS - 30.0)
+                let call_buttons = if calls { 2.0 } else { 0.0 };
+                let buttons = if narrow { 3.0 } else { 2.0 } + call_buttons;
+                let folded = palette.vibrant() && !header_fits(ui.available_width(), buttons, 48.0);
+                let (buttons, _call_buttons) = if folded {
+                    (buttons - call_buttons - 1.0, 0.0)
                 } else {
-                    buttons * 36.0
-                } + 48.0; // The call-history label has a fixed space in this row.
+                    (buttons, call_buttons)
+                };
+                let right_controls = controls_width(buttons, palette.vibrant()) + 48.0;
                 // On a vibrant window the name and the buttons sit on glass
                 // pills, drawn beneath them once they are measured.
                 let name_pill = ui.painter().add(egui::Shape::Noop);
@@ -621,6 +659,7 @@ fn header(app: &mut App, ui: &mut egui::Ui, chat: &Chat) -> Rect {
                             leave_label.as_ref(),
                             "Copy number",
                             "Close chat",
+                            &super::blocking::label(app, &chat.id),
                         ],
                         true,
                     );
@@ -633,6 +672,39 @@ fn header(app: &mut App, ui: &mut egui::Ui, chat: &Chat) -> Rect {
                         .width(width)
                         .frame(widgets::menu_frame(&palette))
                         .show(|ui| {
+                            if folded {
+                                if widgets::menu_item(
+                                    ui,
+                                    &palette,
+                                    Some(Icon::Search),
+                                    &crate::i18n::gettext(app.locale, "Search messages"),
+                                ) {
+                                    app.actions.push(if app.chat_search_open {
+                                        Action::CloseChatSearch
+                                    } else {
+                                        Action::OpenChatSearch
+                                    });
+                                }
+                                if calls {
+                                    if widgets::menu_item(
+                                        ui,
+                                        &palette,
+                                        Some(Icon::Phone),
+                                        &crate::i18n::gettext(app.locale, "Voice call"),
+                                    ) {
+                                        app.actions.push(Action::StartCall(chat.id.clone()));
+                                    }
+                                    if widgets::menu_item(
+                                        ui,
+                                        &palette,
+                                        Some(Icon::Video),
+                                        &crate::i18n::gettext(app.locale, "Video call"),
+                                    ) {
+                                        app.actions.push(Action::StartVideoCall(chat.id.clone()));
+                                    }
+                                }
+                                widgets::menu_separator(ui, &palette);
+                            }
                             if widgets::menu_item(ui, &palette, Some(Icon::Info), "Info") {
                                 app.actions
                                     .push(Action::ShowDialog(Dialog::ChatInfo(chat.id.clone())));
@@ -681,6 +753,7 @@ fn header(app: &mut App, ui: &mut egui::Ui, chat: &Chat) -> Rect {
                                         chat.id.clone(),
                                     )));
                             }
+                            super::blocking::menu(app, ui, &chat.id);
                             widgets::menu_separator(ui, &palette);
                             if chat.can_leave(&app.our_ids())
                                 && widgets::menu_item(
@@ -704,69 +777,72 @@ fn header(app: &mut App, ui: &mut egui::Ui, chat: &Chat) -> Rect {
                                 app.actions.push(Action::CloseChat);
                             }
                         });
-                    if chat.kind == crate::model::ChatKind::Direct
-                        && !chat.locked
-                        && theme::icon_button(
+                    if !folded {
+                        if chat.kind == crate::model::ChatKind::Direct
+                            && !chat.locked
+                            && !app.blocklist.contains(&chat.id)
+                            && theme::icon_button(
+                                ui,
+                                Icon::Phone,
+                                18.0,
+                                palette.secondary,
+                                palette.text,
+                                "Start voice call",
+                            )
+                            .clicked()
+                        {
+                            app.actions.push(Action::StartCall(chat.id.clone()));
+                        }
+                        if calls
+                            && theme::icon_button(
+                                ui,
+                                Icon::Video,
+                                18.0,
+                                palette.secondary,
+                                palette.text,
+                                "Start video call",
+                            )
+                            .clicked()
+                        {
+                            app.actions.push(Action::StartVideoCall(chat.id.clone()));
+                        }
+                        if ui.small_button("Calls").clicked() {
+                            app.actions.push(Action::ToggleCallLog);
+                        }
+                        let searching = app.chat_search_open;
+                        let tip = format!(
+                            "{} ({})",
+                            crate::i18n::gettext(app.locale, "Search messages"),
+                            super::keys::label("Ctrl+F")
+                        );
+                        if palette.vibrant() {
+                            ui.add_space(BUTTON_GAP);
+                        }
+                        let search_glass = ui.painter().add(egui::Shape::Noop);
+                        let search = theme::icon_button(
                             ui,
-                            Icon::Phone,
+                            Icon::Search,
                             18.0,
-                            palette.secondary,
+                            if searching {
+                                palette.accent
+                            } else {
+                                palette.secondary
+                            },
                             palette.text,
-                            "Start voice call",
+                            &tip,
                         )
-                        .clicked()
-                    {
-                        app.actions.push(Action::StartCall(chat.id.clone()));
-                    }
-                    if calls
-                        && theme::icon_button(
-                            ui,
-                            Icon::Video,
-                            18.0,
-                            palette.secondary,
-                            palette.text,
-                            "Start video call",
-                        )
-                        .clicked()
-                    {
-                        app.actions.push(Action::StartVideoCall(chat.id.clone()));
-                    }
-                    if ui.small_button("Calls").clicked() {
-                        app.actions.push(Action::ToggleCallLog);
-                    }
-                    let searching = app.chat_search_open;
-                    let tip = format!(
-                        "{} ({})",
-                        crate::i18n::gettext(app.locale, "Search messages"),
-                        super::keys::label("Ctrl+F")
-                    );
-                    if palette.vibrant() {
-                        ui.add_space(BUTTON_GAP);
-                    }
-                    let search_glass = ui.painter().add(egui::Shape::Noop);
-                    let search = theme::icon_button(
-                        ui,
-                        Icon::Search,
-                        18.0,
-                        if searching {
-                            palette.accent
-                        } else {
-                            palette.secondary
-                        },
-                        palette.text,
-                        &tip,
-                    )
-                    .tab_stop(Stop::ChatSearch);
-                    if palette.vibrant() {
-                        ui.painter()
-                            .set(search_glass, glass_button(&palette, search.rect));
-                    }
-                    if search.clicked() {
-                        app.actions.push(if searching {
-                            Action::CloseChatSearch
-                        } else {
-                            Action::OpenChatSearch
-                        });
+                        .tab_stop(Stop::ChatSearch);
+                        if palette.vibrant() {
+                            ui.painter()
+                                .set(search_glass, glass_button(&palette, search.rect));
+                        }
+                        if search.clicked() {
+                            app.actions.push(if searching {
+                                Action::CloseChatSearch
+                            } else {
+                                Action::OpenChatSearch
+                            });
+                        }
                     }
                     // A narrow window shows the list or the chat, not both;
                     // this is the way back to the list.
@@ -1262,8 +1338,21 @@ fn mention_picker(app: &mut App, ui: &mut egui::Ui, chat: &Chat, field: egui::Id
     }
 }
 
+/// Review only while the composer can send its staged files.
+fn reviewing_attachments(app: &App, chat: &Chat) -> bool {
+    !app.pending.is_empty()
+        && chat.can_send()
+        && app.selection.is_none()
+        && app.editing.is_none()
+        && app.recording.is_none()
+}
+
+fn attachment_review(app: &mut App, ui: &mut egui::Ui, chat: &Chat) -> Option<bool> {
+    reviewing_attachments(app, chat).then(|| super::attachment_preview::bar(app, ui))
+}
+
 /// Draws the composer and queues sends with the originating account and selected mentions.
-fn composer(app: &mut App, ui: &mut egui::Ui, chat: &Chat) {
+fn composer(app: &mut App, ui: &mut egui::Ui, chat: &Chat, review_send: Option<bool>) {
     if app.account().settings.archive_only {
         ui.label("Offline archive: messages cannot be sent from this account.");
         return;
@@ -1299,6 +1388,16 @@ fn composer(app: &mut App, ui: &mut egui::Ui, chat: &Chat) {
                 && selected_chat == chat.id
             {
                 selection_bar(app, ui, &chat.id, &selected);
+                return;
+            }
+            if app.blocklist.contains(&chat.id) {
+                if app.recording.is_some() {
+                    widgets::raised(ui, &palette, composer_pill(&palette), |ui| recording_strip(app, ui));
+                }
+                ui.vertical_centered(|ui| {
+                    theme::text(ui, crate::i18n::gettext(app.locale, "You blocked this contact"), theme::regular(13.5), palette.secondary);
+                    super::blocking::button(app, ui, &chat.id, super::focus::Stop::Composer);
+                });
                 return;
             }
             if !chat.can_send() {
@@ -1409,6 +1508,10 @@ fn composer(app: &mut App, ui: &mut egui::Ui, chat: &Chat) {
                     None => app.reply_to = None,
                 }
             }
+            // Nearest the pill, under a reply. A caption goes without one.
+            if app.pending.is_empty() && app.recording.is_none() {
+                link_preview_strip(app, ui);
+            }
             app.prepare_composer_undo(ui.ctx());
             let id = egui::Id::new("composer-text");
             let has_focus = ui.memory(|memory| memory.has_focus(id));
@@ -1476,7 +1579,7 @@ fn composer(app: &mut App, ui: &mut egui::Ui, chat: &Chat) {
             if typed_text {
                 app.emoticon_undo = None;
             }
-            if !app.pending.is_empty() {
+            if !app.pending.is_empty() && review_send.is_none() {
                 pending_strip(app, ui);
             }
             if app.recording.is_some() {
@@ -1513,7 +1616,7 @@ fn composer(app: &mut App, ui: &mut egui::Ui, chat: &Chat) {
                     });
                     sent
                 });
-            let mut send_click = false;
+            let mut send_click = review_send.unwrap_or(false);
             let line_height = ui
                 .painter()
                 .layout_no_wrap("x".to_owned(), theme::regular(BODY_SIZE), palette.text)
@@ -1527,7 +1630,7 @@ fn composer(app: &mut App, ui: &mut egui::Ui, chat: &Chat) {
             let line = (line_height + COMPOSER_PADDING)
                 .round()
                 .max(COMPOSER_CONTROL);
-            let button_width = line;
+            let button_width = if review_send.is_some() { 0.0 } else { line };
             let view_once = app.editing.is_none()
                 && (app.pending_supports_view_once() || app.pending_view_once);
             let view_once_width = if view_once { COMPOSER_CONTROL + ui.spacing().item_spacing.x } else { 0.0 };
@@ -1661,7 +1764,10 @@ fn composer(app: &mut App, ui: &mut egui::Ui, chat: &Chat) {
                                 };
                                 let wrap = ui.available_width();
                                 ui.ctx().data_mut(|data| data.insert_temp(wrap_id, wrap));
-                                let output = egui::TextEdit::multiline(&mut app.composer)
+                                let selection_before = egui::TextEdit::load_state(ui.ctx(), id)
+                                    .and_then(|state| state.cursor.char_range())
+                                    .filter(|range| !range.is_empty());
+                                let mut output = egui::TextEdit::multiline(&mut app.composer)
                                     .id(id)
                                     .frame(Frame::NONE)
                                     .margin(Margin::ZERO)
@@ -1692,6 +1798,18 @@ fn composer(app: &mut App, ui: &mut egui::Ui, chat: &Chat) {
                                     })
                                     .layouter(&mut layouter)
                                     .show(ui);
+                                // egui moves the caret on any pointer press, including a
+                                // secondary click. A modal menu also disables the field.
+                                // Keep the selection the menu acts on until it closes.
+                                if (egui::Popup::is_id_open(ui.ctx(), id.with("popup"))
+                                    || (ui.input(|input| input.pointer.button_pressed(egui::PointerButton::Secondary))
+                                        && output.response.response.contains_pointer()))
+                                    && let Some(range) = selection_before
+                                {
+                                    output.state.cursor.set_char_range(Some(range));
+                                    output.cursor_range = Some(range);
+                                    egui::TextEdit::store_state(ui.ctx(), id, output.state.clone());
+                                }
                                 #[cfg(target_os = "linux")]
                                 let output = {
                                     let mut output = output;
@@ -1756,6 +1874,61 @@ fn composer(app: &mut App, ui: &mut egui::Ui, chat: &Chat) {
                                         node.set_active_descendant(suggestion.accesskit_id());
                                     }
                                 });
+                                let keyboard_menu = response.has_focus()
+                                    && ui.input_mut(|input| super::keys::take_exact(input, Modifiers::SHIFT, Key::F10));
+                                let menu_id = egui::Popup::default_response_id(&response);
+                                // The first popup pass only measures its items.
+                                let focus_pending_id = menu_id.with("focus-pending");
+                                if keyboard_menu {
+                                    egui::Popup::open_id(ui.ctx(), menu_id);
+                                    ui.ctx().data_mut(|data| data.insert_temp(focus_pending_id, true));
+                                }
+                                let mut menu = egui::Popup::context_menu(&response);
+                                // Keyboard opening has no saved pointer position.
+                                if !response.secondary_clicked() && egui::Popup::position_of_id(ui.ctx(), menu_id).is_none() {
+                                    menu = menu.at_position(response.rect.left_bottom());
+                                }
+                                let mut first_item = None;
+                                let shown_menu = menu.show(|ui| {
+                                    use crate::model::ComposerFormat;
+                                    let range = output.state.cursor.char_range().map(|range| range.as_sorted_char_range());
+                                    let selected = range.as_ref().is_some_and(|range| !range.is_empty());
+                                    ui.add_enabled_ui(selected, |ui| {
+                                        for (format, label) in [
+                                            (ComposerFormat::Bold, crate::i18n::gettext(app.locale, "Bold")),
+                                            (ComposerFormat::Italic, crate::i18n::gettext(app.locale, "Italic")),
+                                            (ComposerFormat::Strikethrough, crate::i18n::gettext(app.locale, "Strikethrough")),
+                                            (ComposerFormat::Monospace, crate::i18n::gettext(app.locale, "Monospace")),
+                                        ] {
+                                            let button = ui.button(label);
+                                            if format == ComposerFormat::Bold && ui.is_visible() {
+                                                first_item = Some(button.id);
+                                            }
+                                            if button.clicked() {
+                                                if let Some(range) = &range {
+                                                    app.actions.push(Action::FormatComposer { format, start: range.start.0, end: range.end.0 });
+                                                }
+                                                ui.close();
+                                            }
+                                        }
+                                    });
+                                });
+                                let focus_pending = ui.ctx().data(|data| data.get_temp::<bool>(focus_pending_id));
+                                if let Some(menu) = shown_menu {
+                                    if focus_pending.is_some() {
+                                        ui.memory_mut(|memory| memory.set_modal_layer(menu.response.layer_id));
+                                    }
+                                    if focus_pending == Some(true) && let Some(first) = first_item {
+                                        ui.memory_mut(|memory| memory.request_focus(first));
+                                        ui.ctx().data_mut(|data| data.insert_temp(focus_pending_id, false));
+                                    }
+                                }
+                                if !egui::Popup::is_id_open(ui.ctx(), menu_id) && focus_pending.is_some() {
+                                    ui.ctx().data_mut(|data| data.remove::<bool>(focus_pending_id));
+                                    if !ui.input(|input| input.pointer.any_pressed() || input.pointer.any_click()) {
+                                        response.request_focus();
+                                    }
+                                }
                                 if response.changed() {
                                     app.actions.push(Action::Composing {
                                         chat: chat.id.clone(),
@@ -1846,43 +2019,45 @@ fn composer(app: &mut App, ui: &mut egui::Ui, chat: &Chat) {
                 } else {
                     (palette.surface, palette.surface_hover, palette.dim)
                 };
-                last_line(ui, line, |ui| if !ready && app.editing.is_none() {
-                    // An empty composer changes the send button to record.
-                    if theme::circle_button(
-                        ui,
-                        Icon::Mic,
-                        button_width,
-                        fill,
-                        hover,
-                        palette.secondary,
-                        &crate::i18n::gettext(app.locale, "Record a voice message"),
-                    )
-                    .tab_stop(Stop::Send)
-                    .clicked()
-                    {
-                        app.actions.push(Action::StartRecording);
-                    }
-                } else {
-                    let icon_kind = if app.editing.is_some() {
-                        Icon::Check
-                    } else {
-                        Icon::Send
-                    };
-                    if theme::circle_button(
-                        ui,
-                        icon_kind,
-                        button_width,
-                        fill,
-                        hover,
-                        icon,
-                        &crate::i18n::gettext(app.locale, "Send"),
-                    )
+                if review_send.is_none() {
+                    last_line(ui, line, |ui| if !ready && app.editing.is_none() {
+                        // An empty composer changes the send button to record.
+                        if theme::circle_button(
+                            ui,
+                            Icon::Mic,
+                            button_width,
+                            fill,
+                            hover,
+                            palette.secondary,
+                            &crate::i18n::gettext(app.locale, "Record a voice message"),
+                        )
                         .tab_stop(Stop::Send)
                         .clicked()
-                    {
-                        send_click = true;
-                    }
-                });
+                        {
+                            app.actions.push(Action::StartRecording);
+                        }
+                    } else {
+                        let icon_kind = if app.editing.is_some() {
+                            Icon::Check
+                        } else {
+                            Icon::Send
+                        };
+                        if theme::circle_button(
+                            ui,
+                            icon_kind,
+                            button_width,
+                            fill,
+                            hover,
+                            icon,
+                            &crate::i18n::gettext(app.locale, "Send"),
+                        )
+                            .tab_stop(Stop::Send)
+                            .clicked()
+                        {
+                            send_click = true;
+                        }
+                    });
+                }
             },
                     );
                 });
@@ -1914,7 +2089,7 @@ fn composer(app: &mut App, ui: &mut egui::Ui, chat: &Chat) {
                 app.actions.push(Action::SendRecording);
                 app.focus_composer = true;
             }
-            if app.settings.show_shortcut_hints {
+            if app.settings.show_shortcut_hints && review_send.is_none() {
                 let hint_text = if enter_sends {
                     crate::i18n::gettext(app.locale, "Enter sends · Shift+Enter for a new line · *bold* _italic_ ~strike~ · Ctrl+V pastes a picture")
                 } else {
@@ -2278,6 +2453,88 @@ pub(crate) fn suggestion_list_id() -> egui::Id {
 /// Where the reply strip was drawn, for layout tests.
 pub(crate) fn reply_strip_id() -> egui::Id {
     egui::Id::new("reply-strip")
+}
+
+/// Where the link preview strip was drawn, for layout tests.
+pub(crate) fn link_preview_strip_id() -> egui::Id {
+    egui::Id::new("link-preview-strip")
+}
+
+/// The link preview that goes with the message being written: "Loading
+/// preview…" while it is fetched, then the card with an X that sends the
+/// message without it. Nothing once dismissed.
+fn link_preview_strip(app: &mut App, ui: &mut egui::Ui) {
+    let palette = app.palette;
+    let Some(shown) = app.shown_preview() else {
+        return;
+    };
+    let mut dismiss = false;
+    let strip = match &shown.state {
+        LinkPreviewState::Dismissed => return,
+        LinkPreviewState::Loading => {
+            let loading = crate::i18n::gettext(app.locale, "Loading preview…");
+            widgets::raised(ui, &palette, strip_frame(&palette), |ui| {
+                ui.set_width(ui.available_width().max(0.0));
+                ui.horizontal(|ui| {
+                    let (bar, _) = ui.allocate_exact_size(vec2(3.0, 18.0), Sense::hover());
+                    ui.painter().rect_filled(bar, 2.0, palette.accent);
+                    theme::text(ui, loading, theme::regular(12.5), palette.secondary);
+                });
+            })
+        }
+        LinkPreviewState::Ready(composed) => {
+            let remove = crate::i18n::gettext(app.locale, "Remove link preview");
+            // The card has no message: its picture is named by its chat and
+            // link instead, the same each frame.
+            let image = composer_thumbnail_id(&composed.preview.url);
+            let thumbnail = composed
+                .thumbnail
+                .as_deref()
+                .map(|bytes| (shown.chat.as_str(), image.as_str(), bytes));
+            widgets::raised(ui, &palette, strip_frame(&palette), |ui| {
+                ui.set_width(ui.available_width().max(0.0));
+                ui.horizontal(|ui| {
+                    let (bar, _) = ui.allocate_exact_size(vec2(3.0, 0.0), Sense::hover());
+                    let width = (ui.available_width() - 40.0).max(0.0);
+                    let card = preview_layout(ui, &palette, &composed.preview, thumbnail, width);
+                    ui.painter().rect_filled(
+                        Rect::from_x_y_ranges(bar.x_range(), card.y_range()),
+                        2.0,
+                        palette.accent,
+                    );
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        let button = theme::icon_button(
+                            ui,
+                            Icon::X,
+                            16.0,
+                            palette.secondary,
+                            palette.text,
+                            remove.as_ref(),
+                        );
+                        #[cfg(test)]
+                        ui.ctx().data_mut(|data| {
+                            data.insert_temp(egui::Id::new("link-preview-dismiss"), button.rect)
+                        });
+                        dismiss = button.clicked();
+                    });
+                });
+            })
+        }
+    };
+    ui.ctx()
+        .data_mut(|data| data.insert_temp(link_preview_strip_id(), strip.response.rect));
+    if dismiss {
+        app.actions.push(Action::DismissLinkPreview);
+    }
+    strip_gap(ui);
+}
+
+/// The image id of the composer card's thumbnail for `url`.
+fn composer_thumbnail_id(url: &str) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    url.hash(&mut hasher);
+    format!("composer-preview-{}", hasher.finish())
 }
 
 /// App data needed while drawing a checked-out conversation.
@@ -4989,10 +5246,32 @@ fn bubble_frame(
                 .map(|_| CARD_WIDTH.min(cap))
                 .or_else(|| settled_width(ui, view, message, cap));
             let slot = if let Some(messages) = album {
+                let mut quoted_targets = std::collections::HashMap::new();
+                let mut quotes: Vec<(&Message, &crate::model::Quoted)> = Vec::new();
                 for member in messages {
                     if let Some(quoted) = &member.quoted {
-                        quote_block(ui, view, member, quoted, settled.unwrap_or(cap), actions);
+                        // WhatsApp can repeat the same reply on every album
+                        // item. Show each target once, keeping distinct replies.
+                        let target = (
+                            quoted.chat.as_deref().unwrap_or(&view.chat.id),
+                            quoted.id.as_str(),
+                            quoted.sender.as_str(),
+                        );
+                        let index = *quoted_targets.entry(target).or_insert_with(|| {
+                            quotes.push((member, quoted));
+                            quotes.len() - 1
+                        });
+                        // Keep targets in their first-seen order, but let a
+                        // later copy supply text missing from the first one.
+                        if quotes[index].1.summary.trim().is_empty()
+                            && !quoted.summary.trim().is_empty()
+                        {
+                            quotes[index] = (member, quoted);
+                        }
                     }
+                }
+                for (member, quoted) in quotes {
+                    quote_block(ui, view, member, quoted, settled.unwrap_or(cap), actions);
                 }
                 album_content(ui, view, messages, settled.unwrap_or(cap), actions);
                 None
@@ -6918,6 +7197,7 @@ fn context_menu_contents(
     }
     if let Content::Sticker { media, .. } = &message.content
         && let Some(path) = &media.path
+        && path.extension().is_none_or(|extension| extension != "was")
         && widgets::menu_item(
             ui,
             &palette,
@@ -8841,16 +9121,10 @@ fn preview_card(
     actions: &mut Vec<Action>,
 ) {
     let palette = view.palette;
-    let thumbnail = message.thumbnail.as_deref();
-    let domain = preview
-        .url
-        .split("://")
-        .nth(1)
-        .unwrap_or(&preview.url)
-        .split('/')
-        .next()
-        .unwrap_or_default()
-        .to_owned();
+    let thumbnail = message
+        .thumbnail
+        .as_deref()
+        .map(|bytes| (message.chat.as_str(), message.id.as_str(), bytes));
     let response = Frame::new()
         .fill(palette.window.gamma_multiply(0.35))
         .corner_radius(CornerRadius::same(6))
@@ -8858,47 +9132,7 @@ fn preview_card(
         .show(ui, |ui| {
             // Include margins in the settled card width.
             let card_width = (width - 16.0).max(0.0);
-            ui.set_width(card_width);
-            // Limit text to the space beside the thumbnail and keep it
-            // left-aligned in own bubbles.
-            let column = (card_width - if thumbnail.is_some() { 72.0 } else { 0.0 }).max(0.0);
-            ui.allocate_ui_with_layout(vec2(card_width, 0.0), Layout::top_down(Align::Min), |ui| {
-                ui.set_width(card_width);
-                ui.horizontal(|ui| {
-                    if let Some(bytes) = thumbnail {
-                        let (rect, _) = ui.allocate_exact_size(Vec2::splat(64.0), Sense::hover());
-                        // Off-screen cards are laid out too; only a visible
-                        // one keeps its thumbnail resident.
-                        if ui.is_rect_visible(rect) {
-                            let uri = thumbnail_uri(ui.ctx(), &message.chat, &message.id, bytes);
-                            egui::Image::new(uri)
-                                .fit_to_exact_size(rect.size())
-                                .corner_radius(4.0)
-                                .paint_at(ui, rect);
-                        }
-                    }
-                    ui.vertical(|ui| {
-                        ui.spacing_mut().item_spacing.y = 2.0;
-                        ui.set_width(column);
-                        if let Some(title) = &preview.title {
-                            widgets::rich_text(ui, title, theme::semibold(13.5), palette.text);
-                        }
-                        if let Some(description) = &preview.description {
-                            let line = widgets::line(
-                                ui,
-                                description,
-                                theme::regular(12.5),
-                                palette.secondary,
-                                ui.available_width(),
-                                2,
-                            );
-                            let (rect, _) = ui.allocate_exact_size(line.size(), Sense::hover());
-                            line.paint(ui, rect.min, palette.secondary);
-                        }
-                        theme::text(ui, &domain, theme::regular(12.0), palette.dim);
-                    });
-                });
-            });
+            preview_layout(ui, &palette, preview, thumbnail, card_width);
         })
         .response;
     ui.ctx().data_mut(|data| {
@@ -8917,6 +9151,70 @@ fn preview_card(
     if response.clicked() {
         actions.push(Action::OpenUrl(preview.url.clone()));
     }
+}
+
+/// The inside of a link preview card, a bubble's or the composer's: a
+/// 64-point thumbnail (from `thumbnail`'s chat, image id and JPEG), then the
+/// title, up to two lines of description and the domain, `card_width` wide.
+/// Returns where it was laid out.
+fn preview_layout(
+    ui: &mut egui::Ui,
+    palette: &Palette,
+    preview: &LinkPreview,
+    thumbnail: Option<(&str, &str, &[u8])>,
+    card_width: f32,
+) -> Rect {
+    let domain = preview
+        .url
+        .split("://")
+        .nth(1)
+        .unwrap_or(&preview.url)
+        .split('/')
+        .next()
+        .unwrap_or_default()
+        .to_owned();
+    // Limit text to the space beside the thumbnail and keep it
+    // left-aligned in own bubbles.
+    let column = (card_width - if thumbnail.is_some() { 72.0 } else { 0.0 }).max(0.0);
+    ui.allocate_ui_with_layout(vec2(card_width, 0.0), Layout::top_down(Align::Min), |ui| {
+        ui.set_width(card_width);
+        ui.horizontal(|ui| {
+            if let Some((chat, id, bytes)) = thumbnail {
+                let (rect, _) = ui.allocate_exact_size(Vec2::splat(64.0), Sense::hover());
+                // Off-screen cards are laid out too; only a visible
+                // one keeps its thumbnail resident.
+                if ui.is_rect_visible(rect) {
+                    let uri = thumbnail_uri(ui.ctx(), chat, id, bytes);
+                    egui::Image::new(uri)
+                        .fit_to_exact_size(rect.size())
+                        .corner_radius(4.0)
+                        .paint_at(ui, rect);
+                }
+            }
+            ui.vertical(|ui| {
+                ui.spacing_mut().item_spacing.y = 2.0;
+                ui.set_width(column);
+                if let Some(title) = &preview.title {
+                    widgets::rich_text(ui, title, theme::semibold(13.5), palette.text);
+                }
+                if let Some(description) = &preview.description {
+                    let line = widgets::line(
+                        ui,
+                        description,
+                        theme::regular(12.5),
+                        palette.secondary,
+                        ui.available_width(),
+                        2,
+                    );
+                    let (rect, _) = ui.allocate_exact_size(line.size(), Sense::hover());
+                    line.paint(ui, rect.min, palette.secondary);
+                }
+                theme::text(ui, &domain, theme::regular(12.0), palette.dim);
+            });
+        });
+    })
+    .response
+    .rect
 }
 
 /// A location as a card: the map preview WhatsApp sent across the top, then
@@ -11068,6 +11366,17 @@ fn chat_of(chat: &ChatId) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Glass buttons leave the name no room in a narrow header (#626).
+    #[test]
+    fn a_vibrant_header_folds_its_buttons_rather_than_cover_the_name() {
+        assert!(super::controls_width(4.0, true) > super::controls_width(4.0, false));
+        assert!(super::header_fits(500.0, 4.0, 0.0));
+        assert!(!super::header_fits(360.0, 4.0, 0.0));
+        // Folded, More alone leaves the name room.
+        assert!(super::header_fits(280.0, 1.0, 0.0));
+        assert!(!super::header_fits(460.0, 4.0, 120.0));
+    }
 
     #[test]
     fn focused_message_keys_keep_confirmation_and_local_send_boundaries() {

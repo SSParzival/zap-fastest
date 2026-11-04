@@ -38,6 +38,8 @@ pub struct Account {
     pub me_lid: Option<String>,
     pub me_name: Option<String>,
     pub me_about: Option<String>,
+    /// The phone's "Disable link previews", for this account.
+    pub link_previews_disabled: bool,
     pub chats: Vec<Chat>,
     /// The archive's initial chat list has arrived, including offline.
     pub(crate) chats_loaded: bool,
@@ -61,6 +63,9 @@ pub struct Account {
     /// dropped: it would otherwise put its numbers over the newer read and
     /// date them now.
     pub(crate) storage_stats_token: u64,
+    pub chat_export: Option<(u64, crate::archive::chat_export::Counts)>,
+    pub(crate) chat_export_sequence: u64,
+    pub(crate) chat_export_allowed_sent: Option<bool>,
     pub(crate) refused_edits: Vec<(ChatId, String, crate::backend::EditDraft)>,
     pub(crate) attachment_drafts: HashMap<ChatId, AttachmentDraft>,
     pub(crate) private_reply_drafts: HashMap<ChatId, crate::model::ReplyTarget>,
@@ -136,6 +141,7 @@ pub struct Account {
     pub label_filter: Option<String>,
     pub labels: Vec<Label>,
     pub account_privacy: crate::privacy::Snapshot,
+    pub blocklist: crate::blocking::Blocklist,
     pub gallery: crate::model::GalleryState,
     pub uploads: HashMap<u64, (ChatId, u64, u64)>,
     pub interactive_sending: HashSet<(ChatId, String)>,
@@ -194,6 +200,7 @@ impl Account {
             me_lid: None,
             me_name: None,
             me_about: None,
+            link_previews_disabled: false,
             chats: Vec::new(),
             chats_loaded: false,
             contacts: HashMap::new(),
@@ -207,6 +214,9 @@ impl Account {
             storage_stats_asked: false,
             storage_stats_token: 0,
             storage_stats_counted: false,
+            chat_export: None,
+            chat_export_sequence: 0,
+            chat_export_allowed_sent: None,
             refused_edits: Vec::new(),
             private_reply_drafts: HashMap::new(),
             private_reply_generations: HashMap::new(),
@@ -268,6 +278,7 @@ impl Account {
             label_filter,
             labels: Vec::new(),
             account_privacy: crate::privacy::Snapshot::default(),
+            blocklist: Default::default(),
             gallery: Default::default(),
             uploads: HashMap::new(),
             interactive_sending: HashSet::new(),

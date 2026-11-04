@@ -14,7 +14,10 @@ use crate::model::{
 mod archive_sync;
 mod automation;
 pub mod backup;
+mod broadcast_lists;
+pub use broadcast_lists::Adopted;
 mod call_log;
+pub mod chat_export;
 mod communities;
 mod disappearing;
 mod drafts;
@@ -276,7 +279,56 @@ const MIGRATIONS: &[(&str, &str, &str)] = &[
     // NULL plays voice messages at the speed in Settings.
     ("chats", "voice_speed", "REAL"),
     ("contacts", "first_name", "TEXT"),
+    // The broadcast list a received message came through, for its receipts.
+    ("messages", "broadcast_list", "TEXT"),
 ];
+
+/// One copy of a message that a merge meets twice, as stored.
+struct MessageCopy {
+    chat: String,
+    json: String,
+    /// What this build reads `json` as; `None` for content a newer build
+    /// wrote that it cannot read.
+    content: Option<Content>,
+    edited: bool,
+    reactions: Vec<crate::model::Reaction>,
+}
+
+impl MessageCopy {
+    fn new(chat: &str, json: String, edited: bool, reactions: &str) -> Self {
+        Self {
+            chat: chat.to_owned(),
+            content: serde_json::from_str(&json).ok(),
+            json,
+            edited,
+            reactions: serde_json::from_str(reactions).unwrap_or_default(),
+        }
+    }
+}
+
+/// How a merge settles the reactions of a message it meets twice.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Reactions {
+    /// As the upsert left them: the kept row's, or the other copy's when
+    /// the kept row has none. A privacy-id merge keeps this rule.
+    Kept,
+    /// Both copies', one per person.
+    Both,
+}
+
+/// Whether a merge may replace this content with another copy's: an
+/// unsupported or unreadable placeholder, or a phone-only one other than
+/// view-once, which is the message's final state on a linked device.
+fn replaceable(content: &Content) -> bool {
+    matches!(
+        content,
+        Content::Unsupported { .. }
+            | Content::PhoneOnly {
+                view_once: false,
+                ..
+            }
+    )
+}
 
 /// Whether a message holds an attachment that is on this computer: its own
 /// file, an interactive card's image, or any of that card's carousel images.
@@ -503,6 +555,9 @@ pub const GALLERY_PAGE: usize = 200;
 /// `meta` keys for the phone's "Keep chats archived" and when it changed.
 const UNARCHIVE_CHATS: &str = "unarchive_chats";
 const UNARCHIVE_CHATS_AT: &str = "unarchive_chats_at";
+/// `meta` keys for the phone's "Disable link previews" and when it changed.
+const LINK_PREVIEWS_DISABLED: &str = "link_previews_disabled";
+const LINK_PREVIEWS_DISABLED_AT: &str = "link_previews_disabled_at";
 impl Archive {
     /// Unlocks the on-disk archive with its OS keyring key, migrating plaintext
     /// archives before their first encrypted use. Never falls back to plaintext.
@@ -549,6 +604,7 @@ impl Archive {
                 ))?;
             }
         }
+        connection.execute_batch(broadcast_lists::INDEX)?;
         Self::add_downloaded_marker(&connection)?;
         media_jobs::install(&connection)?;
         connection.execute_batch(call_log::SCHEMA)?;
@@ -1453,9 +1509,10 @@ impl Archive {
              FROM chats WHERE id = ?1",
             params![lid_chat, phone_chat],
         )?;
+        let copies = self.duplicate_copies(&lid_chat, &phone_chat)?;
         transaction.execute(
-            "INSERT INTO messages (chat, id, sender, sender_name, from_me, timestamp, content, status, quoted, reactions, edited, raw, thumbnail, mentions, forwarded, delivered_at, read_at, history_order)
-             SELECT ?2, id, sender, sender_name, from_me, timestamp, content, status, quoted, reactions, edited, raw, thumbnail, mentions, forwarded, delivered_at, read_at, history_order
+            "INSERT INTO messages (chat, id, sender, sender_name, from_me, timestamp, content, status, quoted, reactions, edited, raw, thumbnail, mentions, forwarded, delivered_at, read_at, history_order, broadcast_list)
+             SELECT ?2, id, sender, sender_name, from_me, timestamp, content, status, quoted, reactions, edited, raw, thumbnail, mentions, forwarded, delivered_at, read_at, history_order, broadcast_list
              FROM messages WHERE chat = ?1 AND timestamp > COALESCE(
                 (SELECT through FROM chat_removals WHERE chat = ?2), -1)
              ON CONFLICT(chat, id) DO UPDATE SET
@@ -1472,9 +1529,11 @@ impl Archive {
                 forwarded = MAX(messages.forwarded, excluded.forwarded),
                 delivered_at = COALESCE(messages.delivered_at, excluded.delivered_at),
                 read_at = COALESCE(messages.read_at, excluded.read_at),
-                history_order = COALESCE(messages.history_order, excluded.history_order)",
+                history_order = COALESCE(messages.history_order, excluded.history_order),
+                broadcast_list = COALESCE(messages.broadcast_list, excluded.broadcast_list)",
             params![lid_chat, phone_chat],
         )?;
+        self.settle_duplicates(&phone_chat, copies, Reactions::Kept)?;
         Self::move_message_metadata(transaction, &lid_chat, &phone_chat)?;
         transaction.execute(
             "INSERT OR IGNORE INTO meta(key,value) SELECT ?2,value FROM meta WHERE key=?1",
@@ -1610,6 +1669,193 @@ impl Archive {
         self.purge_chat_rows(&lid_chat)?;
         transaction.execute("DELETE FROM chats WHERE id = ?1", params![lid_chat])?;
         Ok(changed > 0 || favorite || removed > 0 || had_lid_chat)
+    }
+
+    /// on which they differ: the rows of `from` past `to`'s removal point
+    /// that `to` holds as well. Raw messages are not read here: a merge
+    /// fetches one only for the copy whose content it takes.
+    fn duplicate_copies(&self, from: &str, to: &str) -> Result<Vec<(String, [MessageCopy; 2])>> {
+        let mut statement = self.connection.prepare(
+            "SELECT f.id, f.content, f.edited, f.reactions, t.content, t.edited, t.reactions
+             FROM messages f JOIN messages t ON t.chat = ?2 AND t.id = f.id
+             WHERE f.chat = ?1 AND f.timestamp > COALESCE(
+                (SELECT through FROM chat_removals WHERE chat = ?2), -1)
+             AND (f.content <> t.content OR f.reactions <> t.reactions)
+             ORDER BY f.id",
+        )?;
+        let rows = statement.query_map(params![from, to], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                [
+                    MessageCopy::new(from, row.get(1)?, row.get(2)?, &row.get::<_, String>(3)?),
+                    MessageCopy::new(to, row.get(4)?, row.get(5)?, &row.get::<_, String>(6)?),
+                ],
+            ))
+        })?;
+        rows.collect()
+    }
+
+    fn stored_copy(&self, chat: &str, id: &str) -> Result<Option<MessageCopy>> {
+        self.connection
+            .query_row(
+                "SELECT content, edited, reactions FROM messages WHERE chat = ?1 AND id = ?2",
+                params![chat, id],
+                |row| {
+                    Ok(MessageCopy::new(
+                        chat,
+                        row.get(0)?,
+                        row.get(1)?,
+                        &row.get::<_, String>(2)?,
+                    ))
+                },
+            )
+            .optional()
+    }
+
+    /// Settles a merged message that `chat` met twice, after the merge's
+    /// upsert kept one copy's content. `copies` are the copy merged in and
+    /// the copy that was there, as they were before it.
+    ///
+    /// Content this build cannot read, which a newer build wrote, is kept as
+    /// it is. Otherwise a deletion for everyone on either copy stands; real
+    /// content beats a placeholder (unsupported or unreadable, or phone-only
+    /// other than view-once, which is final), together with its raw
+    /// message; and a file either copy downloaded stays. With
+    /// [`Reactions::Both`] the reactions of both copies are kept, one per
+    /// person; with [`Reactions::Kept`] they stay as the upsert left them.
+    fn settle_duplicates(
+        &self,
+        chat: &str,
+        copies: Vec<(String, [MessageCopy; 2])>,
+        reactions: Reactions,
+    ) -> Result<()> {
+        for (id, copies) in copies {
+            let Some(row) = self.stored_copy(chat, &id)? else {
+                continue;
+            };
+            let [_, there] = &copies;
+            if there.content.is_none() {
+                // What was there cannot be read here: it stays as it was.
+                if row.json != there.json || row.edited != there.edited {
+                    self.connection.execute(
+                        "UPDATE messages SET content = ?3, edited = ?4 WHERE chat = ?1 AND id = ?2",
+                        params![chat, id, there.json, there.edited],
+                    )?;
+                }
+            } else if let Some(kept) = &row.content {
+                self.settle_content(chat, &id, kept, row.edited, &copies)?;
+            }
+            if reactions == Reactions::Both {
+                self.merge_reactions(chat, &id, &row.reactions, &copies)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn settle_content(
+        &self,
+        chat: &str,
+        id: &str,
+        kept: &Content,
+        kept_edited: bool,
+        copies: &[MessageCopy; 2],
+    ) -> Result<()> {
+        if copies
+            .iter()
+            .any(|copy| matches!(copy.content, Some(Content::Revoked)))
+        {
+            if !matches!(kept, Content::Revoked) {
+                self.set_content(chat, id, &Content::Revoked, false)?;
+            }
+            return Ok(());
+        }
+        let real = if replaceable(kept) {
+            copies.iter().find(|copy| {
+                copy.content
+                    .as_ref()
+                    .is_none_or(|content| !replaceable(content))
+            })
+        } else {
+            None
+        };
+        if let Some(real) = real {
+            self.connection.execute(
+                "UPDATE messages SET raw = COALESCE(
+                    (SELECT raw FROM messages WHERE chat = ?3 AND id = ?2), raw)
+                 WHERE chat = ?1 AND id = ?2",
+                params![chat, id, real.chat],
+            )?;
+        }
+        let (mut content, edited) = match real {
+            Some(real) => match &real.content {
+                Some(content) => (content.clone(), real.edited),
+                None => {
+                    // Real content from a newer build goes in as it is stored.
+                    self.connection.execute(
+                        "UPDATE messages SET content = ?3, edited = ?4 WHERE chat = ?1 AND id = ?2",
+                        params![chat, id, real.json, real.edited],
+                    )?;
+                    return Ok(());
+                }
+            },
+            None => (kept.clone(), kept_edited),
+        };
+        for copy in copies {
+            if let Some(other) = &copy.content {
+                content.fill_local_paths(other);
+            }
+        }
+        if content != *kept || edited != kept_edited {
+            self.set_content(chat, id, &content, edited)?;
+        }
+        Ok(())
+    }
+
+    /// Adds the reactions of both copies to the kept row's, one per person:
+    /// a reactor known by a privacy id counts as its phone number. Where
+    /// both copies hold one from the same person, the kept row's stays.
+    fn merge_reactions(
+        &self,
+        chat: &str,
+        id: &str,
+        kept: &[crate::model::Reaction],
+        copies: &[MessageCopy; 2],
+    ) -> Result<()> {
+        let mut merged = kept.to_vec();
+        let mut people = kept
+            .iter()
+            .map(|reaction| self.reactor(&reaction.sender))
+            .collect::<Result<Vec<_>>>()?;
+        for reaction in copies.iter().flat_map(|copy| &copy.reactions) {
+            let person = self.reactor(&reaction.sender)?;
+            if !people.contains(&person) {
+                merged.push(crate::model::Reaction {
+                    sender: person.clone(),
+                    ..reaction.clone()
+                });
+                people.push(person);
+            }
+        }
+        if merged != kept {
+            self.connection.execute(
+                "UPDATE messages SET reactions = ?3 WHERE chat = ?1 AND id = ?2",
+                params![chat, id, serde_json::to_string(&merged).unwrap_or_default()],
+            )?;
+        }
+        Ok(())
+    }
+
+    fn reactor(&self, sender: &str) -> Result<String> {
+        let Some(lid) = sender.strip_suffix("@lid") else {
+            return Ok(sender.to_owned());
+        };
+        let pn: Option<String> = self
+            .connection
+            .query_row("SELECT pn FROM lids WHERE lid = ?1", params![lid], |row| {
+                row.get(0)
+            })
+            .optional()?;
+        Ok(pn.map_or_else(|| sender.to_owned(), |pn| format!("{pn}@s.whatsapp.net")))
     }
 
     pub fn lids(&self) -> Result<Vec<(String, String)>> {
@@ -2959,6 +3205,36 @@ impl Archive {
             ],
         )?;
         Ok(unarchive)
+    }
+
+    /// The phone's "Disable link previews": `Some(true)` when it is on.
+    /// `None` until the phone has said.
+    pub fn link_previews_disabled(&self) -> Result<Option<bool>> {
+        Ok(self.meta(LINK_PREVIEWS_DISABLED)?.map(|value| value == "1"))
+    }
+
+    /// Records the phone's "Disable link previews" changed at `timestamp`
+    /// milliseconds, unless a newer change is stored, so a replayed snapshot
+    /// cannot undo it. Returns the setting in force.
+    pub fn set_link_previews_disabled_at(&self, disabled: bool, timestamp: i64) -> Result<bool> {
+        let stored = self
+            .meta(LINK_PREVIEWS_DISABLED_AT)?
+            .and_then(|value| value.parse::<i64>().ok());
+        if stored.is_some_and(|stored| stored > timestamp) {
+            return Ok(self.link_previews_disabled()?.unwrap_or(disabled));
+        }
+        // One statement, so a failed write leaves the previous pair intact.
+        self.connection.execute(
+            "INSERT INTO meta (key, value) VALUES (?1, ?2), (?3, ?4)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![
+                LINK_PREVIEWS_DISABLED,
+                if disabled { "1" } else { "0" },
+                LINK_PREVIEWS_DISABLED_AT,
+                timestamp.to_string()
+            ],
+        )?;
+        Ok(disabled)
     }
 
     /// Atomically reserves a readable folder for this chat for the archive's lifetime.
@@ -4667,6 +4943,19 @@ pub(crate) mod tests {
             .ensure_chat("1@s.whatsapp.net", "Initial history")
             .unwrap();
         assert!(!fresh.take_preferences_refresh().unwrap());
+    }
+
+    #[test]
+    fn link_preview_setting_newest_wins() {
+        let archive = Archive::in_memory().unwrap();
+        assert_eq!(archive.link_previews_disabled().unwrap(), None);
+        assert!(archive.set_link_previews_disabled_at(true, 200).unwrap());
+        assert_eq!(archive.link_previews_disabled().unwrap(), Some(true));
+        // A replayed older change does not undo it; a newer one does.
+        assert!(archive.set_link_previews_disabled_at(false, 100).unwrap());
+        assert_eq!(archive.link_previews_disabled().unwrap(), Some(true));
+        assert!(!archive.set_link_previews_disabled_at(false, 300).unwrap());
+        assert_eq!(archive.link_previews_disabled().unwrap(), Some(false));
     }
 
     #[test]

@@ -781,6 +781,15 @@ pub fn show_sticker(app: &mut App, ctx: &egui::Context) {
                     app.actions.push(Action::CloseStickerPreview);
                 }
                 ui.add_space(16.0);
+                // Favorites sync still assumes WebP media. Never advertise
+                // it for native .was stickers until that protocol path exists.
+                if preview
+                    .path()
+                    .extension()
+                    .is_some_and(|extension| extension == "was")
+                {
+                    return;
+                }
                 let (icon, label, action) = match favorite {
                     Some(saved) => (
                         Icon::StarOff,
@@ -966,6 +975,33 @@ mod tests {
         assert_eq!(
             display_size(vec2(320.0, 240.0), vec2(800.0, 700.0), false, 2.0),
             vec2(640.0, 480.0)
+        );
+    }
+
+    /// The parts of the stage the picture leaves uncovered are the viewer's:
+    /// one click there closes it, and none of them covers the picture.
+    #[test]
+    fn the_field_beside_the_picture_takes_the_click_that_closes_it() {
+        use egui::pos2;
+        let stage = Rect::from_min_size(pos2(0.0, 56.0), vec2(800.0, 400.0));
+        let picture = Rect::from_min_size(pos2(300.0, 156.0), vec2(200.0, 200.0));
+        let panels = field_panels(stage, picture);
+        for panel in panels {
+            assert_eq!(
+                panel.intersect(picture).area(),
+                0.0,
+                "{panel:?} covers the picture"
+            );
+            assert!(stage.contains_rect(panel), "{panel:?} leaves the stage");
+        }
+        let in_field = |pos: egui::Pos2| panels.iter().any(|panel| panel.contains(pos));
+        assert!(in_field(pos2(100.0, 200.0)), "the margin beside it");
+        assert!(!in_field(picture.center()), "the picture keeps its clicks");
+        // A picture as big as the stage leaves no field at all.
+        assert!(
+            field_panels(stage, stage)
+                .iter()
+                .all(|panel| panel.area() == 0.0)
         );
     }
 }

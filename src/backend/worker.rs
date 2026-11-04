@@ -40,8 +40,10 @@ use whatsapp_rust::wacore_binary::jid::JidExt;
 use whatsapp_rust::waproto::buffa::Message as _;
 use whatsapp_rust::{MediaRetryResult, MediaReuploadRequest};
 
+mod blocking;
 mod bot_replies;
 mod channel_pictures;
+mod chat_export;
 mod contact_names;
 mod device_store;
 mod download_folders;
@@ -58,6 +60,8 @@ mod calls;
 mod disappearing;
 mod favorite_chats;
 mod interactive;
+mod link_preview;
+mod link_preview_setting;
 mod link_watch;
 mod new_group;
 mod outgoing;
@@ -682,6 +686,8 @@ pub async fn run(
             (None, true)
         }
     };
+    let (link_previews_disabled, link_previews_unknown) =
+        link_preview_setting::link_previews_at_start(archive.link_previews_disabled());
     // Likewise only contacts synced before first names were kept lack them.
     let first_names_recovered = archive
         .meta(contact_names::FIRST_NAMES_RECOVERED)
@@ -765,6 +771,10 @@ pub async fn run(
         keep_chats_archived: true,
         phone_unarchive_chats,
         phone_unarchive_unread,
+        link_previews_disabled,
+        link_previews_unknown,
+        link_previews_reading: false,
+        preview_fetch: None,
         online_wanted: false,
         online_changed: Instant::now(),
         online_sent: None,
@@ -820,6 +830,7 @@ pub async fn run(
         background_media_usage: None,
         cache_retention_days: account_settings.cache_retention_days,
         cache_retention_next: None,
+        blocklist: Default::default(),
         background_media_cancelled: HashSet::new(),
         history_checkpoint_failed: false,
         background_media: HashSet::new(),
@@ -850,6 +861,7 @@ pub async fn run(
         early: Default::default(),
         link_watch: Default::default(),
         outgoing: Default::default(),
+        chat_export: chat_export::State::default(),
     };
     worker.load_state();
     match worker.archive.meta("background_history_checkpoint_v1") {
@@ -867,6 +879,7 @@ pub async fn run(
         _ => {}
     }
     worker.backfill();
+    worker.backfill_lottie_stickers();
     worker.backfill_media_albums();
     worker.backfill_video_notes();
     worker.backfill_view_once();
@@ -874,6 +887,7 @@ pub async fn run(
     worker.backfill_hd_copies();
     worker.backfill_group_status_mentions();
     worker.backfill_interactive();
+    worker.adopt_broadcast_lists();
     worker.backfill_call_entries();
     worker.relocate_media();
     discard_attachment_staging(&worker.dirs.media_cache_dir());
@@ -919,6 +933,9 @@ pub async fn run(
                 }
                 RuntimeEvent::FavoriteChatsRead { generation, complete } => {
                     worker.favorite_chats_read(generation, complete);
+                }
+                RuntimeEvent::LinkPreviewsRead { generation, complete } => {
+                    worker.link_previews_read(generation, complete);
                 }
             },
             _ = async {
@@ -969,6 +986,7 @@ pub async fn run(
             }
         }
     }
+    worker.stop_chat_export().await;
     worker.shutdown_call().await;
     worker.stop_bot().await;
 }
@@ -994,6 +1012,8 @@ enum RuntimeEvent {
     },
     /// The one-time read of the phone's favorite chats finished.
     FavoriteChatsRead { generation: u64, complete: bool },
+    /// The one-time read of the phone's link preview setting finished.
+    LinkPreviewsRead { generation: u64, complete: bool },
 }
 
 /// Complete only a previously persisted logout intent, retaining it on failure.
@@ -1246,6 +1266,7 @@ struct Worker {
     background_media_usage: Option<(Instant, Option<u64>)>,
     cache_retention_days: Option<u32>,
     cache_retention_next: Option<Instant>,
+    pub(crate) blocklist: crate::blocking::Blocklist,
     background_media_cancelled: HashSet<(ChatId, String, i64)>,
     history_checkpoint_failed: bool,
     background_media: HashSet<(ChatId, String, i64)>,
@@ -1341,6 +1362,15 @@ struct Worker {
     /// The phone's own "Keep chats archived", inverted as WhatsApp sends it
     /// (`Some(true)`: a new message unarchives). It wins over Settings'.
     phone_unarchive_chats: Option<bool>,
+    /// The phone's own "Disable link previews": while on, nothing is fetched
+    /// for a link we send. Also on until the phone has said.
+    link_previews_disabled: bool,
+    /// The phone has not said yet, so its setting is read from a snapshot.
+    link_previews_unknown: bool,
+    /// That read is running.
+    link_previews_reading: bool,
+    /// The composer's page fetch in flight; a newer request aborts it.
+    preview_fetch: Option<tokio::task::JoinHandle<()>>,
     /// The stored phone setting could not be read at startup; it is read
     /// again when needed, and chats stay archived until it is.
     phone_unarchive_unread: bool,
@@ -1418,6 +1448,7 @@ struct Worker {
     /// Transcriptions waiting for their voice attachment to download.
     pending_transcriptions: HashSet<(ChatId, String)>,
     outgoing: outgoing::Outgoing,
+    chat_export: chat_export::State,
 }
 
 /// Decoded history chunk waiting to be canonicalized and archived.
@@ -1647,7 +1678,9 @@ impl Worker {
         if !self.privacy_ready
             && matches!(
                 event,
-                Event::Chats(_)
+                Event::Blocklist { .. }
+                    | Event::BlocklistMapped { .. }
+                    | Event::Chats(_)
                     | Event::Drafts(_)
                     | Event::ChatHits { .. }
                     | Event::ChatUpdated(_)
@@ -1904,6 +1937,7 @@ impl Worker {
         self.group_info_retry.retain(|(_, id)| id != chat);
         self.group_info_requested.remove(chat);
         self.group_info_tries.remove(chat);
+        self.cancel_chat_export_for(chat);
         match self.archive.remove_chat_through(chat, through, true) {
             Ok(removed) => {
                 self.discard_removed_edits(chat);
@@ -1938,6 +1972,7 @@ impl Worker {
     /// Empties a chat while keeping it listed.
     /// Empties a chat through `through`; false when the archive could not.
     fn empty_chat(&mut self, chat: &str, through: i64, delete_media: bool) -> bool {
+        self.cancel_chat_export_for(chat);
         match self.archive.remove_chat_through(chat, through, false) {
             Ok(removed) => {
                 self.discard_removed_edits(chat);
@@ -2043,9 +2078,15 @@ impl Worker {
     }
 
     fn emit_chat(&self, id: &str) {
-        if let Ok(Some(mut chat)) = self.archive.chat(id) {
-            self.polish_chat(&mut chat);
-            self.emit(Event::ChatUpdated(Box::new(chat)));
+        match self.archive.chat(id) {
+            Ok(Some(mut chat)) => {
+                if chat.locked {
+                    self.cancel_chat_export_for(id);
+                }
+                self.polish_chat(&mut chat);
+                self.emit(Event::ChatUpdated(Box::new(chat)));
+            }
+            _ => self.cancel_chat_export_for(id),
         }
     }
 
@@ -2219,6 +2260,7 @@ impl Worker {
         if self.me_pn.is_some() || self.me_lid.is_some() {
             self.emit(self.me_event());
         }
+        self.emit(Event::LinkPreviewsDisabled(self.link_previews_disabled));
         self.emit(Event::Contacts(self.contacts.values().cloned().collect()));
         self.emit_chats();
     }
@@ -2287,6 +2329,56 @@ impl Worker {
         }
     }
 
+    /// Reclassify previously unsupported Lottie stickers without replaying
+    /// the entire message archive. Raw protobufs retain the media keys.
+    fn backfill_lottie_stickers(&mut self) {
+        const KEY: &str = "lottie_stickers";
+        if self.archive.meta(KEY).ok().flatten().as_deref() == Some("1") {
+            return;
+        }
+        let rows = match self.archive.unsupported_with_raw() {
+            Ok(rows) => rows,
+            Err(error) => {
+                log::warn!("could not read archived Lottie stickers: {error}");
+                return;
+            }
+        };
+        let mut updated = 0;
+        let mut failed = false;
+        for (chat, id, raw) in rows {
+            let Ok(message) = wa::Message::decode_from_slice(&raw) else {
+                continue;
+            };
+            if !message.get_base_message().lottie_sticker_message.is_set() {
+                continue;
+            }
+            let Some(content @ Content::Sticker { .. }) = classify(&message) else {
+                continue;
+            };
+            let Some(old) = self.archive.message(&chat, &id).ok().flatten() else {
+                continue;
+            };
+            if old.edited {
+                continue;
+            }
+            match self.archive.set_content(&chat, &id, &content, false) {
+                Ok(true) => updated += 1,
+                Ok(false) => {}
+                Err(error) => {
+                    log::warn!("could not reclassify archived Lottie sticker: {error}");
+                    failed = true;
+                }
+            }
+        }
+        if !failed && let Err(error) = self.archive.set_meta(KEY, "1") {
+            log::warn!("could not mark Lottie archive migration complete: {error}");
+        }
+        if updated > 0 {
+            log::info!("reclassified {updated} archived Lottie stickers");
+            self.emit_chats();
+        }
+    }
+
     fn backfill(&mut self) {
         const VERSION: &str = "3";
         if self.archive.meta("derived").ok().flatten().as_deref() == Some(VERSION) {
@@ -2345,6 +2437,55 @@ impl Worker {
                 started.elapsed()
             );
             self.emit_chats();
+        }
+    }
+
+    /// Moves the messages earlier versions filed under a contact's broadcast
+    /// list into the chat with that contact, where they now arrive. The phone
+    /// already shows them there, so this is local: nothing is sent.
+    ///
+    /// It runs at every start: an older build run in between may have filed
+    /// more, and a list that has moved has nothing left to find.
+    fn adopt_broadcast_lists(&mut self) {
+        let lists = match self.archive.received_broadcast_lists() {
+            Ok(lists) => lists,
+            Err(error) => {
+                log::warn!("could not read broadcast-list chats: {error}");
+                return;
+            }
+        };
+        let (mut chats, mut moved, mut left, mut strangers) = (0, 0, 0, 0);
+        for (list, senders) in lists {
+            // Only a person's messages have a chat with them to go to; the
+            // others stay in the list chat.
+            let mut moves = Vec::new();
+            for sender in senders {
+                let chat = self.canonical_str(&sender);
+                let person = Self::jid_of(&chat).is_some_and(|jid| jid.is_pn() || jid.is_lid());
+                if person && !self.is_me(&chat) {
+                    let name = self.chat_name(&chat, None);
+                    moves.push((sender, chat, name));
+                } else {
+                    strangers += 1;
+                }
+            }
+            match self.archive.adopt_broadcast_list(&list, &moves) {
+                Ok(adopted) => {
+                    chats += usize::from(adopted.moved > 0);
+                    moved += adopted.moved;
+                    left += adopted.left;
+                }
+                Err(error) => log::warn!("could not move a broadcast-list chat: {error}"),
+            }
+        }
+        if moved > 0 {
+            log::info!(
+                "moved {moved} messages from {chats} broadcast-list chats into their senders' chats; \
+                 {left} stayed ({strangers} senders without a chat, or removed or being deleted)"
+            );
+            self.emit_chats();
+        } else if left > 0 {
+            log::debug!("{left} messages stay in broadcast-list chats");
         }
     }
 
@@ -3720,7 +3861,9 @@ impl Worker {
                 WorkerTiming::run("recover-first-names", || self.recover_first_names());
                 let _ = WorkerTiming::run("retry-poll-votes", || self.archive.retry_poll_votes());
                 WorkerTiming::run("recover-stars", || self.recover_stars());
+                self.recover_link_previews();
                 self.pump_poll_votes();
+                self.fetch_blocklist();
                 if let Some(client) = self.client.clone() {
                     let me = self.me_pn.clone().and_then(|pn| Self::jid_of(&pn));
                     let commands = self.commands.clone();
@@ -3780,6 +3923,7 @@ impl Worker {
                 }
             }
             E::Disconnected(disconnected) => {
+                self.blocklist.invalidate();
                 if matches!(self.status, LinkStatus::Connected | LinkStatus::Connecting) {
                     self.set_status(LinkStatus::Disconnected {
                         reason: disconnected.reason.to_string(),
@@ -3787,6 +3931,7 @@ impl Worker {
                 }
             }
             E::LoggedOut(_) => {
+                self.blocklist.invalidate();
                 self.on_logged_out().await;
                 if !self.logout_cleanup_blocked {
                     self.start_bot().await;
@@ -4060,6 +4205,23 @@ impl Worker {
                     }
                 }
             }
+            E::DisableLinkPreviewsUpdate(update) => {
+                // The phone has spoken, stored or not, so the end of a
+                // snapshot must not take its silence for the default.
+                self.link_previews_unknown = false;
+                match self.archive.set_link_previews_disabled_at(
+                    update.previews_disabled,
+                    update.timestamp.timestamp_millis(),
+                ) {
+                    Ok(disabled) => {
+                        self.link_previews_disabled = disabled;
+                        self.emit(Event::LinkPreviewsDisabled(disabled));
+                    }
+                    Err(error) => {
+                        log::warn!("could not store the phone's link preview setting: {error}")
+                    }
+                }
+            }
             E::SelfPushNameUpdated(update) => {
                 self.me_name = Some(update.new_name.clone());
                 let _ = self.archive.set_meta("me_name", &update.new_name);
@@ -4146,6 +4308,7 @@ impl Worker {
 
     /// Invalidates account-scoped work and clears the unlinked account before publishing logout.
     async fn on_logged_out(&mut self) {
+        self.stop_chat_export().await;
         self.shutdown_call().await;
         self.sticker_download_failed.clear();
         self.sticker_clicked.clear();
@@ -4224,6 +4387,11 @@ impl Worker {
         self.privacy_snapshot = false;
         self.phone_unarchive_chats = None;
         self.phone_unarchive_unread = false;
+        // The next account's phone has said nothing yet.
+        self.link_previews_disabled = true;
+        self.link_previews_unknown = true;
+        self.link_previews_reading = false;
+        self.emit(Event::LinkPreviewsDisabled(true));
         // Reads for the unlinked account must not be answered for the next.
         self.withheld_pages.clear();
         self.early.clear();
@@ -6621,6 +6789,13 @@ impl Worker {
             | Command::SendLocation { chat, .. }
             | Command::CreatePoll { chat, .. } => Some(chat),
             Command::Forward { to_chat, .. } => Some(to_chat),
+            Command::React { chat, .. }
+            | Command::VotePoll { chat, .. }
+            | Command::EditText { chat, .. }
+            | Command::SendStickerPack { chat, .. }
+            | Command::StickerMade {
+                chat: Some(chat), ..
+            } if self.blocklist.contains(&self.canonical_str(chat)) => Some(chat),
             _ => None,
         };
         let writable = |chat: &str| match &command {
@@ -6630,6 +6805,10 @@ impl Worker {
         if let Some(chat) = destination
             && !writable(chat)
         {
+            if self.blocklist.contains(&self.canonical_str(chat)) {
+                self.refuse_blocked(command);
+                return;
+            }
             let error = "This conversation is read-only in ZapFastest".to_owned();
             if matches!(&command, Command::CreatePoll { .. }) {
                 self.emit(Event::PollCreated {
@@ -6642,6 +6821,42 @@ impl Worker {
             return;
         }
         match command {
+            Command::FetchBlocklist => self.fetch_blocklist(),
+            Command::SetBlocked { chat, blocked } => self.set_blocked(chat, blocked),
+            Command::BlocklistFetched { generation, result } => {
+                self.blocklist_fetched(generation, result).await;
+            }
+            Command::BlockedSet {
+                generation,
+                chat,
+                blocked,
+                result,
+            } => {
+                self.blocked_set(generation, chat, blocked, result);
+            }
+            Command::SetChatExportAllowed(allowed) => {
+                self.chat_export.allowed = allowed;
+                if !allowed {
+                    self.stop_chat_export().await;
+                }
+            }
+            Command::ExportChat {
+                request,
+                chat,
+                include_media,
+            } => self.begin_chat_export(request, chat, include_media).await,
+            Command::CancelChatExport => self.stop_chat_export().await,
+            Command::ChatExportTarget {
+                request,
+                include_media,
+                target,
+            } => self.chat_export_target(request, include_media, target),
+            Command::ChatExportProgress { request, counts } => {
+                self.chat_export_progress(request, counts)
+            }
+            Command::ChatExportFinished { request, result } => {
+                self.chat_export_finished(request, result)
+            }
             Command::Automation(request) => self.automation(request),
             Command::Statuses => self.emit_statuses(),
             Command::DownloadStatus(key) => self.download_status(key),
@@ -6721,7 +6936,9 @@ impl Worker {
                 text,
                 quoting,
                 mentions,
-            } => self.send_text(chat, text, quoting, mentions),
+                preview,
+            } => self.send_text(chat, text, quoting, mentions, preview),
+            Command::FetchLinkPreview { url } => self.fetch_link_preview(url),
             Command::SendLocation {
                 chat,
                 latitude,
@@ -7456,6 +7673,9 @@ impl Worker {
                 });
             }
             Command::SetGroupName { chat, name } => self.set_group_name(chat, name),
+            Command::SetGroupDescription { chat, description } => {
+                self.set_group_description(chat, description);
+            }
             Command::PickGroupPicture(chat) => {
                 if !self.may_edit_group(&chat) {
                     return;
@@ -8854,6 +9074,57 @@ impl Worker {
         });
     }
 
+    /// Changes the group's description, or removes it when `description` is
+    /// empty, once WhatsApp accepts.
+    fn set_group_description(&mut self, chat: ChatId, description: String) {
+        let description = description.trim().to_owned();
+        let Ok(Some(row)) = self.archive.chat(&chat) else {
+            return;
+        };
+        if description == row.group_description.as_deref().unwrap_or_default().trim() {
+            return;
+        }
+        if !self.may_edit_group(&chat) {
+            return;
+        }
+        let text = if description.is_empty() {
+            None
+        } else if let Ok(text) = whatsapp_rust::GroupDescription::new(description.clone()) {
+            Some(text)
+        } else {
+            self.emit(Event::Error(format!(
+                "A group description can have at most {} characters.",
+                crate::model::GROUP_DESCRIPTION_LIMIT
+            )));
+            return;
+        };
+        let (Some(client), Some(jid)) = (self.client.clone(), Self::jid_of(&chat)) else {
+            self.emit(Event::Error(
+                "Connect to WhatsApp to change the group's description.".to_owned(),
+            ));
+            return;
+        };
+        self.emit(Event::GroupSaving {
+            chat: chat.clone(),
+            saving: true,
+        });
+        let commands = self.commands.clone();
+        let waker = self.waker.clone();
+        tokio::spawn(async move {
+            let result = client
+                .groups()
+                .set_description(jid, text, whatsapp_rust::PreviousDescription::Resolve)
+                .await
+                .map_err(|error| error.to_string());
+            let _ = commands.send(Command::GroupEdited {
+                chat,
+                edit: GroupEdit::Description(description),
+                result,
+            });
+            waker.wake();
+        });
+    }
+
     /// Sets the group's photo to a prepared JPEG, or removes it.
     fn set_group_picture(&mut self, chat: ChatId, jpeg: Option<Vec<u8>>) {
         if !self.may_edit_group(&chat) {
@@ -8901,6 +9172,12 @@ impl Worker {
                 let _ = self.archive.rename_chat(&chat, &name);
                 self.emit_chat(&chat);
             }
+            (Ok(()), GroupEdit::Description(description)) => {
+                // Metadata asked for before now may still hold the old text.
+                *self.description_generation.entry(chat.clone()).or_default() += 1;
+                let _ = self.archive.set_group_description(&chat, &description);
+                self.emit_chat(&chat);
+            }
             (Ok(()), GroupEdit::Picture { removed }) => self.refresh_avatar(chat, removed),
             (Err(error), edit) => {
                 let refused = group_edit_refused(&error);
@@ -8913,6 +9190,7 @@ impl Worker {
                 } else {
                     match edit {
                         GroupEdit::Name(_) => "Could not rename the group.",
+                        GroupEdit::Description(_) => "Could not change the group's description.",
                         GroupEdit::Picture { removed: false } => {
                             "Could not change the group's photo."
                         }
@@ -9052,12 +9330,19 @@ impl Worker {
         if matches!(row.content, Content::Revoked) || (row.from_me && row.status.is_local()) {
             return Err(unavailable);
         }
-        let raw = self
-            .archive
-            .raw(source, id)
-            .map_err(|_| unavailable)?
-            .ok_or(unavailable)?;
-        let original = wa::Message::decode_from_slice(&raw).map_err(|_| unavailable)?;
+        let raw = self.archive.raw(source, id).map_err(|_| unavailable)?;
+        let original = match (raw, &row.content) {
+            (Some(raw), _) => wa::Message::decode_from_slice(&raw).map_err(|_| unavailable)?,
+            (
+                None,
+                Content::PhoneOnly {
+                    view_once: true,
+                    once,
+                    ..
+                },
+            ) => quoted_view_once(*once),
+            (None, _) => return Err(unavailable),
+        };
         let jid = Self::jid_of(chat).ok_or(unavailable)?;
         let source_jid = Self::jid_of(source).ok_or(unavailable)?;
         let sender = Self::jid_of(&row.sender).ok_or(unavailable)?;
@@ -9136,8 +9421,9 @@ impl Worker {
         text: String,
         quoting: Option<crate::model::ReplyTarget>,
         mentions: Vec<String>,
+        preview: Option<crate::model::ComposedPreview>,
     ) {
-        let _ = self.send_text_inner(chat, text, quoting, mentions, None);
+        let _ = self.send_text_inner(chat, text, quoting, mentions, preview, None);
     }
 
     fn send_text_inner(
@@ -9146,6 +9432,7 @@ impl Worker {
         text: String,
         quoting: Option<crate::model::ReplyTarget>,
         mentions: Vec<String>,
+        preview: Option<crate::model::ComposedPreview>,
         cli_request: Option<String>,
     ) -> Option<String> {
         let (context, shown) = match self.quote_target(&chat, quoting.as_ref()) {
@@ -9160,7 +9447,8 @@ impl Worker {
             self.refuse(chat, quoting, Unsent::Text(text), Refusal::Offline);
             return None;
         };
-        let mut message = outgoing_text(text.clone(), context, &mentions);
+        let (mut message, content, thumbnail) =
+            self.compose_text(text.clone(), context, &mentions, preview);
         let expiration = self.apply_ephemeral(&chat, &mut message);
         let mentions = self.mentions_of(&mentions);
         let id = client.generate_message_id().into_string();
@@ -9185,7 +9473,7 @@ impl Worker {
             sender_name: None,
             from_me: true,
             timestamp: crate::util::now(),
-            content: Content::text(text),
+            content,
             status: Delivery::Pending,
             delivered_at: None,
             read_at: None,
@@ -9195,7 +9483,7 @@ impl Worker {
             edited: false,
             mentions,
             forwarded: false,
-            thumbnail: None,
+            thumbnail,
         };
         self.store_message(row, Some(message.encode_to_vec()), None);
         if cli_request.is_some() && self.archive.message(&chat, &id).ok().flatten().is_none() {
@@ -9203,6 +9491,59 @@ impl Worker {
         }
         self.queue_outgoing(chat, jid, id.clone(), message, expiration);
         Some(id)
+    }
+
+    /// Builds the outgoing body, its stored content and thumbnail. A preview
+    /// goes along only when the phone setting allows it and it describes the
+    /// first link of the text, so an edited text never carries a stale card.
+    fn compose_text(
+        &self,
+        text: String,
+        context: Option<wa::ContextInfo>,
+        mentions: &[String],
+        preview: Option<crate::model::ComposedPreview>,
+    ) -> (wa::Message, Content, Option<Vec<u8>>) {
+        let mut message = outgoing_text(text.clone(), context, mentions);
+        let matched = preview
+            .filter(|_| !self.link_previews_disabled)
+            .and_then(|preview| {
+                let link = crate::safety::first_link(&text)?;
+                (crate::safety::preview_url(&link).as_deref()
+                    == crate::safety::preview_url(&preview.preview.url).as_deref())
+                .then_some((link, preview))
+            });
+        let Some((link, preview)) = matched else {
+            return (message, Content::text(text), None);
+        };
+        attach_preview(&mut message, &link, &preview);
+        let crate::model::ComposedPreview { preview, thumbnail } = preview;
+        (
+            message,
+            Content::Text {
+                text,
+                preview: Some(preview),
+            },
+            thumbnail,
+        )
+    }
+
+    /// Reads the page behind a link for the composer, replacing a fetch still
+    /// running. Nothing is fetched while the phone has previews disabled.
+    fn fetch_link_preview(&mut self, url: String) {
+        if let Some(previous) = self.preview_fetch.take() {
+            previous.abort();
+        }
+        if self.link_previews_disabled {
+            self.emit(Event::LinkPreview { url, preview: None });
+            return;
+        }
+        let events = self.events.clone();
+        let waker = self.waker.clone();
+        self.preview_fetch = Some(tokio::spawn(async move {
+            let preview = link_preview::fetch(url.clone()).await;
+            let _ = events.send(Event::LinkPreview { url, preview });
+            waker.wake();
+        }));
     }
 
     /// Sends a spot as a location, keeping the row locally the way a phone
@@ -9654,10 +9995,14 @@ impl Worker {
                     document.mimetype.clone().unwrap_or_default(),
                     document.file_name.clone(),
                 )
-            } else if let Some(sticker) = base.sticker_message.as_option() {
+            } else if let Some(sticker) = sticker_of(&base) {
                 (
                     Box::new(sticker.clone()),
-                    sticker.mimetype.clone().unwrap_or_default(),
+                    if base.lottie_sticker_message.is_set() || sticker.is_lottie == Some(true) {
+                        "application/was".to_owned()
+                    } else {
+                        sticker.mimetype.clone().unwrap_or_default()
+                    },
                     None,
                 )
             } else {
@@ -9704,11 +10049,7 @@ impl Worker {
                     .as_option()
                     .and_then(|media| media.media_key.clone())
             })
-            .or_else(|| {
-                base.sticker_message
-                    .as_option()
-                    .and_then(|media| media.media_key.clone())
-            })
+            .or_else(|| sticker_of(&base).and_then(|media| media.media_key.clone()))
             .unwrap_or_default();
         // A sticker only the picker wanted is not worth a re-upload request:
         // the picker fetches in the background, and each request counts
@@ -9748,6 +10089,16 @@ impl Worker {
                 return Some(Box::new(media.clone()));
             }
             if let Some(media) = fresh_base.sticker_message.as_option_mut() {
+                media.direct_path = Some(direct);
+                media.url = None;
+                return Some(Box::new(media.clone()));
+            }
+            if let Some(media) = fresh_base
+                .lottie_sticker_message
+                .as_option_mut()
+                .and_then(|wrapper| wrapper.message.as_option_mut())
+                .and_then(|inner| inner.sticker_message.as_option_mut())
+            {
                 media.direct_path = Some(direct);
                 media.url = None;
                 return Some(Box::new(media.clone()));
@@ -12203,6 +12554,34 @@ fn outgoing_text(
     }
 }
 
+/// Puts a link preview on an outgoing text, keeping its quote and mentions.
+/// `matched` is the link as it appears in the text.
+fn attach_preview(
+    message: &mut wa::Message,
+    matched: &str,
+    preview: &crate::model::ComposedPreview,
+) {
+    use wa::message::extended_text_message::PreviewType;
+    let mut extended = message.extended_text_message.take().unwrap_or_default();
+    if let Some(text) = message.conversation.take() {
+        extended.text = Some(text);
+    }
+    extended.matched_text = Some(matched.to_owned());
+    extended.title = preview.preview.title.clone();
+    extended.description = preview.preview.description.clone();
+    if let Some(bytes) = &preview.thumbnail {
+        let size = image::ImageReader::new(std::io::Cursor::new(bytes))
+            .with_guessed_format()
+            .ok()
+            .and_then(|reader| reader.into_dimensions().ok());
+        extended.jpeg_thumbnail = Some(bytes.clone());
+        extended.thumbnail_width = size.map(|(width, _)| width);
+        extended.thumbnail_height = size.map(|(_, height)| height);
+    }
+    extended.preview_type = Some(PreviewType::NONE);
+    message.extended_text_message = MessageField::some(extended);
+}
+
 /// A location message: the coordinates and nothing else, because a computer
 /// has no place name to send. A quote rides inside the location, where a
 /// phone puts it.
@@ -12250,7 +12629,7 @@ fn context_of(base: &wa::Message) -> Option<&wa::ContextInfo> {
     if let Some(document) = base.document_message.as_option() {
         return document.context_info.as_option();
     }
-    if let Some(sticker) = base.sticker_message.as_option() {
+    if let Some(sticker) = sticker_of(base) {
         return sticker.context_info.as_option();
     }
     if let Some(location) = base.location_message.as_option() {
@@ -12287,13 +12666,6 @@ fn forwarded_of(base: &wa::Message) -> bool {
     context_of(base).is_some_and(|context| {
         context.is_forwarded.unwrap_or(false) || context.forwarding_score.unwrap_or(0) > 0
     })
-}
-
-/// Finds the first web address when preview metadata omits its URL.
-fn first_link(text: &str) -> Option<String> {
-    text.split_whitespace()
-        .find(|token| token.starts_with("http://") || token.starts_with("https://"))
-        .map(|token| token.trim_end_matches(['.', ',', ')', ']']).to_owned())
 }
 
 /// Extracts the attachment or link-preview thumbnail.
@@ -12460,6 +12832,19 @@ fn classify(message: &wa::Message) -> Option<Content> {
     Some(content)
 }
 
+/// A Lottie sticker's media lives in FutureProofMessage -> Message -> StickerMessage.
+/// Use the same extraction for both classification and downloads.
+fn sticker_of(base: &wa::Message) -> Option<&wa::message::StickerMessage> {
+    base.sticker_message.as_option().or_else(|| {
+        base.lottie_sticker_message
+            .as_option()?
+            .message
+            .as_option()?
+            .sticker_message
+            .as_option()
+    })
+}
+
 /// [`classify`] for a message with its wrappers already removed.
 fn classify_base(base: &wa::Message) -> Option<Content> {
     if let Some(inner) = bot_replies::invoked(base) {
@@ -12478,7 +12863,9 @@ fn classify_base(base: &wa::Message) -> Option<Content> {
             }
             let url = non_empty(&extended.matched_text)
                 .and_then(|url| crate::safety::preview_url(&url))
-                .or_else(|| first_link(text).and_then(|url| crate::safety::preview_url(&url)))?;
+                .or_else(|| {
+                    crate::safety::first_link(text).and_then(|url| crate::safety::preview_url(&url))
+                })?;
             Some(LinkPreview {
                 url,
                 title,
@@ -12550,15 +12937,22 @@ fn classify_base(base: &wa::Message) -> Option<Content> {
             pages: document.page_count,
         });
     }
-    if let Some(sticker) = base.sticker_message.as_option() {
+    if let Some(sticker) = sticker_of(base) {
+        let lottie = base.lottie_sticker_message.is_set()
+            || sticker.is_lottie.unwrap_or(false)
+            || sticker.mimetype.as_deref() == Some("application/was");
+        let mut attachment = media(
+            sticker.mimetype.as_ref(),
+            sticker.file_length,
+            sticker.width,
+            sticker.height,
+        );
+        if lottie {
+            attachment.mime = "application/was".to_owned();
+        }
         return Some(Content::Sticker {
-            media: media(
-                sticker.mimetype.as_ref(),
-                sticker.file_length,
-                sticker.width,
-                sticker.height,
-            ),
-            animated: sticker.is_animated.unwrap_or(false),
+            media: attachment,
+            animated: lottie || sticker.is_animated.unwrap_or(false),
         });
     }
     if let Some(location) = base.location_message.as_option() {
@@ -12664,9 +13058,6 @@ fn classify_base(base: &wa::Message) -> Option<Content> {
     }
     if base.scheduled_call_creation_message.is_set() {
         return unsupported("call");
-    }
-    if base.lottie_sticker_message.is_set() {
-        return unsupported("animated sticker");
     }
     if base.poll_update_message.is_set()
         || base.enc_reaction_message.is_set()
@@ -13390,6 +13781,47 @@ async fn quoted_outbound(
     let (mut row, raw) = file_outbound(client, chat, me, dir, prepared, caption, mentions).await?;
     row.quoted = shown;
     Ok((row, raw))
+}
+
+/// What a reply quotes of a view-once message, whose body this device never
+/// had: an empty view-once message of its kind, so that WhatsApp draws the
+/// quote as it draws one made on the phone. Nothing says which kind a bare
+/// placeholder was, so its quote is a photo's, the commonest.
+fn quoted_view_once(kind: Option<crate::model::OnceMedia>) -> wa::Message {
+    use crate::model::OnceMedia;
+    use whatsapp_rust::prelude::MessageField;
+    let mut inner = wa::Message::default();
+    match kind {
+        Some(OnceMedia::Video) => {
+            let video = wa::message::VideoMessage {
+                view_once: Some(true),
+                ..Default::default()
+            };
+            inner.video_message = MessageField::some(video);
+        }
+        Some(kind @ (OnceMedia::Voice | OnceMedia::Audio)) => {
+            let audio = wa::message::AudioMessage {
+                view_once: Some(true),
+                ptt: Some(kind == OnceMedia::Voice),
+                ..Default::default()
+            };
+            inner.audio_message = MessageField::some(audio);
+        }
+        Some(OnceMedia::Photo) | None => {
+            let image = wa::message::ImageMessage {
+                view_once: Some(true),
+                ..Default::default()
+            };
+            inner.image_message = MessageField::some(image);
+        }
+    }
+    let wrapper = wa::message::FutureProofMessage {
+        message: MessageField::some(inner),
+    };
+    wa::Message {
+        view_once_message_v2: MessageField::some(wrapper),
+        ..Default::default()
+    }
 }
 
 /// Puts a reply's quote on an outgoing message, returning what the reply's
@@ -16354,6 +16786,7 @@ mod tests {
                 text: "Fixture".into(),
                 quoting: None,
                 mentions: Vec::new(),
+                preview: None,
             })
             .await;
         assert!(matches!(events.try_recv().unwrap(), Event::Error(_)));
@@ -17484,6 +17917,10 @@ fn offline_worker(
         keep_chats_archived: true,
         phone_unarchive_chats: None,
         phone_unarchive_unread: false,
+        link_previews_disabled: false,
+        link_previews_unknown: false,
+        link_previews_reading: false,
+        preview_fetch: None,
         online_wanted: false,
         online_changed: Instant::now(),
         online_sent: None,
@@ -17539,6 +17976,7 @@ fn offline_worker(
         background_media_usage: None,
         cache_retention_days: None,
         cache_retention_next: None,
+        blocklist: Default::default(),
         background_media_cancelled: HashSet::new(),
         history_checkpoint_failed: false,
         background_media: HashSet::new(),
@@ -17569,6 +18007,7 @@ fn offline_worker(
         early: Default::default(),
         link_watch: Default::default(),
         outgoing: Default::default(),
+        chat_export: chat_export::State::default(),
     };
     worker.archive.set_meta("me_pn", me).unwrap();
     (worker, events_rx, inbox, wa_events)
@@ -18179,6 +18618,57 @@ mod receipt_tests {
                 _ => None,
             })
             .collect()
+    }
+
+    #[tokio::test]
+    async fn a_group_description_is_filed_once_whatsapp_accepts_it() {
+        let (mut worker, events, _inbox, _wa) = worker();
+        let chat = "fixture@g.us";
+        worker.archive.ensure_chat(chat, "Weekend plans").unwrap();
+        worker.archive.set_group_rights(chat, false, false).unwrap();
+        worker.archive.set_group_description(chat, "Old").unwrap();
+        let edit = |description: &str| Command::SetGroupDescription {
+            chat: chat.into(),
+            description: description.into(),
+        };
+        // The same text asks nothing of WhatsApp.
+        worker.handle_command(edit(" Old ")).await;
+        assert!(errors(&events).is_empty());
+        worker
+            .handle_command(edit(&"x".repeat(crate::model::GROUP_DESCRIPTION_LIMIT + 1)))
+            .await;
+        assert_eq!(errors(&events).len(), 1, "too long");
+        let generation = |worker: &Worker| worker.description_generation.get(chat).copied();
+        let stored = |worker: &Worker| {
+            worker
+                .archive
+                .chat(chat)
+                .unwrap()
+                .unwrap()
+                .group_description
+        };
+        worker
+            .handle_command(Command::GroupEdited {
+                chat: chat.into(),
+                edit: GroupEdit::Description("New".into()),
+                result: Err("refused".into()),
+            })
+            .await;
+        assert_eq!(stored(&worker).as_deref(), Some("Old"));
+        assert_eq!(generation(&worker), None);
+        worker
+            .handle_command(Command::GroupEdited {
+                chat: chat.into(),
+                edit: GroupEdit::Description("New".into()),
+                result: Ok(()),
+            })
+            .await;
+        assert_eq!(stored(&worker).as_deref(), Some("New"));
+        assert_eq!(
+            generation(&worker),
+            Some(1),
+            "older metadata cannot undo it"
+        );
     }
 
     /// A rename or photo change goes out only when we may make it, with a
@@ -22125,7 +22615,9 @@ mod receipt_tests {
     }
 
     /// Enumerates synthetic send commands and matching unsent payloads with a shared quote target.
-    fn reply_sends(quoting: Option<crate::model::ReplyTarget>) -> Vec<(Command, Unsent)> {
+    pub(super) fn reply_sends(
+        quoting: Option<crate::model::ReplyTarget>,
+    ) -> Vec<(Command, Unsent)> {
         let gif = Gif {
             id: "fixture-gif".into(),
             still: None,
@@ -22140,6 +22632,7 @@ mod receipt_tests {
                     text: "Reply fixture".into(),
                     quoting: quoting.clone(),
                     mentions: Vec::new(),
+                    preview: None,
                 },
                 Unsent::Text("Reply fixture".into()),
             ),
@@ -22229,6 +22722,61 @@ mod receipt_tests {
                 Unsent::Gif,
             ),
         ]
+    }
+
+    /// View-once messages are archived without their raw protobuf (#563).
+    #[test]
+    fn a_view_once_message_is_quoted_from_its_row() {
+        use crate::model::OnceMedia;
+        let (worker, _, _, _) = worker();
+        worker.archive.ensure_chat(PEER, "Fixture").unwrap();
+        for (id, once, summary) in [
+            ("photo", Some(OnceMedia::Photo), "View once photo"),
+            ("video", Some(OnceMedia::Video), "View once video"),
+            ("voice", Some(OnceMedia::Voice), "View once voice message"),
+            ("bare", None, "View once message"),
+        ] {
+            let mut row = own_message(id, 100);
+            row.content = Content::PhoneOnly {
+                view_once: true,
+                live_location: false,
+                once,
+            };
+            worker.archive.insert_message(&row, None).unwrap();
+            let (context, shown) = worker.quote(PEER, Some(id)).unwrap().unwrap();
+            assert_eq!(context.stanza_id.as_deref(), Some(id));
+            assert_eq!(shown.id, id);
+            assert_eq!(shown.summary, summary);
+            let quoted = context.quoted_message.as_option().expect("a quoted body");
+            assert!(quoted.is_view_once(), "{id}");
+            let inner = quoted
+                .view_once_message_v2
+                .as_option()
+                .and_then(|wrapper| wrapper.message.as_option())
+                .expect("the wrapped kind");
+            assert_eq!(
+                inner.video_message.is_set(),
+                once == Some(OnceMedia::Video),
+                "{id}"
+            );
+            assert_eq!(
+                inner.audio_message.is_set(),
+                once == Some(OnceMedia::Voice),
+                "{id}"
+            );
+        }
+        // Another placeholder without a protobuf stays refused.
+        let mut row = own_message("phone-only", 100);
+        row.content = Content::PhoneOnly {
+            view_once: false,
+            live_location: false,
+            once: None,
+        };
+        worker.archive.insert_message(&row, None).unwrap();
+        assert_eq!(
+            worker.quote(PEER, Some("phone-only")).map(|_| ()),
+            Err(Refusal::QuoteUnavailable)
+        );
     }
 
     /// Checks that every send path refuses missing originals instead of sending an unquoted reply.
@@ -24065,5 +24613,53 @@ mod sync_profile_tests {
         assert_eq!(config.full_sync_days_limit, Some(365));
         assert_eq!(config.on_demand_ready, Some(true));
         assert_eq!(config.complete_on_demand_ready, Some(true));
+    }
+}
+
+#[cfg(test)]
+mod lottie_sticker_tests {
+    use super::*;
+
+    #[test]
+    fn recognizes_nested_lottie_sticker_and_keeps_its_media_type() {
+        let sticker = wa::message::StickerMessage {
+            mimetype: Some("application/was".to_owned()),
+            is_lottie: Some(true),
+            is_animated: Some(true),
+            ..Default::default()
+        };
+        let nested = wa::Message {
+            sticker_message: MessageField::some(sticker),
+            ..Default::default()
+        };
+        let wrapper = wa::message::FutureProofMessage {
+            message: MessageField::some(nested),
+        };
+        let message = wa::Message {
+            lottie_sticker_message: MessageField::some(wrapper),
+            ..Default::default()
+        };
+        let content = classify(&message).expect("recognized Lottie");
+        assert!(matches!(
+            content,
+            Content::Sticker { media, animated: true } if media.mime == "application/was"
+        ));
+        assert!(sticker_of(message.get_base_message()).is_some());
+    }
+
+    #[test]
+    fn still_recognizes_regular_webp_stickers() {
+        let sticker = wa::message::StickerMessage {
+            mimetype: Some("image/webp".to_owned()),
+            ..Default::default()
+        };
+        let message = wa::Message {
+            sticker_message: MessageField::some(sticker),
+            ..Default::default()
+        };
+        assert!(matches!(
+            classify(&message),
+            Some(Content::Sticker { media, animated: false }) if media.mime == "image/webp"
+        ));
     }
 }

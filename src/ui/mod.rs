@@ -3,7 +3,10 @@
 pub(crate) mod accessibility;
 pub mod accounts;
 pub mod archive_backup;
+pub mod attachment_preview;
+pub mod blocking;
 pub mod call;
+pub mod chat_export;
 pub mod chats;
 pub mod conversation;
 pub mod dialogs;
@@ -28,6 +31,7 @@ pub mod settings;
 mod statuses;
 pub mod update;
 pub mod video_preview;
+pub mod voice_bar;
 pub mod widgets;
 
 use egui::{Align2, CornerRadius, Frame, Margin, Stroke, vec2};

@@ -578,6 +578,11 @@ impl Worker {
             self.emit(Event::CallPreparing(false));
             return;
         }
+        if self.blocklist.contains(&self.canonical_str(&chat)) {
+            self.emit(Event::CallPreparing(false));
+            self.emit(Event::Error("Unblock this contact to call them.".into()));
+            return;
+        }
         if self.call_busy() {
             self.emit(Event::CallPreparing(false));
             self.emit(Event::Error("Finish the current call first".into()));

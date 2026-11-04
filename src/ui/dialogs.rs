@@ -47,6 +47,10 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 Dialog::NewContact | Dialog::MessageNumber => 380.0,
                 Dialog::NewChat => 420.0,
                 Dialog::UnlockLockedChats | Dialog::ConfirmLockChat(_) => 380.0,
+                Dialog::ConfirmBlock { .. } => 380.0,
+                Dialog::BlockedContacts => {
+                    420.0_f32.min((ui.ctx().content_rect().width() - 48.0).max(180.0))
+                }
                 Dialog::ChatInfo(_) if app.gallery.tab.is_some() => {
                     (ui.ctx().content_rect().width() - 64.0).clamp(180.0, 760.0)
                 }
@@ -57,6 +61,9 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                     380.0
                 }
                 Dialog::ConfirmClearChat(_) => 380.0,
+                Dialog::ExportChat { .. } => {
+                    380.0_f32.min((ui.ctx().content_rect().width() - 48.0).max(180.0))
+                }
                 Dialog::ConfirmDeleteMessage { .. } | Dialog::ConfirmDeleteSelection { .. } => {
                     380.0
                 }
@@ -110,11 +117,19 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 Dialog::NewChat => new_chat(app, ui),
                 Dialog::UnlockLockedChats => unlock_locked_chats(app, ui),
                 Dialog::ConfirmLockChat(id) => confirm_lock_chat(app, ui, &id),
+                Dialog::BlockedContacts => super::blocking::list(app, ui),
+                Dialog::ConfirmBlock { chat, blocked, .. } => {
+                    super::blocking::confirmation(app, ui, &chat, blocked)
+                }
                 Dialog::ChatInfo(id) => {
                     chat_info(app, ui, &id);
                 }
                 Dialog::ConfirmDeleteChat(id) => confirm_delete_chat(app, ui, &id),
                 Dialog::ConfirmClearChat(id) => confirm_clear_chat(app, ui, &id),
+                Dialog::ExportChat {
+                    chat,
+                    include_media,
+                } => super::chat_export::show(app, ui, &chat, include_media),
                 Dialog::ConfirmDeleteMessage {
                     chat,
                     message,
@@ -682,7 +697,10 @@ pub(super) fn contact_choices(app: &App, needle: &str) -> Vec<crate::model::Cont
                 && app.me.as_deref() != Some(contact.id.as_str())
                 && !app.chat(&contact.id).is_some_and(|chat| chat.locked)
                 && (needle.is_empty()
-                    || crate::util::search_key(&app.display_name(&contact.id)).contains(needle)
+                    || crate::util::search_matches(
+                        &crate::util::search_key(&app.display_name(&contact.id)),
+                        needle,
+                    )
                     || crate::model::phone_of(&contact.id)
                         .is_some_and(|phone| phone.contains(needle)))
         })
@@ -2285,8 +2303,26 @@ fn chat_info(app: &mut App, ui: &mut egui::Ui, id: &str) {
     ui.vertical_centered(|ui| {
         if group_editable {
             group_action = group_photo(app, ui, &name, id, photo, picture.as_deref());
+        } else if let Some(picture) = picture.as_deref() {
+            let label = crate::i18n::gettext(app.locale, "View photo");
+            if super::widgets::clickable_avatar(
+                ui,
+                &palette,
+                &name,
+                id,
+                photo,
+                Some(picture),
+                &label,
+            )
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .on_hover_text(label.as_ref())
+            .clicked()
+            {
+                app.actions
+                    .push(Action::PreviewImage(picture.to_path_buf()));
+            }
         } else {
-            super::widgets::avatar(ui, &palette, &name, id, photo, picture.as_deref());
+            super::widgets::avatar(ui, &palette, &name, id, photo, None);
         }
         if editable {
             let label = crate::i18n::gettext(app.locale, "Set local picture");
@@ -2741,13 +2777,49 @@ fn chat_info(app: &mut App, ui: &mut egui::Ui, id: &str) {
     } else {
         0.0
     };
-    if let Some(description) = description {
-        theme::text(
-            ui,
-            crate::i18n::gettext(app.locale, "Description"),
-            theme::medium(12.5),
-            palette.secondary,
-        );
+    let describing = app.group_description_edit.take().filter(|_| group_editable);
+    if let Some(mut draft) = describing {
+        ui.add_space(4.0);
+        match group_description_field(app, ui, &mut draft) {
+            Some(true) => app.actions.push(Action::SetGroupDescription {
+                chat: id.to_owned(),
+                description: draft,
+            }),
+            Some(false) => app.actions.push(Action::CloseGroupDescription),
+            None => app.group_description_edit = Some(draft),
+        }
+        ui.add_space(8.0);
+    } else if group_editable && description.is_none() {
+        ui.add_space(4.0);
+        let add = crate::i18n::gettext(app.locale, "Add group description");
+        if super::widgets::menu_item(ui, &palette, Some(Icon::Pencil), add.as_ref()) {
+            app.actions
+                .push(Action::EditGroupDescription(String::new()));
+        }
+        ui.add_space(8.0);
+    } else if let Some(description) = description {
+        ui.horizontal(|ui| {
+            theme::text(
+                ui,
+                crate::i18n::gettext(app.locale, "Description"),
+                theme::medium(12.5),
+                palette.secondary,
+            );
+            if group_editable
+                && theme::icon_button(
+                    ui,
+                    Icon::Pencil,
+                    15.0,
+                    palette.secondary,
+                    palette.text,
+                    &crate::i18n::gettext(app.locale, "Edit group description"),
+                )
+                .clicked()
+            {
+                app.actions
+                    .push(Action::EditGroupDescription(description.to_owned()));
+            }
+        });
         ui.add_space(4.0);
         egui::ScrollArea::vertical()
             .id_salt("group-description")
@@ -3099,6 +3171,75 @@ pub fn group_name_field_id() -> egui::Id {
     egui::Id::new("group-name-field")
 }
 
+pub fn group_description_field_id() -> egui::Id {
+    egui::Id::new("group-description-field")
+}
+
+/// The description's editor: `Some(true)` to save and `Some(false)` to cancel.
+/// Enter starts a new line, as a description may have several.
+fn group_description_field(app: &App, ui: &mut egui::Ui, draft: &mut String) -> Option<bool> {
+    let palette = app.palette;
+    let hint = crate::i18n::gettext(app.locale, "Group description");
+    let field = Frame::new()
+        .fill(palette.surface)
+        .corner_radius(CornerRadius::same(theme::RADIUS))
+        .inner_margin(Margin::symmetric(10, 6))
+        .show(ui, |ui| {
+            ui.add(
+                egui::TextEdit::multiline(draft)
+                    .id(group_description_field_id())
+                    .hint_text(
+                        egui::RichText::new(hint.as_ref())
+                            .color(palette.dim)
+                            .font(theme::regular(13.5)),
+                    )
+                    .font(theme::regular(13.5))
+                    .text_color(palette.text)
+                    .frame(Frame::NONE)
+                    .char_limit(crate::model::GROUP_DESCRIPTION_LIMIT)
+                    .desired_rows(4)
+                    .desired_width(f32::INFINITY),
+            )
+        });
+    theme::focus_outline(
+        ui,
+        field.inner.id,
+        field.response.rect,
+        f32::from(theme::RADIUS),
+    );
+    if ui.memory(|memory| memory.focused().is_none()) {
+        field.inner.request_focus();
+    }
+    let mut outcome = None;
+    ui.horizontal(|ui| {
+        if theme::icon_button(
+            ui,
+            Icon::Check,
+            18.0,
+            palette.secondary,
+            palette.accent,
+            &crate::i18n::gettext(app.locale, "Save description"),
+        )
+        .clicked()
+        {
+            outcome = Some(true);
+        }
+        if theme::icon_button(
+            ui,
+            Icon::X,
+            18.0,
+            palette.secondary,
+            palette.text,
+            &crate::i18n::gettext(app.locale, "Cancel"),
+        )
+        .clicked()
+        {
+            outcome = Some(false);
+        }
+    });
+    outcome
+}
+
 /// A filled button for a destructive action.
 pub(super) fn danger_button(ui: &mut egui::Ui, app: &mut App, label: &str) -> bool {
     let palette = app.palette;
@@ -3133,6 +3274,49 @@ pub(super) fn danger_button(ui: &mut egui::Ui, app: &mut App, label: &str) -> bo
     response
         .on_hover_cursor(egui::CursorIcon::PointingHand)
         .clicked()
+}
+
+/// A confirmation for a destructive or sensitive action: the question, its
+/// consequences (the first paragraph in the text colour, any after it as a smaller
+/// note), then Cancel and a red button that queues `actions` and closes the
+/// dialog. Callers pass translated text. Enter is deliberately not bound: a
+/// stray keypress must not destroy anything.
+pub(super) fn confirm_destructive<const N: usize>(
+    app: &mut App,
+    ui: &mut egui::Ui,
+    heading: &str,
+    paragraphs: &[&str],
+    button: &str,
+    actions: [Action; N],
+) {
+    let palette = app.palette;
+    title(ui, app, heading);
+    for (index, paragraph) in paragraphs.iter().enumerate() {
+        let (font, color) = if index == 0 {
+            (theme::regular(13.5), palette.text)
+        } else {
+            (theme::regular(13.0), palette.secondary)
+        };
+        theme::paragraph(ui, *paragraph, font, color);
+    }
+    ui.add_space(10.0);
+    let cancel = crate::i18n::gettext(app.locale, "Cancel");
+    ui.horizontal(|ui| {
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            let enabled = !matches!(app.dialog, Some(Dialog::ConfirmBlock { .. }))
+                || (app.is_connected() && app.blocklist.editable());
+            if ui
+                .add_enabled_ui(enabled, |ui| danger_button(ui, app, button))
+                .inner
+            {
+                app.actions.extend(actions);
+                app.actions.push(Action::CloseDialog);
+            }
+            if theme::pill_button(ui, &palette, &cancel, false).clicked() {
+                app.actions.push(Action::CloseDialog);
+            }
+        });
+    });
 }
 
 #[cfg(test)]

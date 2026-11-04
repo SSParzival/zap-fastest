@@ -1,0 +1,105 @@
+{
+  "version": "0.33.0",
+  "base_commit": "709be3e3ecf64dc7b3ef7d4fff144dc3ca05208f",
+  "platform": "Linux x86_64",
+  "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13) (Arch Linux rust 1:1.99.1-1)",
+  "cargo": "cargo 1.99.1 (5f94df478 2026-08-27) (Arch Linux rust 1:1.99.1-1)",
+  "inputs_sha256": {
+    "Cargo.toml": "cb9a8eaabd3c7b37f4c803548a4ecc4f0d48b5ae859653ae7d1fd67ba9b07334",
+    "Cargo.lock": "9e9e1a2d0e9272da29ef452967b58d96d96b3ab61c875217ac914ff041236c9d",
+    "rust-toolchain.toml": "137d8b787d6c480233b1b4331da73a688a13a5860166ebf0675a7462cf44389a",
+    "build.rs": "17cf584a114a8613500f396c626db0d8b0c1748d469ed0e1b9f6cb2f72afe9b7",
+    "assets/update-public-key.hex": "35a910c2d382346598093b5452085a466c48605f9de289d3ea815f8c95a14828"
+  },
+  "checks": [
+    {
+      "name": "format",
+      "command": [
+        "cargo",
+        "fmt",
+        "--all",
+        "--check"
+      ],
+      "exit_code": 0,
+      "seconds": 1.25,
+      "test_summaries": []
+    },
+    {
+      "name": "sources",
+      "command": [
+        "python3",
+        ".github/scripts/check-dependency-sources.py"
+      ],
+      "exit_code": 0,
+      "seconds": 0.05,
+      "test_summaries": []
+    },
+    {
+      "name": "clippy",
+      "command": [
+        "cargo",
+        "clippy",
+        "--locked",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "seconds": 15.37,
+      "test_summaries": []
+    },
+    {
+      "name": "test-unit",
+      "command": [
+        "cargo",
+        "test",
+        "--lib"
+      ],
+      "exit_code": 0,
+      "seconds": 45.2,
+      "test_summaries": [
+        "2088 passed; 0 failed; 15 ignored"
+      ]
+    },
+    {
+      "name": "packaging-linux-finalize",
+      "command": [
+        "python3",
+        "packaging/test-linux-finalize.py"
+      ],
+      "exit_code": 0,
+      "seconds": 0.01,
+      "test_summaries": [
+        "3 passed; 0 failed"
+      ]
+    },
+    {
+      "name": "packaging-flatpak",
+      "command": [
+        "python3",
+        "packaging/flatpak/test-packaging.py"
+      ],
+      "exit_code": 0,
+      "seconds": 0.1,
+      "test_summaries": [
+        "3 passed; 0 failed"
+      ]
+    },
+    {
+      "name": "packaging-install-user",
+      "command": [
+        "bash",
+        "packaging/test-install-user.sh"
+      ],
+      "exit_code": 0,
+      "seconds": 0.05,
+      "test_summaries": []
+    }
+  ],
+  "limits": [
+    "Tests ran on Linux only. No application tests ran on Windows or macOS.",
+    "No personal archive, messages, contacts or production logs were inspected.",
+    "Live WhatsApp, device synchronization and physical audio/video acceptance were not performed."
+  ]
+}

@@ -393,18 +393,24 @@ impl StickerPreview {
     /// message's `is_animated` flag out.
     pub fn new(path: PathBuf) -> Self {
         use std::io::Read;
+        let lottie = path.extension().is_some_and(|extension| extension == "was");
         // Stickers are small. Bound a file supplied from an old archive before
-        // computing its hash on the interface thread.
+        // computing its hash on the interface thread. Native Lottie is receive-only,
+        // so don't read/hash a potentially large ZIP on the UI thread.
         const MAX_BYTES: u64 = 8 * 1024 * 1024;
-        let bytes = std::fs::File::open(&path).ok().and_then(|file| {
-            let mut bytes = Vec::new();
-            file.take(MAX_BYTES + 1).read_to_end(&mut bytes).ok()?;
-            (bytes.len() as u64 <= MAX_BYTES).then_some(bytes)
-        });
+        let bytes = if lottie {
+            None
+        } else {
+            std::fs::File::open(&path).ok().and_then(|file| {
+                let mut bytes = Vec::new();
+                file.take(MAX_BYTES + 1).read_to_end(&mut bytes).ok()?;
+                (bytes.len() as u64 <= MAX_BYTES).then_some(bytes)
+            })
+        };
         Self {
             chat: None,
             message: None,
-            animated: bytes.as_deref().is_some_and(webp_moves),
+            animated: lottie || bytes.as_deref().is_some_and(webp_moves),
             hash: bytes
                 .as_deref()
                 .map(crate::backend::sticker_store::content_hash),

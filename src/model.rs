@@ -466,6 +466,13 @@ pub struct LinkPreview {
     pub description: Option<String>,
 }
 
+/// A link preview made here for an outgoing message, with its picture as JPEG.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ComposedPreview {
+    pub preview: LinkPreview,
+    pub thumbnail: Option<Vec<u8>>,
+}
+
 pub const EDIT_WINDOW: std::time::Duration = std::time::Duration::from_secs(15 * 60);
 
 /// How many chats a message may be forwarded to at once, as on WhatsApp.
@@ -903,6 +910,9 @@ impl PollDraft {
 
 /// The longest group name WhatsApp accepts, in characters.
 pub const GROUP_NAME_LIMIT: usize = whatsapp_rust::wacore::iq::groups::GROUP_SUBJECT_MAX_LENGTH;
+/// The longest group description WhatsApp takes.
+pub const GROUP_DESCRIPTION_LIMIT: usize =
+    whatsapp_rust::wacore::iq::groups::GROUP_DESCRIPTION_MAX_LENGTH;
 
 /// WhatsApp's longest live location share, in seconds.
 pub const LIVE_LOCATION_LIMIT: i64 = 8 * 60 * 60;
@@ -1182,6 +1192,46 @@ impl Content {
                 card: Some(card), ..
             } => card.image.as_mut(),
             _ => None,
+        }
+    }
+
+    /// Takes the files that `other`, another copy of the same message,
+    /// downloaded where this copy has none: the attachment, a motion photo's
+    /// clip, and each carousel card's image. A file this copy has stays.
+    pub fn fill_local_paths(&mut self, other: &Content) {
+        if let (Some(new), Some(old)) = (self.media_mut(), other.media())
+            && new.path.is_none()
+        {
+            new.path = old.path.clone();
+        }
+        if let (
+            Self::Image { motion: new, .. },
+            Self::Image {
+                motion: Some(old), ..
+            },
+        ) = (&mut *self, other)
+            && new
+                .as_ref()
+                .is_none_or(|new| new.path.is_none() && old.path.is_some())
+        {
+            *new = Some(old.clone());
+        }
+        if let (
+            Self::Interactive {
+                card: Some(new), ..
+            },
+            Self::Interactive {
+                card: Some(old), ..
+            },
+        ) = (self, other)
+        {
+            for (new, old) in new.carousel.iter_mut().zip(&old.carousel) {
+                if let (Some(new), Some(old)) = (&mut new.image, &old.image)
+                    && new.path.is_none()
+                {
+                    new.path = old.path.clone();
+                }
+            }
         }
     }
 }
@@ -1787,6 +1837,12 @@ pub enum Dialog {
     NewContact,
     UnlockLockedChats,
     ConfirmLockChat(ChatId),
+    BlockedContacts,
+    ConfirmBlock {
+        chat: ChatId,
+        blocked: bool,
+        from_list: bool,
+    },
     ChatInfo(ChatId),
     /// Manages the local labels.
     Labels,
@@ -1794,6 +1850,10 @@ pub enum Dialog {
     ConfirmDeleteChat(ChatId),
     /// Confirms clearing a chat's messages, which cannot be undone.
     ConfirmClearChat(ChatId),
+    ExportChat {
+        chat: ChatId,
+        include_media: bool,
+    },
     /// Leaves a group or channel, optionally archiving the chat.
     ConfirmLeaveGroup(ChatId),
     /// Confirms deleting one message. The archive is the only copy, so a
@@ -2015,8 +2075,39 @@ impl MessagePinDuration {
     }
 }
 
+/// The formatting markers the composer context menu offers for selected text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ComposerFormat {
+    Bold,
+    Italic,
+    Strikethrough,
+    Monospace,
+}
+
+impl ComposerFormat {
+    pub const fn marker(self) -> &'static str {
+        match self {
+            Self::Bold => "*",
+            Self::Italic => "_",
+            Self::Strikethrough => "~",
+            Self::Monospace => "```",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Action {
+    FetchBlocklist,
+    SetBlocked {
+        chat: ChatId,
+        blocked: bool,
+    },
+    /// Formats `start..end` of the composer with `format`.
+    FormatComposer {
+        format: ComposerFormat,
+        start: usize,
+        end: usize,
+    },
     ToggleCallLog,
     StartCall(ChatId),
     StartVideoCall(ChatId),
@@ -2173,6 +2264,11 @@ pub enum Action {
         path: PathBuf,
         fraction: f32,
     },
+    /// Plays or pauses the clip in the player from the bar another chat
+    /// shows it in.
+    ToggleVoice,
+    /// Stops the clip in the player.
+    StopVoice,
     /// Sets the voice playback speed to one of the supported speeds.
     SetVoiceSpeed(f32),
     /// Plays or pauses a downloaded video inside its message.
@@ -2242,6 +2338,11 @@ pub enum Action {
     /// Copy a downloaded attachment to a native drag target.
     DragAttachment(PathBuf),
     OpenFolder(PathBuf),
+    ExportChat {
+        chat: ChatId,
+        include_media: bool,
+    },
+    CancelChatExport,
     /// Saves a copy of a downloaded attachment where the person chooses.
     SaveAttachmentAs {
         path: PathBuf,
@@ -2265,6 +2366,9 @@ pub enum Action {
         message: String,
     },
     CancelReply,
+    /// Takes away the link preview above the composer, for its link only:
+    /// the message goes without one.
+    DismissLinkPreview,
     /// Forwards archived messages to one destination chosen by the caller.
     Forward {
         from_chat: ChatId,
@@ -2613,6 +2717,16 @@ pub enum Action {
         chat: ChatId,
         name: String,
     },
+    /// Opens the group description editor, holding the current text.
+    EditGroupDescription(String),
+    /// Closes the group description editor without changing it.
+    CloseGroupDescription,
+    /// Changes a group's description on WhatsApp; the editor closes. Empty
+    /// text removes it.
+    SetGroupDescription {
+        chat: ChatId,
+        description: String,
+    },
     /// Asks for a picture and makes it the group's photo.
     PickGroupPicture(ChatId),
     /// Removes the group's photo.
@@ -2671,6 +2785,8 @@ pub enum Action {
     CloseWindow,
     /// Shows another linked account in the window.
     SwitchAccount(AccountId),
+    /// Moves to the next (`1`) or previous (`-1`) account, wrapping round.
+    CycleAccount(i8),
     /// Starts linking another number beside the ones already here.
     AddAccount,
     /// Leaves an account being added before it was linked.

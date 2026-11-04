@@ -8586,12 +8586,15 @@ mod tests {
                     })
                     .unwrap();
                 assert!(caption.right() <= toggle.left(), "{page} {width}");
-                assert!(toggle.right() <= send.left(), "{page} {width}");
+                assert!(pill.contains_rect(toggle), "{page} {width}");
                 assert!(
-                    pill.contains_rect(toggle) && pill.contains_rect(send),
-                    "{page} {width}"
+                    send.top() >= pill.bottom(),
+                    "Send is below the caption: {page} {width}"
                 );
-                assert!((toggle.center().y - send.center().y).abs() < 1.0);
+                assert!(
+                    ctx.content_rect().contains_rect(send),
+                    "Send fits: {page} {width}"
+                );
             }
         }
     }
