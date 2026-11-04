@@ -1245,7 +1245,7 @@ fn about(app: &mut App, ui: &mut egui::Ui) {
     ui.add_space(6.0);
     theme::paragraph(
         ui,
-        "A community fork of ZapFast and ZapFaster, maintained by a daily user. Built with Rust, egui and whatsapp-rust. Messages are end-to-end encrypted on this device.",
+        "A community fork of ZapFastest and ZapFastest, maintained by a daily user. Built with Rust, egui and whatsapp-rust. Messages are end-to-end encrypted on this device.",
         theme::regular(13.0),
         palette.text,
     );

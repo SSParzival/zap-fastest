@@ -46,7 +46,11 @@ impl Archive {
         ensure!(!known.locked, "Locked chats cannot be exported");
         let folder = target.parent().context("Choose an export folder")?;
         let mut transcript = tempfile::NamedTempFile::new_in(folder)?;
-        writeln!(transcript, "ZapFast chat export: {}", one_line(&known.name))?;
+        writeln!(
+            transcript,
+            "ZapFastest chat export: {}",
+            one_line(&known.name)
+        )?;
         writeln!(
             transcript,
             "Times are UTC. Only locally saved messages are included."
@@ -217,9 +221,15 @@ fn one_line(text: &str) -> String {
 /// Builds a bounded filename component without separators, control characters or dot-only names.
 /// The caller adds a numeric prefix to keep ZIP entries unique.
 fn safe_name(name: &str) -> String {
+    // Limit UTF-8 bytes too, since common filesystems cap components at 255 bytes.
+    let mut bytes = 0;
     let name: String = name
         .chars()
         .take(100)
+        .take_while(|c| {
+            bytes += c.len_utf8();
+            bytes <= 160
+        })
         .map(|c| {
             if c.is_control() || "<>:\"/\\|?*".contains(c) {
                 '_'
@@ -228,6 +238,7 @@ fn safe_name(name: &str) -> String {
             }
         })
         .collect();
+    let name = name.replace("..", "__");
     let name = name.trim_matches(['.', ' ']);
     if name.is_empty() {
         "attachment".into()
@@ -358,6 +369,27 @@ mod tests {
             pages: None,
         };
         row
+    }
+
+    #[test]
+    fn archive_names_are_portable_even_for_long_unicode_and_traversal() {
+        for input in [
+            "../a/../../b",
+            "C:\\Windows\\file",
+            "...",
+            "a\0b",
+            &"👋".repeat(100),
+        ] {
+            let name = safe_name(input);
+            assert!(!name.is_empty());
+            assert!(name.len() <= 160);
+            assert!(!name.contains(".."));
+            assert!(
+                !name
+                    .chars()
+                    .any(|c| c.is_control() || "<>:\"/\\|?*".contains(c))
+            );
+        }
     }
 
     /// Text export retains Unicode, multiline bodies and stable ordering across archive pages.

@@ -1,6 +1,6 @@
-# Zap Faster agent guide
+# ZapFastest agent guide
 
-Zap Faster is a small native WhatsApp client: Rust, egui, and the
+ZapFastest is a small native WhatsApp client: Rust, egui, and the
 [whatsapp-rust](https://github.com/oxidezap/whatsapp-rust) library for the
 protocol. These notes are for coding agents and new contributors.
 
@@ -55,6 +55,16 @@ protocol. These notes are for coding agents and new contributors.
   out of scope, identify the explicit boundary it conflicts with and check
   the relevant implementation and reported version. A missing feature,
   download limit, or stale guide does not establish a permanent boundary.
+
+## Branding compatibility
+
+Use ZapFastest for the application, `zap-fastest` for binaries and packages, and
+`zapfastest` for new slugs. Preserve upstream attribution and published evidence.
+The Rust library import `zapfast`, gettext domain, existing data directories,
+SQLCipher keyring service `rocks.zapfast.ZapFast`, instance wire prefix, Flatpak
+ID and Windows upgrade/login-item identifiers are stable compatibility contracts.
+Do not rename these identities without a tested migration. Old release download
+metadata stays in place until replacement assets have been published.
 
 ## Privacy
 
@@ -173,20 +183,20 @@ protocol. These notes are for coding agents and new contributors.
 - Chat ids are canonical strings: a chat behind a privacy id (`@lid`) is
   filed under its phone number once the mapping is known. Use
   `Worker::canonical` for anything that arrives as a `Jid`.
-- Updates come from fastframe-update: `src/updates.rs` holds Zap Faster's
+- Updates come from fastframe-update: `src/updates.rs` holds ZapFastest's
   `UpdateConfig` (the fork repository, asset names and publisher key) and the
   proxy-aware client. It downloads verified GitHub releases and hands
   installation to a helper after an explicit restart action. `main` calls
   `fastframe_update::intercept` before anything else, so `--apply-update`,
   `--update-receipt` and `--update-error` keep working with older releases'
   helpers (`tests/update_flags.rs`). Portable releases carry
-  `packaging/zap-faster-portable.txt`; the Windows installer has its own marker.
-- Custom themes come from fastframe-theme (`theme::Catalog`, Zap Faster's
+  `packaging/zap-fastest-portable.txt`; the Windows installer has its own marker.
+- Custom themes come from fastframe-theme (`theme::Catalog`, ZapFastest's
   `fastframe_theme::Palette` impl in `src/theme.rs`): it scans local JSON
   palettes off the UI thread, and the app caches the last usable choice in
   settings, with the palettes shared with Spotifast embedded as defaults. On Linux filesystem notifications reload the catalog and the active
   Omarchy palette without a repaint timer; following Omarchy does not require
-  packaged assets. Changing `contrib/omarchy/zap-faster.json.tpl` means saving the
+  packaged assets. Changing `contrib/omarchy/zap-fastest.json.tpl` means saving the
   old text in `contrib/omarchy/previous/` and listing it in
   `omarchy_previous_templates`, so untouched installed copies are upgraded. Native packages ship optional hooks and templates, preserving
   existing per-user files. `reload-themes` uses the single-instance channel
@@ -372,17 +382,17 @@ protocol. These notes are for coding agents and new contributors.
   Linux, tray-icon on Windows and macOS; on macOS made with the first window
   and pumped by `fastframe_tray::idle` while none exists), and `src/macos.rs`
   hands its menu events to `fastframe_tray::claim_menu_event` first.
-  Closing keeps Zap Faster running, and a hidden start stays hidden, only while
+  Closing keeps ZapFastest running, and a hidden start stays hidden, only while
   `Tray::is_shown`: on Linux the item exists before a panel shows it (a
   start at login beats the panel) and registers once one appears. A
   hidden start makes the macOS item with `Tray::create_item`, which does not
-  bring Zap Faster forward; a window's `attach` makes it otherwise.
+  bring ZapFastest forward; a window's `attach` makes it otherwise.
   `src/single_instance.rs` claims fastframe-instance's slot in the runtime
   directory (`Slot::at(runtime, "fastsapp")`, so requests and replies stay
   `fastsapp:show` and `fastsapp:ok` for older copies), and a second launch
   asks the first to surface over a private socket (a token-checked loopback
   port on Windows); the handler queues `ControlCommand`s and declines unknown
-  verbs. The fixed port 47119 that 0.15-era copies look for stays in Zap Faster,
+  verbs. The fixed port 47119 that 0.15-era copies look for stays in ZapFastest,
   answered once the slot is claimed. `src/notify.rs` sends desktop notifications
   for `Event::Incoming` (live messages from others, not history) when the
   reader is away from that chat; a click carries the chat and the message
@@ -522,7 +532,7 @@ A release is not finished when the tag is pushed. Do these in order:
    `packaging/release-notes/vX.Y.Z.md`: the release workflow publishes that
    file as the release description, and a stable tag without it fails. Link
    screenshots at the release's asset URLs
-   (`https://github.com/eternalwaitt/zap-faster/releases/download/vX.Y.Z/NAME.png`).
+   (`https://github.com/SSParzival/zap-fastest/releases/download/vX.Y.Z/NAME.png`).
    Run the full checks, commit, and push `main`. Before tagging, verify the
    release commit is reachable from the fork's public main so the binaries report the
    right version and the release contains the canonical history.
@@ -536,7 +546,7 @@ A release is not finished when the tag is pushed. Do these in order:
    The menu lists only the current version, which points to `/download/`,
    and the Changelog link; do not add older versions to it. Never point the
    download page at files that do not exist yet. Set `release_asset_prefix` to
-   `zap-faster` and `release_app_name` to `Zap Faster` only once those assets exist.
+   `zap-fastest` and `release_app_name` to `ZapFastest` only once those assets exist.
 5. Update the AUR packages from the templates in `packaging/arch/`. The shared
    packaging workflow generates versions, hashes and `.SRCINFO` after the
    release exists, and publishes when `PUBLISH_AUR` and the required secrets

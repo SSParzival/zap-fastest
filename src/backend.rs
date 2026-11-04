@@ -266,6 +266,7 @@ pub enum Command {
     FetchLinkPreview {
         url: String,
     },
+    CancelLinkPreview,
     SendLocation {
         chat: ChatId,
         latitude: f64,
@@ -609,12 +610,12 @@ pub enum Command {
         complete: bool,
     },
     /// Internal: the one-time replay of the phone's contacts, for the first
-    /// names saved before Zap Faster kept them, finished.
+    /// names saved before ZapFastest kept them, finished.
     FirstNamesRecovered {
         complete: bool,
     },
     /// Internal: the one-time replay of the phone's stars, for those made
-    /// before ZapFast followed them, finished.
+    /// before ZapFastest followed them, finished.
     StarsRecovered {
         complete: bool,
     },
@@ -957,7 +958,7 @@ pub enum Command {
     /// Sets aside an unreadable archive and the linked session, then starts
     /// over with a new archive and a new link.
     StartOverArchive,
-    /// Whether the person is looking at Zap Faster. While they are not, the
+    /// Whether the person is looking at ZapFastest. While they are not, the
     /// linked phone keeps receiving push notifications.
     SetOnline(bool),
     Shutdown,

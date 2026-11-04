@@ -27,29 +27,29 @@ docker run --rm \
     set -- /packages/*."$FORMAT"
     test "$#" -eq 1
     test -f "$1"
-    mkdir -p /root/.config/zap-faster
-    printf "%s\n" "preserve-existing-settings" > /root/.config/zap-faster/fixture
+    mkdir -p /root/.config/zap-fastest
+    printf "%s\n" "preserve-existing-settings" > /root/.config/zap-fastest/fixture
     if [ "$FORMAT" = deb ]; then
       apt-get update
       DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "$1"
-      dpkg-query -W zap-faster
+      dpkg-query -W zap-fastest
     else
       dnf install -y --setopt=install_weak_deps=False "$1"
-      rpm -q zap-faster
+      rpm -q zap-fastest
     fi
-    zap-faster --version
+    zap-fastest --version
     /checks/check-runtime-libs
-    test -s /usr/share/applications/zap-faster.desktop
-    test -s /usr/share/icons/hicolor/scalable/apps/zap-faster.svg
-    grep -qx "Icon=zap-faster" /usr/share/applications/zap-faster.desktop
-    grep -qx "StartupWMClass=zap-faster" /usr/share/applications/zap-faster.desktop
-    test -s /usr/share/zap-faster/omarchy/zap-faster.json.tpl
-    test -x /usr/share/zap-faster/omarchy/zap-faster-theme
-    if [ "$FORMAT" = deb ]; then apt-get remove -y zap-faster; else dnf remove -y zap-faster; fi
-    test ! -e /usr/bin/zap-faster
-    test ! -e /usr/share/applications/zap-faster.desktop
-    test ! -e /usr/share/icons/hicolor/scalable/apps/zap-faster.svg
-    test ! -e /usr/share/zap-faster/omarchy/zap-faster.json.tpl
-    test ! -e /usr/share/zap-faster/omarchy/zap-faster-theme
-    test "$(cat /root/.config/zap-faster/fixture)" = preserve-existing-settings
+    test -s /usr/share/applications/zap-fastest.desktop
+    test -s /usr/share/icons/hicolor/scalable/apps/zap-fastest.svg
+    grep -qx "Icon=zap-fastest" /usr/share/applications/zap-fastest.desktop
+    grep -qx "StartupWMClass=zap-fastest" /usr/share/applications/zap-fastest.desktop
+    test -s /usr/share/zap-fastest/omarchy/zap-fastest.json.tpl
+    test -x /usr/share/zap-fastest/omarchy/zap-fastest-theme
+    if [ "$FORMAT" = deb ]; then apt-get remove -y zap-fastest; else dnf remove -y zap-fastest; fi
+    test ! -e /usr/bin/zap-fastest
+    test ! -e /usr/share/applications/zap-fastest.desktop
+    test ! -e /usr/share/icons/hicolor/scalable/apps/zap-fastest.svg
+    test ! -e /usr/share/zap-fastest/omarchy/zap-fastest.json.tpl
+    test ! -e /usr/share/zap-fastest/omarchy/zap-fastest-theme
+    test "$(cat /root/.config/zap-fastest/fixture)" = preserve-existing-settings
   '

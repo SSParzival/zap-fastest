@@ -1,4 +1,4 @@
-//! Where Zap Faster keeps its files.
+//! Where ZapFastest keeps its files.
 //!
 //! Configuration, session state, and caches use separate standard platform
 //! directories. Clearing a cache does not remove device keys.
@@ -307,13 +307,13 @@ impl AppDirs {
         self.state.join("stickers")
     }
 
-    /// Zap Faster's copy of the chosen chat wallpaper image. User data, so it
+    /// ZapFastest's copy of the chosen chat wallpaper image. User data, so it
     /// sits beside saved stickers rather than in the cache.
     pub fn wallpaper_file(&self, extension: &str) -> PathBuf {
         self.state.join(format!("wallpaper.{extension}"))
     }
 
-    /// ZapFast's copy of the font file chosen in Settings. User data, so it
+    /// ZapFastest's copy of the font file chosen in Settings. User data, so it
     /// sits in the state directory beside the wallpaper image.
     pub fn custom_font_dir(&self) -> PathBuf {
         self.state.join("font")
@@ -404,7 +404,7 @@ impl AccountDirs {
         self.state.join("stickers")
     }
 
-    /// Zap Faster's copy of the chosen chat wallpaper image for this account.
+    /// ZapFastest's copy of the chosen chat wallpaper image for this account.
     pub fn wallpaper_file(&self, extension: &str) -> PathBuf {
         self.state.join(format!("wallpaper.{extension}"))
     }

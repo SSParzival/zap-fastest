@@ -1,9 +1,9 @@
-cask "zap-faster" do
+cask "zap-fastest" do
   version "@VERSION@"
   sha256 "@MACOS_SHA256@"
 
-  url "https://github.com/SSParzival/zap-fastest/releases/download/v#{version}/zap-faster-v#{version}-macos-universal.dmg"
-  name "Zap Faster"
+  url "https://github.com/SSParzival/zap-fastest/releases/download/v#{version}/zap-fastest-v#{version}-macos-universal.dmg"
+  name "ZapFastest"
   desc "Native WhatsApp client"
   homepage "https://github.com/SSParzival/zap-fastest"
 
@@ -12,5 +12,5 @@ cask "zap-faster" do
     strategy :github_latest
   end
 
-  app "Zap Faster.app"
+  app "ZapFastest.app"
 end

@@ -13,6 +13,8 @@ use rasterlottie::{Animation, RenderConfig, Renderer, Rgba8};
 
 const MAX_ARCHIVE_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_JSON_BYTES: u64 = 2 * 1024 * 1024;
+const MAX_JSON_NODES: usize = 30_000;
+const MAX_EXPANDED_LAYERS: usize = 512;
 const MAX_CANVAS_SIDE: u32 = 1024;
 const MAX_DURATION: f32 = 15.0;
 const MAX_FPS: f32 = 24.0;
@@ -52,6 +54,91 @@ fn animation_json(path: &Path) -> Option<String> {
     String::from_utf8(data).ok()
 }
 
+/// Bound work before the renderer expands precompositions or decodes assets.
+/// Its image loader has no allocation limit, so raster assets are refused here.
+fn bounded_document(json: &str) -> Option<()> {
+    use serde_json::Value;
+    let document: Value = serde_json::from_str(json).ok()?;
+    let mut nodes = 0;
+    let mut stack = vec![(&document, 0)];
+    while let Some((value, depth)) = stack.pop() {
+        nodes += 1;
+        if nodes > MAX_JSON_NODES || depth > 32 {
+            return None;
+        }
+        match value {
+            Value::Array(values) => stack.extend(values.iter().map(|v| (v, depth + 1))),
+            Value::Object(values) => {
+                // Repeaters and expressions can multiply work independently of file size.
+                if values.get("ty").and_then(Value::as_str) == Some("rp")
+                    || values.contains_key("x") && values.get("x").is_some_and(Value::is_string)
+                {
+                    return None;
+                }
+                stack.extend(values.values().map(|v| (v, depth + 1)));
+            }
+            Value::Number(number) if number.as_f64()?.abs() > 1_000_000.0 => return None,
+            _ => {}
+        }
+    }
+    let assets = document.get("assets").and_then(Value::as_array);
+    let mut compositions = std::collections::HashMap::new();
+    for asset in assets.into_iter().flatten() {
+        if asset.get("p").is_some() {
+            return None;
+        }
+        let id = asset.get("id")?.as_str()?;
+        if compositions.insert(id, asset).is_some() {
+            return None;
+        }
+    }
+    // Walk every reachable layer with its ancestry; reject cycles and exponential
+    // reuse as well as chains too deep for the renderer's recursive traversal.
+    let mut pending = vec![(&document, Vec::<&str>::new())];
+    // Preparation also visits assets unused by root layers.
+    pending.extend(compositions.iter().map(|(id, asset)| (*asset, vec![*id])));
+    let mut expanded = 0;
+    while let Some((composition, ancestry)) = pending.pop() {
+        if ancestry.len() > 8 {
+            return None;
+        }
+        let layers = composition.get("layers").and_then(Value::as_array);
+        let mut parents = std::collections::HashMap::new();
+        for layer in layers.into_iter().flatten() {
+            expanded += 1;
+            if expanded > MAX_EXPANDED_LAYERS {
+                return None;
+            }
+            if let Some(index) = layer.get("ind").and_then(Value::as_i64)
+                && parents
+                    .insert(index, layer.get("parent").and_then(Value::as_i64))
+                    .is_some()
+            {
+                return None;
+            }
+            if let Some(reference) = layer.get("refId").and_then(Value::as_str) {
+                if ancestry.contains(&reference) {
+                    return None;
+                }
+                let mut next = ancestry.clone();
+                next.push(reference);
+                pending.push((*compositions.get(reference)?, next));
+            }
+        }
+        for index in parents.keys() {
+            let mut seen = std::collections::HashSet::new();
+            let mut current = Some(*index);
+            while let Some(index) = current {
+                if !seen.insert(index) {
+                    return None;
+                }
+                current = parents.get(&index).copied().flatten();
+            }
+        }
+    }
+    Some(())
+}
+
 /// Rasterize at most `requested` frames. One requested frame is the poster;
 /// the shared animation cache only requests the rest during actual playback.
 pub(crate) fn decode(path: &Path, requested: usize) -> Option<Vec<(ColorImage, Duration)>> {
@@ -59,6 +146,7 @@ pub(crate) fn decode(path: &Path, requested: usize) -> Option<Vec<(ColorImage, D
         return None;
     }
     let json = animation_json(path)?;
+    bounded_document(&json)?;
     let animation = Animation::from_json_str(&json).ok()?;
     if animation.width == 0
         || animation.height == 0
@@ -134,6 +222,39 @@ mod tests {
                 .iter()
                 .all(|(_, delay)| *delay >= Duration::from_millis(20))
         );
+    }
+
+    #[test]
+    fn refuses_recursive_assets_parent_cycles_and_embedded_images() {
+        for extra in [
+            r#""layers":[{"ty":0,"refId":"loop"}],"assets":[{"id":"loop","layers":[{"ty":0,"refId":"loop"}]}]"#,
+            r#""layers":[{"ty":3,"ind":1,"parent":2},{"ty":3,"ind":2,"parent":1}]"#,
+            r#""assets":[{"id":"unused","layers":[{"ty":0,"refId":"unused"}]}]"#,
+            r#""assets":[{"id":"image","p":"data:image/png;base64,AAAA"}]"#,
+            r#""layers":[{"ty":4,"shapes":[{"ty":"rp","c":{"k":100000}}]}]"#,
+        ] {
+            assert!(bounded_document(&format!("{{{extra}}}")).is_none());
+        }
+        assert!(bounded_document(JSON).is_some());
+    }
+
+    #[test]
+    fn refuses_zip_decompression_bombs() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bomb.was");
+        let file = std::fs::File::create(&path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        zip.start_file(
+            "animation.json",
+            zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated),
+        )
+        .unwrap();
+        zip.write_all(&vec![b' '; MAX_JSON_BYTES as usize + 1])
+            .unwrap();
+        zip.finish().unwrap();
+        assert!(std::fs::metadata(&path).unwrap().len() < MAX_ARCHIVE_BYTES);
+        assert!(decode(&path, 1).is_none());
     }
 
     #[test]

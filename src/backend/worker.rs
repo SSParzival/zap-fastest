@@ -657,7 +657,7 @@ pub async fn run(
     let privacy_snapshot =
         !privacy_confirmed && archive.chats().is_ok_and(|chats| !chats.is_empty());
     // A new link receives the phone's favorites and its "Keep chats archived"
-    // with its first sync; only an archive filled before ZapFast followed
+    // with its first sync; only an archive filled before ZapFastest followed
     // them needs them replayed.
     let replayed = [
         stickers::FAVORITES_RECOVERED,
@@ -701,7 +701,7 @@ pub async fn run(
                 .is_ok());
     let account_settings = crate::settings::AccountSettings::load(&dirs.settings_file());
     let sync_mode = account_settings.sync_mode;
-    // Only stars synced before ZapFast followed them were consumed unseen.
+    // Only stars synced before ZapFastest followed them were consumed unseen.
     let stars_recovered = archive
         .meta(star_recovery::STARS_RECOVERED)
         .ok()
@@ -986,6 +986,9 @@ pub async fn run(
             }
         }
     }
+    if let Some(task) = worker.preview_fetch.take() {
+        task.abort();
+    }
     worker.stop_chat_export().await;
     worker.shutdown_call().await;
     worker.stop_bot().await;
@@ -1095,7 +1098,7 @@ fn invite_error(error: &str) -> String {
 /// unconfirmed. A healthy sync answers well within this.
 const PRIVACY_GRACE: Duration = Duration::from_secs(10);
 
-/// How long Zap Faster stays "available" after the window loses focus.
+/// How long ZapFastest stays "available" after the window loses focus.
 const PRESENCE_LINGER: Duration = Duration::from_secs(10);
 
 /// Waits longer after each failed lock-state recovery, so a collection the
@@ -1419,7 +1422,7 @@ struct Worker {
     favorites_pushing: bool,
     /// More favorite changes arrived while a push was running.
     favorites_again: bool,
-    /// The phone's favorites from before Zap Faster followed them were replayed.
+    /// The phone's favorites from before ZapFastest followed them were replayed.
     favorites_recovered: bool,
     /// That replay is running.
     favorites_recovering: bool,
@@ -1427,7 +1430,7 @@ struct Worker {
     first_names_recovered: bool,
     /// That replay is running.
     first_names_recovering: bool,
-    /// The phone's stars from before ZapFast followed them were replayed.
+    /// The phone's stars from before ZapFastest followed them were replayed.
     stars_recovered: bool,
     /// That replay is running.
     stars_recovering: bool,
@@ -4215,9 +4218,18 @@ impl Worker {
                 ) {
                     Ok(disabled) => {
                         self.link_previews_disabled = disabled;
+                        if disabled && let Some(task) = self.preview_fetch.take() {
+                            task.abort();
+                        }
                         self.emit(Event::LinkPreviewsDisabled(disabled));
                     }
                     Err(error) => {
+                        // A storage failure must never override a privacy refusal.
+                        self.link_previews_disabled = true;
+                        if let Some(task) = self.preview_fetch.take() {
+                            task.abort();
+                        }
+                        self.emit(Event::LinkPreviewsDisabled(true));
                         log::warn!("could not store the phone's link preview setting: {error}")
                     }
                 }
@@ -4308,6 +4320,9 @@ impl Worker {
 
     /// Invalidates account-scoped work and clears the unlinked account before publishing logout.
     async fn on_logged_out(&mut self) {
+        if let Some(task) = self.preview_fetch.take() {
+            task.abort();
+        }
         self.stop_chat_export().await;
         self.shutdown_call().await;
         self.sticker_download_failed.clear();
@@ -6939,6 +6954,11 @@ impl Worker {
                 preview,
             } => self.send_text(chat, text, quoting, mentions, preview),
             Command::FetchLinkPreview { url } => self.fetch_link_preview(url),
+            Command::CancelLinkPreview => {
+                if let Some(task) = self.preview_fetch.take() {
+                    task.abort();
+                }
+            }
             Command::SendLocation {
                 chat,
                 latitude,
@@ -13364,7 +13384,7 @@ fn whatsapp_audio_mime(mime: &str) -> Option<&'static str> {
 /// inline, and WhatsApp drops a video message in another container (a
 /// QuickTime `.mov`, WebM, MKV, AVI) without telling either side, so the
 /// recipient gets nothing (#553). Those go as documents and arrive as the
-/// original file; ZapFast does not transcode.
+/// original file; ZapFastest does not transcode.
 fn whatsapp_video_mime(mime: &str, bytes: &[u8]) -> bool {
     mime == "video/mp4"
         && mp4::Mp4Reader::read_header(std::io::Cursor::new(bytes), bytes.len() as u64)
@@ -21526,7 +21546,7 @@ mod receipt_tests {
         let archived = |worker: &Worker| worker.archive.chat(PEER).unwrap().unwrap().archived;
         worker.store_message(incoming("before", 100), None, None);
         worker.archive.set_archived_at(PEER, true, 200_000).unwrap();
-        // Kept archived, the default, as Zap Faster always behaved.
+        // Kept archived, the default, as ZapFastest always behaved.
         worker.store_message(incoming("kept", 300), None, None);
         assert!(archived(&worker));
 

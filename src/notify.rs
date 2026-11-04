@@ -476,7 +476,7 @@ pub fn lines(
 
 /// What a Linux notification asks of the desktop's sound. The system sound is
 /// named, because notification servers such as Plasma's play nothing for an
-/// application without its own notification configuration. Zap Faster's own sounds
+/// application without its own notification configuration. ZapFastest's own sounds
 /// and silence keep the desktop quiet.
 #[cfg(target_os = "linux")]
 fn sound_hint(system_sound: bool) -> notify_rust::Hint {
@@ -508,7 +508,7 @@ fn deliver(
     notification
         .appname("ZapFastest")
         // Ties the notification to the installed application, so desktops
-        // list Zap Faster in their notification settings and group by it.
+        // list ZapFastest in their notification settings and group by it.
         .hint(notify_rust::Hint::DesktopEntry(badge::desktop_file()))
         .summary(title)
         .body(body)

@@ -11,16 +11,7 @@ set -euo pipefail
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 repo=$(dirname -- "$here")
 
-binary=${1:-""}
-if [[ -z "$binary" ]]; then
-  if [[ -x "$repo/target/release/zap-fastest" ]]; then
-    binary="$repo/target/release/zap-fastest"
-  elif [[ -x "$repo/target/release/zap-faster" ]]; then
-    binary="$repo/target/release/zap-faster"
-  else
-    binary="$repo/target/release/zap-fastest"
-  fi
-fi
+binary=${1:-"$repo/target/release/zap-fastest"}
 
 prefix=${2:-"${PREFIX:-}"}
 if [[ -n "$prefix" ]]; then
@@ -46,14 +37,9 @@ install -Dm755 "$binary" "$installed"
 
 if [[ -f "$here/icons/zap-fastest.svg" ]]; then
   install -Dm644 "$here/icons/zap-fastest.svg" "$icons_dir/zap-fastest.svg"
-elif [[ -f "$here/icons/zap-faster.svg" ]]; then
-  install -Dm644 "$here/icons/zap-faster.svg" "$icons_dir/zap-faster.svg"
 fi
 
 desktop_src="$here/applications/zap-fastest.desktop"
-if [[ ! -f "$desktop_src" ]]; then
-  desktop_src="$here/applications/zap-faster.desktop"
-fi
 
 EXEC_PATH="$installed" awk '
   function quote(path,   out, i, c) {

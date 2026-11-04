@@ -353,7 +353,7 @@ impl WallpaperColor {
     }
 }
 
-/// How long Zap Faster may go without input before the app lock locks it:
+/// How long ZapFastest may go without input before the app lock locks it:
 /// WhatsApp Web's three choices.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -433,7 +433,7 @@ pub enum NotificationSound {
     System,
     /// No sound.
     None,
-    /// An audio file Zap Faster plays itself.
+    /// An audio file ZapFastest plays itself.
     Custom(std::path::PathBuf),
 }
 
@@ -559,7 +559,7 @@ pub struct Settings {
     pub wallpaper_color: WallpaperColor,
     /// Colour selected for the dark wallpaper picker.
     pub dark_wallpaper_color: WallpaperColor,
-    /// Zap Faster's own copy of the chosen wallpaper image, drawn in place of the
+    /// ZapFastest's own copy of the chosen wallpaper image, drawn in place of the
     /// colour and doodles in light and dark mode alike.
     pub wallpaper_image: Option<std::path::PathBuf>,
     /// Whether startup opens the last chat. The chat remains remembered when off.
@@ -629,7 +629,7 @@ pub struct Settings {
     /// Salted, slow verifier of the app lock password
     /// ([`crate::app_lock::verifier`]); `None` leaves the app lock off.
     pub app_lock_hash: Option<String>,
-    /// How long Zap Faster may go unused before the app lock locks it.
+    /// How long ZapFastest may go unused before the app lock locks it.
     pub app_lock_after: AutoLock,
     /// Last window width in logical pixels (points at zoom 1), remembered
     /// across restarts; see [`fastframe_shell::window::Geometry`]. `None`

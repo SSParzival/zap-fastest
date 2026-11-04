@@ -1,4 +1,4 @@
-# Zap Faster as a Flatpak, built from source: the manifest Flathub builds
+# ZapFastest as a Flatpak, built from source: the manifest Flathub builds
 # from. The copy in the Flathub repository names a tag and its commit in
 # the source below and carries cargo-sources.json next to it; flathub.sh
 # writes both. For a local build, this one takes the checkout as it is:
@@ -16,7 +16,7 @@ sdk: org.freedesktop.Sdk
 sdk-extensions:
   - org.freedesktop.Sdk.Extension.rust-stable
   - org.freedesktop.Sdk.Extension.llvm22
-command: zap-faster
+command: zap-fastest
 finish-args:
   # Wayland first, X11 when that is what there is.
   - --socket=wayland
@@ -37,24 +37,24 @@ build-options:
   append-path: /usr/lib/sdk/rust-stable/bin
   prepend-ld-library-path: /usr/lib/sdk/llvm22/lib
   env:
-    CARGO_HOME: /run/build/zap-faster/cargo
+    CARGO_HOME: /run/build/zap-fastest/cargo
     # Camera bindings use bindgen at build time, not at runtime.
     LIBCLANG_PATH: /usr/lib/sdk/llvm22/lib
     # The crate ships bindings for its pinned whisper.cpp revision.
     # Keep using those supported bindings for speech transcription.
     WHISPER_DONT_GENERATE_BINDINGS: '1'
 modules:
-  - name: zap-faster
+  - name: zap-fastest
     buildsystem: simple
     build-commands:
       - cargo --offline fetch --manifest-path Cargo.toml --verbose
       - cargo --offline build --release --locked
-      - bin="target/release/zap-fastest"; [ -f "$bin" ] || bin="target/release/zap-faster"; install -Dm755 "$bin" /app/bin/zap-faster; ln -sf zap-faster /app/bin/zap-fastest
-      - desktop="packaging/applications/zap-fastest.desktop"; [ -f "$desktop" ] || desktop="packaging/applications/zap-faster.desktop"; install -Dm644 "$desktop" /app/share/applications/io.github.eternalwaitt.ZapFaster.desktop
+      - bin="target/release/zap-fastest"; install -Dm755 "$bin" /app/bin/zap-fastest
+      - desktop="packaging/applications/zap-fastest.desktop"; install -Dm644 "$desktop" /app/share/applications/io.github.eternalwaitt.ZapFaster.desktop
       - sed -i 's/^Icon=.*$/Icon=io.github.eternalwaitt.ZapFaster/;s/^StartupWMClass=zap-fast\(est\|er\)$/StartupWMClass=io.github.eternalwaitt.ZapFaster/' /app/share/applications/io.github.eternalwaitt.ZapFaster.desktop
-      - install -Dm644 packaging/icons/zap-faster.svg /app/share/icons/hicolor/scalable/apps/io.github.eternalwaitt.ZapFaster.svg
+      - install -Dm644 packaging/icons/zap-fastest.svg /app/share/icons/hicolor/scalable/apps/io.github.eternalwaitt.ZapFaster.svg
       - install -Dm644 packaging/flatpak/io.github.eternalwaitt.ZapFaster.metainfo.xml /app/share/metainfo/io.github.eternalwaitt.ZapFaster.metainfo.xml
-      - install -Dm644 LICENSE /app/share/licenses/zap-faster/LICENSE
+      - install -Dm644 LICENSE /app/share/licenses/zap-fastest/LICENSE
     sources:
       - type: dir
         path: ../..

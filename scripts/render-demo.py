@@ -2,7 +2,7 @@
 """Add the tour's pointer, click rings, and shortcut captions to a silent MP4.
 
 The app emits only input timing and coordinates. All visual annotations are
-composited here, outside ZapFast. Requires ffmpeg with libass, and ffprobe.
+composited here, outside ZapFastest. Requires ffmpeg with libass, and ffprobe.
 """
 import argparse
 import json

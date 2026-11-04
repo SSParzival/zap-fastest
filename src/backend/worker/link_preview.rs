@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use crate::model::{ComposedPreview, LinkPreview};
 
-const USER_AGENT: &str = concat!("ZapFast/", env!("CARGO_PKG_VERSION"));
+const USER_AGENT: &str = concat!("ZapFastest/", env!("CARGO_PKG_VERSION"));
 /// Page and picture together.
 const TOTAL_TIME: Duration = Duration::from_secs(5);
 const MAX_PAGE: usize = 512 * 1024;
@@ -412,51 +412,52 @@ impl reqwest::dns::Resolve for GuardedResolver {
 async fn read_body(mut response: reqwest::Response, limit: usize) -> Option<(Vec<u8>, bool)> {
     let mut body = Vec::new();
     while let Some(chunk) = response.chunk().await.ok()? {
-        body.extend_from_slice(&chunk);
-        if body.len() > limit {
-            body.truncate(limit);
+        let remaining = limit.saturating_sub(body.len());
+        body.extend_from_slice(&chunk[..chunk.len().min(remaining)]);
+        if chunk.len() > remaining {
             return Some((body, true));
         }
     }
     Some((body, false))
 }
 
-/// Makes SOCKS proxies resolve the target name themselves, so it is never
-/// looked up on this computer. Credentials and other schemes are unchanged.
-fn proxy_url_for_preview(url: &str) -> String {
-    if let Some(rest) = url.strip_prefix("socks5://") {
-        format!("socks5h://{rest}")
-    } else if let Some(rest) = url.strip_prefix("socks4://") {
-        format!("socks4a://{rest}")
-    } else {
-        url.to_owned()
-    }
+/// A remote proxy resolves names outside our guarded resolver. Refuse previews
+/// in that case: local DNS checks cannot establish which address it will use,
+/// and bypassing the proxy would leak the reader's address.
+fn proxy_environment_present(mut lookup: impl FnMut(&str) -> Option<String>) -> bool {
+    [
+        "ALL_PROXY",
+        "all_proxy",
+        "HTTPS_PROXY",
+        "https_proxy",
+        "HTTP_PROXY",
+        "http_proxy",
+    ]
+    .iter()
+    .any(|name| lookup(name).is_some_and(|value| !value.trim().is_empty()))
 }
 
-fn client(url: &reqwest::Url) -> Option<reqwest::Client> {
-    let mut builder = reqwest::Client::builder()
+fn client() -> Option<reqwest::Client> {
+    // NO_PROXY only exempts the initial host, not every redirect or OG image.
+    // Fail closed for the whole fetch, including malformed proxy settings.
+    if crate::proxy::from_settings().is_some()
+        || proxy_environment_present(|name| std::env::var(name).ok())
+    {
+        return None;
+    }
+    reqwest::Client::builder()
         .user_agent(USER_AGENT)
         .redirect(reqwest::redirect::Policy::custom(|attempt| {
-            if attempt.previous().len() > MAX_REDIRECTS || !literal_host_allowed(attempt.url()) {
+            if attempt.previous().len() >= MAX_REDIRECTS || !literal_host_allowed(attempt.url()) {
                 attempt.stop()
             } else {
                 attempt.follow()
             }
         }))
-        .no_proxy();
-    let proxied = if let Some(proxy) = crate::proxy::from_settings() {
-        builder = builder.proxy(reqwest::Proxy::all(proxy_url_for_preview(proxy.url())).ok()?);
-        true
-    } else if let Some(proxy) = url.host_str().and_then(crate::proxy::from_env) {
-        builder = builder.proxy(reqwest::Proxy::all(proxy_url_for_preview(proxy.url())).ok()?);
-        true
-    } else {
-        false
-    };
-    if !proxied {
-        builder = builder.dns_resolver(Arc::new(GuardedResolver));
-    }
-    builder.build().ok()
+        .no_proxy()
+        .dns_resolver(Arc::new(GuardedResolver))
+        .build()
+        .ok()
 }
 
 /// Read the page at `url` and, if it describes itself, its picture. Only the
@@ -476,7 +477,7 @@ async fn fetch_inner(url: String) -> Option<ComposedPreview> {
     if !literal_host_allowed(&parsed) {
         return None;
     }
-    let client = client(&parsed)?;
+    let client = client()?;
 
     let response = client.get(parsed).send().await.ok()?;
     if !response.status().is_success() {
@@ -565,18 +566,36 @@ mod tests {
     }
 
     #[test]
-    fn socks_proxies_resolve_names_remotely() {
-        assert_eq!(
-            proxy_url_for_preview("socks5://u:p@127.0.0.1:1080"),
-            "socks5h://u:p@127.0.0.1:1080"
-        );
-        assert_eq!(
-            proxy_url_for_preview("socks4://127.0.0.1:1080"),
-            "socks4a://127.0.0.1:1080"
-        );
-        for kept in ["socks5h://u:p@h:1", "socks4a://h:1", "http://u:p@h:8080"] {
-            assert_eq!(proxy_url_for_preview(kept), kept);
+    fn proxy_environment_blocks_previews_even_when_the_initial_host_is_exempt() {
+        for name in [
+            "ALL_PROXY",
+            "all_proxy",
+            "HTTPS_PROXY",
+            "https_proxy",
+            "HTTP_PROXY",
+            "http_proxy",
+        ] {
+            assert!(proxy_environment_present(|key| {
+                match key {
+                    "NO_PROXY" => Some("example.com".into()),
+                    key if key == name => Some("http://proxy.example:8080".into()),
+                    _ => None,
+                }
+            }));
         }
+        assert!(!proxy_environment_present(|_| None));
+        assert!(!proxy_environment_present(|_| Some("  ".into())));
+        assert!(proxy_environment_present(|_| Some(
+            "malformed proxy".into()
+        )));
+    }
+
+    #[tokio::test]
+    async fn response_body_is_capped_even_for_one_large_chunk() {
+        let response = reqwest::Response::from(http::Response::new(vec![b'x'; 4096]));
+        let (bytes, truncated) = read_body(response, 128).await.unwrap();
+        assert_eq!(bytes.len(), 128);
+        assert!(truncated);
     }
 
     fn base() -> reqwest::Url {

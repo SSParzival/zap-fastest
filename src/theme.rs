@@ -15,9 +15,9 @@ pub type Catalog = fastframe_theme::Catalog<Palette>;
 /// What a normal launch adds to the catalogue. Demos and tests leave it out
 /// and stay isolated from the desktop and its files.
 pub const DESKTOP_THEMES: fastframe_theme::DesktopThemes = fastframe_theme::DesktopThemes {
-    slug: "zap-faster",
-    omarchy_template: include_str!("../contrib/omarchy/zap-faster.json.tpl"),
-    // Every template Zap Faster shipped before, so an untouched copy installed
+    slug: "zap-fastest",
+    omarchy_template: include_str!("../contrib/omarchy/zap-fastest.json.tpl"),
+    // Every template ZapFastest shipped before, so an untouched copy installed
     // by an older release is replaced with the current one.
     omarchy_previous_templates: &[include_str!(
         "../contrib/omarchy/previous/zap-faster-1.json.tpl"
@@ -25,7 +25,7 @@ pub const DESKTOP_THEMES: fastframe_theme::DesktopThemes = fastframe_theme::Desk
     presets: true,
 };
 
-/// The shared palettes, as Zap Faster reads them.
+/// The shared palettes, as ZapFastest reads them.
 pub fn presets() -> impl Iterator<Item = CustomTheme> {
     fastframe_theme::presets::themes::<Palette>()
 }
@@ -465,7 +465,7 @@ impl fastframe_theme::Palette for Palette {
     }
 
     /// Spotifast palettes share the sixteen interface colours. Derive the
-    /// chat-only colours when importing one, while keeping explicit Zap Faster
+    /// chat-only colours when importing one, while keeping explicit ZapFastest
     /// overrides.
     fn derive(&mut self, given: &std::collections::BTreeSet<&str>) {
         if given.contains("window") && !given.contains("chat") {
@@ -886,7 +886,7 @@ pub fn apply_text_rendering_change(ctx: &egui::Context) -> bool {
 
 fastframe_icons::icons! {
     /// Every icon the interface draws. Icons Spotifast ships too come from
-    /// fastframe-icons (`lucide`); the rest are Zap Faster's own files.
+    /// fastframe-icons (`lucide`); the rest are ZapFastest's own files.
     pub enum Icon {
         prefix: "zapfast-icon-",
         directory: "../assets/icons/",
@@ -1788,7 +1788,7 @@ mod tests {
         assert!(ratio >= 4.5, "hover contrast is only {ratio:.2}:1");
     }
 
-    /// Every colour Zap Faster has can be set by name, including the chat
+    /// Every colour ZapFastest has can be set by name, including the chat
     /// colours Spotifast's palettes lack; explicit ones win over derived ones.
     #[test]
     fn palette_files_set_every_colour_and_keep_explicit_chat_colours() {
@@ -1837,11 +1837,11 @@ mod tests {
         );
     }
 
-    /// Zap Faster's Omarchy template adds the chat colours to the base ones and
+    /// ZapFastest's Omarchy template adds the chat colours to the base ones and
     /// renders as Omarchy's own renderer does.
     #[test]
     fn the_omarchy_template_renders_like_omarchy_in_light_and_dark_themes() {
-        const TEMPLATE: &str = include_str!("../contrib/omarchy/zap-faster.json.tpl");
+        const TEMPLATE: &str = include_str!("../contrib/omarchy/zap-fastest.json.tpl");
         for (colors, expected) in [
             (
                 include_str!("../tests/fixtures/omarchy/catppuccin.tsv"),
@@ -1873,9 +1873,9 @@ mod tests {
     #[test]
     fn the_shipped_omarchy_hook_has_not_drifted() {
         assert_eq!(
-            include_str!("../contrib/omarchy/zap-faster-theme").replace("\r\n", "\n"),
-            fastframe_theme::omarchy::hook_script("zap-faster")
-                .replace("/zap-faster/themes}", "/zapfast/themes}")
+            include_str!("../contrib/omarchy/zap-fastest-theme").replace("\r\n", "\n"),
+            fastframe_theme::omarchy::hook_script("zap-fastest")
+                .replace("/zap-fastest/themes}", "/zapfast/themes}")
         );
     }
 

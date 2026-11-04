@@ -116,6 +116,7 @@ impl Worker {
         self.blocklist.pending = false;
         if result.is_err() {
             self.publish_blocklist(Some(crate::blocking::Failure::Refused));
+            self.fetch_blocklist();
             return;
         }
         let chat = self.canonical_str(&chat);

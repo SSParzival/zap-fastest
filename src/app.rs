@@ -763,7 +763,7 @@ pub struct App {
     /// A notification went out this frame: highlight the taskbar entry of a
     /// window that is open but not focused.
     wants_attention: bool,
-    /// Whether Zap Faster starts at login, when this installation supports it.
+    /// Whether ZapFastest starts at login, when this installation supports it.
     pub start_with_system: Option<bool>,
     /// Cross-thread window repaint handle.
     waker: Waker,
@@ -775,7 +775,7 @@ pub struct App {
     /// spawn.
     #[cfg(test)]
     test_tray_shown: Option<bool>,
-    /// Whether the tray menu offers "Lock Zap Faster": whether an app lock
+    /// Whether the tray menu offers "Lock ZapFastest": whether an app lock
     /// password was set when it last changed.
     tray_lockable: bool,
     /// The unread level the tray icon shows (`util::tray_badge_level`).
@@ -1003,7 +1003,7 @@ fn wayland_session() -> bool {
 }
 
 /// The app outlives its window: closing it with "keep running" on hides
-/// Zap Faster, and the tray, a notification or another launch brings it back.
+/// ZapFastest, and the tray, a notification or another launch brings it back.
 impl fastframe_shell::Resident for App {
     fn closed(&self) -> fastframe_shell::Closed {
         if self.quit_requested {
@@ -1087,11 +1087,11 @@ fn tray_action(event: fastframe_tray::Event, window_hidden: bool) -> Option<Acti
     })
 }
 
-/// The tray item: Zap Faster's icon, and a menu to show or hide the window,
+/// The tray item: ZapFastest's icon, and a menu to show or hide the window,
 /// to lock it while an app lock password is set, and to quit. The title and
 /// the menu never name a chat, so they are safe while locked.
 ///
-/// "Lock Zap Faster" is always in the menu, hidden without a password;
+/// "Lock ZapFastest" is always in the menu, hidden without a password;
 /// `App::sync_tray` shows or hides it as the password is set or removed.
 fn tray_config(lockable: bool) -> fastframe_tray::Config {
     use fastframe_tray::MenuItem;
@@ -1248,7 +1248,7 @@ impl App {
     pub fn start_hidden(&mut self) {
         self.hide_intent = true;
         // No window will attach the tray, which makes the macOS item; make
-        // it now without bringing Zap Faster forward.
+        // it now without bringing ZapFastest forward.
         if let Some(tray) = &mut self.tray {
             tray.create_item();
         }
@@ -1304,7 +1304,7 @@ impl App {
                 _ => Palette::dark(),
             });
         let locale = crate::i18n::resolve(settings.interface_language);
-        // With a password set, Zap Faster starts locked.
+        // With a password set, ZapFastest starts locked.
         let app_lock = crate::app_lock::AppLock::new(settings.app_lock_hash.is_some());
         let tray_lockable = settings.app_lock_hash.is_some();
         let mut app = Self {
@@ -1725,6 +1725,7 @@ impl App {
 
     /// Parks the current account's text, mentions and attachments before switching accounts.
     fn park_composer(&mut self) {
+        self.backend.send(Command::CancelLinkPreview);
         if let Some(previous) = self.open_chat.clone() {
             self.save_attachment_draft(&previous);
             if let Some(target) = self.reply_to.take().filter(|target| target.chat.is_some()) {
@@ -2215,7 +2216,7 @@ impl App {
 
     /// Whether a panel shows the tray item now, so a hidden window can be
     /// brought back from it. On Linux the item exists before a panel shows
-    /// it (Zap Faster started at login before the panel), and on a desktop
+    /// it (ZapFastest started at login before the panel), and on a desktop
     /// without one it never is.
     fn tray_shown(&self) -> bool {
         #[cfg(test)]
@@ -2277,7 +2278,7 @@ impl App {
         self.has_focus = focused;
     }
 
-    /// Offers "Lock Zap Faster" in the tray exactly while an app lock password
+    /// Offers "Lock ZapFastest" in the tray exactly while an app lock password
     /// is set, so setting or removing one changes the menu at once.
     fn sync_tray(&mut self) {
         let lockable = self.settings.app_lock_hash.is_some();
@@ -2679,11 +2680,11 @@ impl App {
     }
 
     /// Announces a message while the app lock is on: "New message" from
-    /// Zap Faster, without the chat, the sender, the text or a picture, so the
+    /// ZapFastest, without the chat, the sender, the text or a picture, so the
     /// desktop shows nothing the lock screen hides. A chat's own sound and
     /// the mention sound would tell who wrote, so only the message sound
     /// plays, still silent for groups when group sounds are off. The click
-    /// target stays inside Zap Faster: it opens the message once unlocked.
+    /// target stays inside ZapFastest: it opens the message once unlocked.
     fn notify_while_locked(&mut self, chat_id: &str, is_group: bool, message: &str, limited: bool) {
         self.wants_attention = true;
         let (title, body) = crate::notify::locked_lines(self.locale);
@@ -4327,7 +4328,10 @@ impl App {
                     .is_some_and(|(pending, _)| *pending == request)
                 {
                     self.chat_export = None;
-                    if live && matches!(self.dialog, Some(Dialog::ExportChat { .. })) {
+                    if !live || self.events_hidden {
+                        return;
+                    }
+                    if matches!(self.dialog, Some(Dialog::ExportChat { .. })) {
                         self.dialog = None;
                     }
                     match result {
@@ -6623,6 +6627,18 @@ impl App {
     /// except a private reply: its quote comes from a group and cannot be
     /// picked again in this chat.
     fn save_attachment_draft(&mut self, chat: &str) {
+        for pending in &mut self.pending {
+            fn release(pending: &mut Pending) {
+                match pending {
+                    Pending::Picture { texture, .. } => *texture = None,
+                    Pending::Document(inner) | Pending::Recovered { item: inner, .. } => {
+                        release(inner)
+                    }
+                    Pending::File(_) => {}
+                }
+            }
+            release(pending);
+        }
         let private = self
             .reply_to
             .as_ref()
@@ -8133,6 +8149,7 @@ impl App {
                 self.reply_when_loaded = None;
             }
             Action::DismissLinkPreview => {
+                self.backend.send(Command::CancelLinkPreview);
                 if let Some(chat) = self.open_chat.clone()
                     && self.preview_for(&chat, &self.composer).is_some()
                     && let Some(shown) = self.composer_preview.as_mut()
@@ -10529,6 +10546,9 @@ impl App {
         for account in &mut self.accounts {
             if account.chat_export_allowed_sent != Some(allowed) {
                 account.backend.send(Command::SetChatExportAllowed(allowed));
+                if !allowed {
+                    account.backend.send(Command::CancelLinkPreview);
+                }
                 account.chat_export_allowed_sent = Some(allowed);
             }
         }
@@ -10748,7 +10768,7 @@ impl App {
         }
     }
 
-    /// Collects a finished password check, and locks once Zap Faster has gone
+    /// Collects a finished password check, and locks once ZapFastest has gone
     /// unused for the chosen time. Inactivity counts while the window is
     /// hidden too: only input in the window restarts it.
     fn tick_app_lock(&mut self, ctx: &egui::Context) {
@@ -10765,7 +10785,7 @@ impl App {
         if self.app_lock.is_locked() {
             return;
         }
-        // Recording a voice message is using Zap Faster, keys or not.
+        // Recording a voice message is using ZapFastest, keys or not.
         if self.recording.is_some() {
             self.app_lock.note_input();
         }
@@ -11370,6 +11390,7 @@ impl App {
             self.take_drops_and_pastes(ctx);
         }
         crate::ui::show(self, ui);
+        crate::animation::release_unseen(ctx);
         self.apply_actions(ctx);
         // After the view and its actions, so a change this frame starts the
         // pause from now. Nobody types behind the lock screen.
@@ -12206,6 +12227,29 @@ fn composer_format_spans(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn hidden_export_completion_only_clears_its_account_progress() {
+        let mut app = app();
+        app.chat_export = Some((7, Default::default()));
+        app.dialog = Some(Dialog::ExportChat {
+            chat: "first".into(),
+            include_media: true,
+        });
+        let dialog = app.dialog.clone();
+        let toasts = app.toasts.len();
+        app.events_hidden = true;
+        app.apply_backend_event(
+            Event::ChatExportFinished {
+                request: 7,
+                result: Ok(Some(("private-export.zip".into(), Default::default()))),
+            },
+            false,
+        );
+        assert!(app.chat_export.is_none());
+        assert_eq!(app.dialog, dialog);
+        assert_eq!(app.toasts.len(), toasts);
+    }
+
     #[test]
     fn the_wheel_steps_through_the_accounts_once_per_turn() {
         assert_eq!(super::cycled(0, 1, 1), None);
@@ -15363,7 +15407,7 @@ mod tests {
         );
     }
 
-    /// Demo and test runs share the machine with a linked Zap Faster, whose real
+    /// Demo and test runs share the machine with a linked ZapFastest, whose real
     /// taskbar badge they must not overwrite.
     #[test]
     fn demo_and_test_runs_do_not_publish_a_taskbar_badge() {
@@ -16684,7 +16728,7 @@ mod tests {
         assert!(!app.hide_intent);
     }
 
-    /// On Linux the tray item exists before a panel shows it (Zap Faster started
+    /// On Linux the tray item exists before a panel shows it (ZapFastest started
     /// at login before the panel, or a desktop without one). Until a panel
     /// shows it, closing quits, a hidden start opens the window, and the
     /// window is not hidden, since nothing could bring it back.
@@ -17235,7 +17279,7 @@ mod tests {
         }
     }
 
-    /// The tray offers "Lock Zap Faster" as soon as a password is set and stops
+    /// The tray offers "Lock ZapFastest" as soon as a password is set and stops
     /// as soon as it is removed, not at the next start.
     #[test]
     fn the_tray_offers_the_lock_while_a_password_is_set() {

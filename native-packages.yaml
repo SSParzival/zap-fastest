@@ -10,41 +10,41 @@ libraries:
     deb: libasound2
     rpm: alsa-lib
 nfpm:
-  name: zap-faster
+  name: zap-fastest
   maintainer: eternalwaitt
   homepage: https://github.com/SSParzival/zap-fastest
   description: Fast native WhatsApp client
   license: MIT
-  provides: [zap-faster]
-  conflicts: [zapfast, fastsapp]
-  replaces: []
+  provides: [zap-fastest, zap-faster]
+  conflicts: [zap-faster, zapfast, fastsapp]
+  replaces: [zap-faster]
   contents:
-  - src: "@PAYLOAD@/zap-faster-v@VERSION@-@TARGET@/zap-faster"
-    dst: "/usr/bin/zap-faster"
+  - src: "@PAYLOAD@/zap-fastest-v@VERSION@-@TARGET@/zap-fastest"
+    dst: "/usr/bin/zap-fastest"
     file_info:
       mode: 493
-  - src: "@PAYLOAD@/zap-faster-v@VERSION@-@TARGET@/LICENSE"
-    dst: "/usr/share/licenses/zap-faster/LICENSE"
+  - src: "@PAYLOAD@/zap-fastest-v@VERSION@-@TARGET@/LICENSE"
+    dst: "/usr/share/licenses/zap-fastest/LICENSE"
     file_info:
       mode: 420
-  - src: "@PAYLOAD@/zap-faster-v@VERSION@-@TARGET@/README.md"
-    dst: "/usr/share/doc/zap-faster/README.md"
+  - src: "@PAYLOAD@/zap-fastest-v@VERSION@-@TARGET@/README.md"
+    dst: "/usr/share/doc/zap-fastest/README.md"
     file_info:
       mode: 420
-  - src: "@PAYLOAD@/zap-faster-v@VERSION@-@TARGET@/packaging/applications/zap-faster.desktop"
-    dst: "/usr/share/applications/zap-faster.desktop"
+  - src: "@PAYLOAD@/zap-fastest-v@VERSION@-@TARGET@/packaging/applications/zap-fastest.desktop"
+    dst: "/usr/share/applications/zap-fastest.desktop"
     file_info:
       mode: 420
-  - src: "@PAYLOAD@/zap-faster-v@VERSION@-@TARGET@/packaging/icons/zap-faster.svg"
-    dst: "/usr/share/icons/hicolor/scalable/apps/zap-faster.svg"
+  - src: "@PAYLOAD@/zap-fastest-v@VERSION@-@TARGET@/packaging/icons/zap-fastest.svg"
+    dst: "/usr/share/icons/hicolor/scalable/apps/zap-fastest.svg"
     file_info:
       mode: 420
-  - src: contrib/omarchy/zap-faster.json.tpl
-    dst: /usr/share/zap-faster/omarchy/zap-faster.json.tpl
+  - src: contrib/omarchy/zap-fastest.json.tpl
+    dst: /usr/share/zap-fastest/omarchy/zap-fastest.json.tpl
     file_info:
       mode: 420
-  - src: contrib/omarchy/zap-faster-theme
-    dst: /usr/share/zap-faster/omarchy/zap-faster-theme
+  - src: contrib/omarchy/zap-fastest-theme
+    dst: /usr/share/zap-fastest/omarchy/zap-fastest-theme
     file_info:
       mode: 493
   # native-packages adds the C library (libc6, glibc) at the version the
@@ -98,7 +98,7 @@ targets:
       local: dist/macos-input
     native:
       command: [ruby, packaging/macos/dmg.rb, '@PAYLOAD@', '@PACKAGE@']
-      output: 'zap-faster-@TAG@-macos-universal.dmg'
+      output: 'zap-fastest-@TAG@-macos-universal.dmg'
   windows-amd64:
     platform: windows
     arch: amd64
@@ -108,7 +108,7 @@ targets:
       local: dist/windows-input-x86_64-pc-windows-msvc
     native:
       command: [ruby, packaging/windows/msi.rb, '@PAYLOAD@', '@PACKAGE@', '@VERSION@']
-      output: 'zap-faster-@TAG@-x86_64-pc-windows-msvc.msi'
+      output: 'zap-fastest-@TAG@-x86_64-pc-windows-msvc.msi'
   windows-arm64:
     platform: windows
     arch: arm64
@@ -118,58 +118,58 @@ targets:
       local: dist/windows-input-aarch64-pc-windows-msvc
     native:
       command: [ruby, packaging/windows/msi.rb, '@PAYLOAD@', '@PACKAGE@', '@VERSION@']
-      output: 'zap-faster-@TAG@-aarch64-pc-windows-msvc.msi'
+      output: 'zap-fastest-@TAG@-aarch64-pc-windows-msvc.msi'
   linux-amd64:
     platform: linux
     arch: amd64
     libc: glibc
     compiler_target: x86_64-unknown-linux-gnu
-    after_package: [python3, packaging/linux-finalize.py, '@FORMAT@', '@PACKAGE@', '@PAYLOAD@/zap-faster-v@VERSION@-@TARGET@/zap-faster', '@ARCH@']
+    after_package: [python3, packaging/linux-finalize.py, '@FORMAT@', '@PACKAGE@', '@PAYLOAD@/zap-fastest-v@VERSION@-@TARGET@/zap-fastest', '@ARCH@']
     formats:
     - deb
     - rpm
     - appimage
     input:
-      local: dist/zap-faster-v@VERSION@-x86_64-unknown-linux-gnu.tar.gz
-      release_asset: zap-faster-v@VERSION@-x86_64-unknown-linux-gnu.tar.gz
+      local: dist/zap-fastest-v@VERSION@-x86_64-unknown-linux-gnu.tar.gz
+      release_asset: zap-fastest-v@VERSION@-x86_64-unknown-linux-gnu.tar.gz
   linux-arm64:
     platform: linux
     arch: arm64
     libc: glibc
     compiler_target: aarch64-unknown-linux-gnu
-    after_package: [python3, packaging/linux-finalize.py, '@FORMAT@', '@PACKAGE@', '@PAYLOAD@/zap-faster-v@VERSION@-@TARGET@/zap-faster', '@ARCH@']
+    after_package: [python3, packaging/linux-finalize.py, '@FORMAT@', '@PACKAGE@', '@PAYLOAD@/zap-fastest-v@VERSION@-@TARGET@/zap-fastest', '@ARCH@']
     formats:
     - deb
     - rpm
     - appimage
     input:
-      local: dist/zap-faster-v@VERSION@-aarch64-unknown-linux-gnu.tar.gz
-      release_asset: zap-faster-v@VERSION@-aarch64-unknown-linux-gnu.tar.gz
+      local: dist/zap-fastest-v@VERSION@-aarch64-unknown-linux-gnu.tar.gz
+      release_asset: zap-fastest-v@VERSION@-aarch64-unknown-linux-gnu.tar.gz
 release:
   repository: SSParzival/zap-fastest
   checksums: checksums.txt
   prereleases: true
 assets:
   AMD64:
-    file: zap-faster-v@VERSION@-x86_64-unknown-linux-gnu.tar.gz
-    local: dist/zap-faster-v@VERSION@-x86_64-unknown-linux-gnu.tar.gz
+    file: zap-fastest-v@VERSION@-x86_64-unknown-linux-gnu.tar.gz
+    local: dist/zap-fastest-v@VERSION@-x86_64-unknown-linux-gnu.tar.gz
   ARM64:
-    file: zap-faster-v@VERSION@-aarch64-unknown-linux-gnu.tar.gz
-    local: dist/zap-faster-v@VERSION@-aarch64-unknown-linux-gnu.tar.gz
+    file: zap-fastest-v@VERSION@-aarch64-unknown-linux-gnu.tar.gz
+    local: dist/zap-fastest-v@VERSION@-aarch64-unknown-linux-gnu.tar.gz
   MACOS:
-    file: zap-faster-v@VERSION@-macos-universal.dmg
-    local: dist/zap-faster-v@VERSION@-macos-universal.dmg
+    file: zap-fastest-v@VERSION@-macos-universal.dmg
+    local: dist/zap-fastest-v@VERSION@-macos-universal.dmg
   SOURCE:
-    file: zap-faster-@VERSION@.tar.gz
+    file: zap-fastest-@VERSION@.tar.gz
     url: https://github.com/SSParzival/zap-fastest/archive/refs/tags/v@VERSION@.tar.gz
     checksummed: false
-    local: dist/zap-faster-@VERSION@.tar.gz
+    local: dist/zap-fastest-@VERSION@.tar.gz
 templates:
-  homebrew/zap-faster.rb: packaging/homebrew/zap-faster.rb.in
-  arch/zap-faster/PKGBUILD: packaging/arch/zap-faster/PKGBUILD.in
-  arch/zap-faster/zap-faster.install: packaging/arch/zap-faster.install
-  arch/zap-faster-bin/PKGBUILD: packaging/arch/zap-faster-bin/PKGBUILD.in
-  arch/zap-faster-bin/zap-faster-bin.install: packaging/arch/zap-faster.install
-  arch/zap-faster-git/PKGBUILD: packaging/arch/zap-faster-git/PKGBUILD.in
-  arch/zap-faster-git/zap-faster-git.install: packaging/arch/zap-faster.install
+  homebrew/zap-fastest.rb: packaging/homebrew/zap-fastest.rb.in
+  arch/zap-fastest/PKGBUILD: packaging/arch/zap-fastest/PKGBUILD.in
+  arch/zap-fastest/zap-fastest.install: packaging/arch/zap-fastest.install
+  arch/zap-fastest-bin/PKGBUILD: packaging/arch/zap-fastest-bin/PKGBUILD.in
+  arch/zap-fastest-bin/zap-fastest-bin.install: packaging/arch/zap-fastest.install
+  arch/zap-fastest-git/PKGBUILD: packaging/arch/zap-fastest-git/PKGBUILD.in
+  arch/zap-fastest-git/zap-fastest-git.install: packaging/arch/zap-fastest.install
 version_file: Cargo.toml

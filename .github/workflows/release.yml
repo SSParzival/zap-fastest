@@ -101,17 +101,17 @@ jobs:
       - name: Package
         shell: bash
         run: |
-          name="zap-faster-${GITHUB_REF_NAME}-${{ matrix.target }}"
+          name="zap-fastest-${GITHUB_REF_NAME}-${{ matrix.target }}"
           mkdir -p "dist/$name"
           if [ "${{ runner.os }}" = "Windows" ]; then
-            cp "target/${{ matrix.target }}/release/zap-fastest.exe" "dist/$name/zap-faster.exe"
+            cp "target/${{ matrix.target }}/release/zap-fastest.exe" "dist/$name/zap-fastest.exe"
           else
-            cp "target/${{ matrix.target }}/release/zap-fastest" "dist/$name/zap-faster"
+            cp "target/${{ matrix.target }}/release/zap-fastest" "dist/$name/zap-fastest"
           fi
-          cp README.md LICENSE THIRD-PARTY-NOTICES.md packaging/zap-faster-portable.txt "dist/$name/"
+          cp README.md LICENSE THIRD-PARTY-NOTICES.md packaging/zap-fastest-portable.txt "dist/$name/"
           if [ "${{ runner.os }}" = "Linux" ]; then
             # Desktop integration for package builds and hand-installs.
-            cp --parents packaging/applications/zap-faster.desktop packaging/icons/zap-faster.svg contrib/omarchy/zap-faster.json.tpl contrib/omarchy/zap-faster-theme "dist/$name/"
+            cp --parents packaging/applications/zap-fastest.desktop packaging/icons/zap-fastest.svg contrib/omarchy/zap-fastest.json.tpl contrib/omarchy/zap-fastest-theme "dist/$name/"
           fi
           cd dist
           if [ "${{ runner.os }}" = "Windows" ]; then
@@ -133,7 +133,7 @@ jobs:
           $numericVersion = $version.Split("-")[0]
           & $iscc "/DVersion=$version" "/DNumericVersion=$numericVersion" "/DArch=$arch" `
             "/DBinary=$PWD\target\${{ matrix.target }}\release\zap-fastest.exe" `
-            "/DOutputDir=$PWD\dist" packaging\windows\zap-faster.iss
+            "/DOutputDir=$PWD\dist" packaging\windows\zap-fastest.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       # The Windows Installer package, which replaces the setup program
@@ -156,9 +156,9 @@ jobs:
           $target = "${{ matrix.target }}"
           $payload = "dist\windows-input-$target"
           New-Item -ItemType Directory -Force $payload | Out-Null
-          Copy-Item "target\$target\release\zap-fastest.exe" "$payload\zap-faster.exe"
+          Copy-Item "target\$target\release\zap-fastest.exe" "$payload\zap-fastest.exe"
           Copy-Item README.md, LICENSE, THIRD-PARTY-NOTICES.md, `
-            packaging\windows\zap-faster-installer.txt $payload
+            packaging\windows\zap-fastest-installer.txt $payload
           $packageTarget = if ($target.StartsWith("aarch64")) { "windows-arm64" } else { "windows-amd64" }
           $version = $env:GITHUB_REF_NAME.TrimStart("v")
           native-packages build --version $version --target $packageTarget `
@@ -222,7 +222,7 @@ jobs:
           lipo -create \
             target/aarch64-apple-darwin/release/zap-fastest \
             target/x86_64-apple-darwin/release/zap-fastest \
-            -output universal/zap-faster
+            -output universal/zap-fastest
           # The two release builds fill most of the runner's disk; the DMG
           # and its notarization copy need room of their own.
           rm -rf target
@@ -238,7 +238,7 @@ jobs:
         run: |
           version="${GITHUB_REF_NAME#v}"
           mkdir -p dist/macos-input
-          bash packaging/macos/bundle.sh universal/zap-faster "dist/macos-input/Zap Faster.app" "$version"
+          bash packaging/macos/bundle.sh universal/zap-fastest "dist/macos-input/ZapFastest.app" "$version"
           cp README.md LICENSE THIRD-PARTY-NOTICES.md dist/macos-input/
 
       - name: Package, sign and notarize macOS app
@@ -250,17 +250,17 @@ jobs:
 
       - name: Verify the notarized release app
         if: env.APPLE_SIGNING_IDENTITY != '' && env.APPLE_ID != '' && env.APPLE_TEAM_ID != '' && env.APPLE_APP_PASSWORD != ''
-        run: bash packaging/macos/verify.sh "dist/zap-faster-${GITHUB_REF_NAME}-macos-universal.dmg"
+        run: bash packaging/macos/verify.sh "dist/zap-fastest-${GITHUB_REF_NAME}-macos-universal.dmg"
 
       - name: Verify unsigned app bundle
         if: env.APPLE_SIGNING_IDENTITY == '' || env.APPLE_ID == '' || env.APPLE_TEAM_ID == '' || env.APPLE_APP_PASSWORD == ''
         run: |
           echo "This release is ad-hoc signed, without Apple notarization."
-          codesign --verify --strict --deep "dist/macos-input/Zap Faster.app"
-          lipo "dist/macos-input/Zap Faster.app/Contents/MacOS/zap-fastest" -verify_arch x86_64 arm64
+          codesign --verify --strict --deep "dist/macos-input/ZapFastest.app"
+          lipo "dist/macos-input/ZapFastest.app/Contents/MacOS/zap-fastest" -verify_arch x86_64 arm64
           python3 - <<'PY'
           import plistlib
-          with open('dist/macos-input/Zap Faster.app/Contents/Info.plist', 'rb') as source:
+          with open('dist/macos-input/ZapFastest.app/Contents/Info.plist', 'rb') as source:
               info = plistlib.load(source)
           assert info['CFBundleIdentifier'] == 'io.github.eternalwaitt.ZapFastest'
           assert info.get('NSMicrophoneUsageDescription', '').strip()
@@ -298,12 +298,12 @@ jobs:
           path: dist
       - name: Unpack the Linux build
         run: |
-          tar xzf dist/zap-faster-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu.tar.gz -C packaging/flatpak
-          mv packaging/flatpak/zap-faster-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu packaging/flatpak/built
+          tar xzf dist/zap-fastest-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu.tar.gz -C packaging/flatpak
+          mv packaging/flatpak/zap-fastest-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu packaging/flatpak/built
       - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:
           manifest-path: packaging/flatpak/io.github.eternalwaitt.ZapFaster.bundle.yml
-          bundle: zap-faster-${{ github.ref_name }}-x86_64.flatpak
+          bundle: zap-fastest-${{ github.ref_name }}-x86_64.flatpak
           cache: false
           upload-artifact: false
       - name: Attest Flatpak bundle
@@ -368,7 +368,7 @@ jobs:
           if [ -f "$notes" ]; then
             cp "$notes" release-notes.md
           elif [[ "$GITHUB_REF_NAME" == *-* ]]; then
-            echo "Prerelease build of Zap Faster ${GITHUB_REF_NAME}." > release-notes.md
+            echo "Prerelease build of ZapFastest ${GITHUB_REF_NAME}." > release-notes.md
           else
             echo "::error::Write $notes and push it before tagging a stable release."
             exit 1

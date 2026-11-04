@@ -1,6 +1,6 @@
 //! A font file the person chose in Settings to lead the interface fonts.
 //!
-//! ZapFast keeps its own copy in the state directory, so the original may
+//! ZapFastest keeps its own copy in the state directory, so the original may
 //! move or go, the same way it keeps the chat wallpaper image.
 
 use std::path::{Path, PathBuf};
@@ -129,7 +129,7 @@ pub fn claim(request: u64) {
 static LATEST: AtomicU64 = AtomicU64::new(0);
 static DIRECTORY: Mutex<()> = Mutex::new(());
 
-/// Copies a chosen font file into a new folder of ZapFast's font directory,
+/// Copies a chosen font file into a new folder of ZapFastest's font directory,
 /// so the original may move or go. Earlier copies are left alone, so an
 /// import that loses to a newer request can never delete the font in use;
 /// [`keep_only`] clears them once a result is applied.
@@ -203,7 +203,7 @@ pub fn keep_only(dirs: &AppDirs, keep: &Path, request: Option<u64>) {
     }
 }
 
-/// Deletes ZapFast's copies of the custom font.
+/// Deletes ZapFastest's copies of the custom font.
 pub fn remove(dirs: &AppDirs, request: Option<u64>) {
     let _guard = DIRECTORY.lock().unwrap_or_else(|e| e.into_inner());
     if request.is_some_and(|request| LATEST.load(Ordering::SeqCst) != request) {

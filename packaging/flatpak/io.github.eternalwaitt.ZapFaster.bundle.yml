@@ -5,7 +5,7 @@ id: io.github.eternalwaitt.ZapFaster
 runtime: org.freedesktop.Platform
 runtime-version: '26.08'
 sdk: org.freedesktop.Sdk
-command: zap-faster
+command: zap-fastest
 finish-args:
   - --socket=wayland
   - --socket=fallback-x11
@@ -18,15 +18,15 @@ finish-args:
   - --talk-name=org.kde.StatusNotifierWatcher
   - --persist=.local/state
 modules:
-  - name: zap-faster
+  - name: zap-fastest
     buildsystem: simple
     build-commands:
-      - bin="zap-fastest"; [ -f "$bin" ] || bin="zap-faster"; install -Dm755 "$bin" /app/bin/zap-faster; ln -sf zap-faster /app/bin/zap-fastest
-      - desktop="packaging/applications/zap-fastest.desktop"; [ -f "$desktop" ] || desktop="packaging/applications/zap-faster.desktop"; install -Dm644 "$desktop" /app/share/applications/io.github.eternalwaitt.ZapFaster.desktop
+      - bin="zap-fastest"; install -Dm755 "$bin" /app/bin/zap-fastest
+      - desktop="packaging/applications/zap-fastest.desktop"; install -Dm644 "$desktop" /app/share/applications/io.github.eternalwaitt.ZapFaster.desktop
       - sed -i 's/^Icon=.*$/Icon=io.github.eternalwaitt.ZapFaster/;s/^StartupWMClass=zap-fast\(est\|er\)$/StartupWMClass=io.github.eternalwaitt.ZapFaster/' /app/share/applications/io.github.eternalwaitt.ZapFaster.desktop
-      - install -Dm644 packaging/icons/zap-faster.svg /app/share/icons/hicolor/scalable/apps/io.github.eternalwaitt.ZapFaster.svg
+      - install -Dm644 packaging/icons/zap-fastest.svg /app/share/icons/hicolor/scalable/apps/io.github.eternalwaitt.ZapFaster.svg
       - install -Dm644 packaging/flatpak/io.github.eternalwaitt.ZapFaster.metainfo.xml /app/share/metainfo/io.github.eternalwaitt.ZapFaster.metainfo.xml
-      - install -Dm644 LICENSE /app/share/licenses/zap-faster/LICENSE
+      - install -Dm644 LICENSE /app/share/licenses/zap-fastest/LICENSE
     sources:
       - type: dir
         path: built

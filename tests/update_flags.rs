@@ -72,7 +72,7 @@ fn update_receipt_and_error_are_taken_off_the_command_line() {
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
-    // Zap Faster helpers check the fork binary name and version.
+    // ZapFastest helpers check the fork binary name and version.
     assert!(output.status.success(), "stderr: {stderr}");
     assert_eq!(
         stdout.trim(),

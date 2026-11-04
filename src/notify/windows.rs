@@ -48,7 +48,7 @@ fn register_identity() -> std::io::Result<()> {
 fn notification(title: &str, body: &str, picture: Option<&Path>, system_sound: bool) -> Toast {
     let toast = Toast::new(APPLICATION_ID).title(title).text1(body);
     // Without the system sound the toast is silent; a custom sound is played
-    // by Zap Faster itself.
+    // by ZapFastest itself.
     let toast = if system_sound {
         toast
     } else {
@@ -95,7 +95,7 @@ mod tests {
 
     #[test]
     fn installer_shortcuts_use_the_toast_identity() {
-        let installer = include_str!("../../packaging/windows/zap-faster.iss");
+        let installer = include_str!("../../packaging/windows/zap-fastest.iss");
         let shortcuts: Vec<_> = installer
             .lines()
             .filter(|line| {

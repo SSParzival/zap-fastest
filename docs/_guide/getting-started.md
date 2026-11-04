@@ -1,6 +1,6 @@
 ---
 title: Getting Started
-description: Install Zap Faster, link your phone, and load chat history.
+description: Install ZapFastest, link your phone, and load chat history.
 nav_order: 2
 ---
 
@@ -12,14 +12,14 @@ macOS, and Windows.
 Or build from source with a recent stable [Rust](https://rustup.rs):
 
 ```sh
-git clone https://github.com/eternalwaitt/zap-faster zapfast
-cd zapfast
+git clone https://github.com/SSParzival/zap-fastest
+cd zap-fastest
 cargo install --path .
-zapfast
+zap-fastest
 ```
 
 On Linux, `cargo install` puts the binary on your `PATH` but does not add a
-launcher entry. To get one (Zap Faster under your application launcher, with its
+launcher entry. To get one (ZapFastest under your application launcher, with its
 own icon and no terminal), install a release build instead:
 
 ```sh
@@ -49,9 +49,9 @@ sudo apt install build-essential cmake perl libasound2-dev libxkbcommon-dev libw
 ```
 
 With Nix, `nix develop` provides the toolchain and every native dependency,
-and `nix run .#zapfast` builds and runs it.
+and `nix run .#zap-fastest` builds and runs it.
 
-The packaged desktop entry is `packaging/applications/zapfast.desktop`;
+The packaged desktop entry is `packaging/applications/zap-fastest.desktop`;
 `packaging/install-user.sh` derives the user copy above from it.
 
 ## Link with your phone
@@ -67,7 +67,7 @@ ZapFastest links as a companion device, like WhatsApp Web. Start it and either:
   phone.
 
 The link survives restarts. Your phone does not need to stay on the same
-network or be online to read messages already stored in Zap Faster.
+network or be online to read messages already stored in ZapFastest.
 
 Several numbers can stay linked in one window. Click your own picture at the
 top of the chat list to switch between them or to add another (**Settings >
@@ -79,9 +79,9 @@ notification, receipt, download, and wallpaper settings.
 ## Message history
 
 After linking, the phone sends recent history. The chat list appears within
-seconds, and messages can take a few minutes to finish loading. Zap Faster stores
+seconds, and messages can take a few minutes to finish loading. ZapFastest stores
 new messages in its own archive. When you scroll past the stored history,
-Zap Faster asks your phone for older messages. The phone must be online.
+ZapFastest asks your phone for older messages. The phone must be online.
 
 ## Try it in your own chat
 

@@ -1,15 +1,17 @@
 [package]
 name = "zap-fastest"
-version = "0.33.0"
+version = "0.34.0"
 edition = "2024"
 rust-version = "1.98"
 license = "MIT"
-description = "Native WhatsApp for power users, combining ZapFast v0.20+ with ZapFaster advanced workflows. Built with Rust and egui."
+description = "ZapFastest, a native WhatsApp client built with Rust and egui."
 homepage = "https://github.com/SSParzival/zap-fastest"
 repository = "https://github.com/SSParzival/zap-fastest"
 keywords = ["whatsapp", "chat", "egui", "messaging"]
 categories = ["gui"]
 
+# Keep the existing Rust crate import name for downstream integration tests.
+# Application, binary and release identities are ZapFastest / zap-fastest.
 [lib]
 name = "zapfast"
 path = "src/lib.rs"
@@ -162,9 +164,9 @@ fastframe-theme = { git = "https://github.com/crmne/fastframe", tag = "v0.5.1" }
 fastframe-log = { git = "https://github.com/crmne/fastframe", tag = "v0.5.1" }
 # The tray item: StatusNotifier on Linux, tray-icon on Windows and macOS.
 fastframe-tray = { git = "https://github.com/crmne/fastframe", tag = "v0.5.1" }
-# Keeps ZapFast running without a window and recovers off-screen windows.
+# Keeps ZapFastest running without a window and recovers off-screen windows.
 fastframe-shell = { git = "https://github.com/crmne/fastframe", tag = "v0.5.1" }
-# Centres the macOS traffic lights on ZapFast's own header.
+# Centres the macOS traffic lights on ZapFastest's own header.
 fastframe-macos = { git = "https://github.com/crmne/fastframe", tag = "v0.5.1" }
 # One running copy per user: the lock, and the channel a second launch uses.
 fastframe-instance = { git = "https://github.com/crmne/fastframe", tag = "v0.5.1" }

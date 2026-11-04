@@ -29,8 +29,8 @@ fn rate() -> NonZero<u32> {
 /// Opens the default output device for playback.
 ///
 /// rodio reports the sink's drop through `stderr` by default. A desktop launch
-/// can have that closed: Zap Faster inherits `stderr` from whatever started it,
-/// and that process can exit while Zap Faster runs on. Rust ignores `SIGPIPE`, so
+/// can have that closed: ZapFastest inherits `stderr` from whatever started it,
+/// and that process can exit while ZapFastest runs on. Rust ignores `SIGPIPE`, so
 /// the next write there fails with `Broken pipe` and the print macro panics,
 /// which aborts the whole app in a release build. Keep it off, and report
 /// failures of our own through the log instead.
@@ -432,8 +432,8 @@ impl Player {
                 if self.output.is_none() {
                     // Paused clips release their player so the shared device
                     // can sleep. Reopen it at the remembered position.
-                    let fraction = fraction_of(loaded.base, loaded.samples.len());
-                    return self.restart(fraction);
+                    let position = loaded.base;
+                    return self.restart_at(position);
                 }
                 if let Some((_, sink)) = &self.output {
                     sink.pause();
@@ -674,6 +674,20 @@ impl Player {
 
     /// Plays the loaded clip from a fraction from 0 to 1.
     fn restart(&mut self, fraction: f32) -> Result<(), String> {
+        let Some(loaded) = self.loaded.as_ref() else {
+            return Ok(());
+        };
+        let fraction = if fraction.is_finite() {
+            fraction.clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let position = clip_length(loaded.samples.len()).mul_f64(f64::from(fraction));
+        self.restart_at(position)
+    }
+
+    /// Resume from the saved clock without a lossy f32 fraction round trip.
+    fn restart_at(&mut self, position: Duration) -> Result<(), String> {
         let Some(loaded) = self.loaded.as_mut() else {
             return Ok(());
         };
@@ -681,7 +695,8 @@ impl Player {
         // so speeds above 1x queue a time-compressed copy of the clip.
         let (buffer, factor) = Self::buffer_for(loaded, &self.stretches, self.speed);
         let total = clip_length(loaded.samples.len());
-        let offset = ((fraction.clamp(0.0, 1.0) * buffer.len() as f32) as usize).min(buffer.len());
+        let position = position.min(total);
+        let offset = sample_offset(position, factor, buffer.len());
         if self.output.is_none() {
             let mut device = open_output_on(self.output_device.as_deref()).map_err(|_| {
                 "Could not open sound output. Choose an output in Settings and resume playback."
@@ -701,8 +716,7 @@ impl Player {
         sink.play();
         loaded.buffer = buffer;
         loaded.factor = factor;
-        loaded.base =
-            Duration::from_secs_f64(fraction.clamp(0.0, 1.0) as f64 * total.as_secs_f64());
+        loaded.base = position;
         loaded.paused = false;
         loaded.done = false;
         Ok(())
@@ -713,13 +727,9 @@ fn clip_length(samples: usize) -> Duration {
     Duration::from_secs_f64(samples as f64 / f64::from(voice::RATE))
 }
 
-/// Where `position` falls in a clip of `samples`, from 0 to 1.
-fn fraction_of(position: Duration, samples: usize) -> f32 {
-    let total = clip_length(samples);
-    if total.is_zero() {
-        return 0.0;
-    }
-    (position.as_secs_f64() / total.as_secs_f64()).clamp(0.0, 1.0) as f32
+/// A resumed clip's sample, rounded down to the preceding sample at its speed.
+fn sample_offset(position: Duration, factor: f32, length: usize) -> usize {
+    ((position.as_secs_f64() * f64::from(voice::RATE) / f64::from(factor)) as usize).min(length)
 }
 
 /// Decodes a file to mono 48 kHz samples. OGG/Opus uses `voice`; other
@@ -1419,6 +1429,14 @@ mod tests {
         player.set_speed(1.0);
         assert!(player.stretching.is_none());
         assert!(cancelled.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn resume_offsets_keep_sample_precision_for_long_clips() {
+        let position = Duration::from_secs(30_000) + Duration::from_nanos(500_000);
+        assert_eq!(sample_offset(position, 1.0, usize::MAX), 1_440_000_024);
+        assert_eq!(sample_offset(position, 2.0, usize::MAX), 720_000_012);
+        assert_eq!(sample_offset(position, 1.0, 100), 100);
     }
 
     #[test]

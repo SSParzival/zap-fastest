@@ -1,7 +1,7 @@
 ; Windows installer built from a release binary with Inno Setup 6.3 or newer:
 ;
-;   iscc /DVersion=0.1.0 /DArch=x86_64 /DBinary=...\zap-faster.exe ^
-;        /DOutputDir=dist packaging\windows\zap-faster.iss
+;   iscc /DVersion=0.1.0 /DArch=x86_64 /DBinary=...\zap-fastest.exe ^
+;        /DOutputDir=dist packaging\windows\zap-fastest.iss
 ;
 ; Arch matches the Rust target: x86_64 or aarch64. Installation uses the
 ; current user's Programs folder and does not need administrator rights.
@@ -52,7 +52,7 @@ MinVersion=10.0
 LicenseFile=..\..\LICENSE
 OutputDir={#OutputDir}
 OutputBaseFilename=zap-fastest-v{#Version}-{#Arch}-pc-windows-msvc-setup
-SetupIconFile=zap-faster.ico
+SetupIconFile=zap-fastest.ico
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
@@ -74,7 +74,7 @@ Source: "..\..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\THIRD-PARTY-NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion
 
-Source: "zap-faster-installer.txt"; DestDir: "{app}"; Flags: ignoreversion
+Source: "zap-fastest-installer.txt"; DestDir: "{app}"; Flags: ignoreversion
 
 [InstallDelete]
 ; AppId keeps upgrades in the existing installation directory. Remove the

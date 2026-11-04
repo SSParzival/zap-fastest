@@ -8,16 +8,16 @@ Application assets and native recipes stay in `packaging/`.
 Windows releases carry both the existing Inno Setup installer and per-user MSI
 packages for x86_64 and ARM64. The MSI uses the fork's own upgrade identity and
 only takes over an Inno installation registered under the fork's AppId. It
-preserves the profile/keyring and refuses changes while Zap Faster is running.
+preserves the profile/keyring and refuses changes while ZapFastest is running.
 The updater verifies the selected release package before installation. Building
 MSI packages needs WiX 5.0.2 and `WixToolset.Util.wixext`; tests run on Linux only. Windows and macOS CI build artifacts without
 executing application or installer tests. Never run
 `packaging/windows/test-installer.ps1` against a personal Windows installation;
 it refuses non-GitHub-runner invocation and changes the runner's installation.
 
-Version 0.20.0 introduces the Zap Faster fork and `zap-faster` binary. The GitHub
-repository is `eternalwaitt/zap-faster`, so source archives extract into
-`zap-faster-VERSION`. Recipes belong to this fork and do not replace upstream
+ZapFastest uses the `zap-fastest` binary. The GitHub
+repository is `SSParzival/zap-fastest`, so source archives extract into
+`zap-fastest-VERSION`. Recipes belong to this fork and do not replace upstream
 packages automatically. AUR and Homebrew publication destinations are not configured.
 
 ```sh
@@ -49,7 +49,7 @@ runtime's reserved ELF section before package checksums are recorded. It keeps
 the appended filesystem and offsets intact. Packaging CI generates an
 architecture-specific `.zsync` sidecar and separate sidecar checksums for external
 AppImage updaters. This metadata does not enable automatic updates or change
-Zap Faster's built-in signature verification. Local package builds need the CI
+ZapFastest's built-in signature verification. Local package builds need the CI
 sidecar step before external update metadata can resolve successfully.
 
 Review or publish an existing build with the same installed CLI:
@@ -146,7 +146,7 @@ flatpak-builder --user --install --force-clean build-dir /path/to/flathub-checko
 ```
 
 Flathub submission/review is a separate publication step; the manifest alone does
-not make Zap Faster available in Flathub. A maintainer must submit it manually:
+not make ZapFastest available in Flathub. A maintainer must submit it manually:
 [Flathub's requirements](https://docs.flathub.org/docs/for-app-authors/requirements#generative-ai-policy)
 prohibit AI agents from submitting or writing submission interactions and require
 disclosure of generated material. Review the manifests and these changes before
@@ -156,15 +156,16 @@ in `checksums.txt`. No existing release files are replaced by this change.
 
 ## ZapFastest release identity
 
-Releases are published to `SSParzival/zap-fastest`. Cargo builds `zap-fastest`;
-the release staging steps retain legacy `zap-faster` payload and package names
-for the existing native recipes. The macOS bundle uses the `zap-fastest` executable
-and icon declared in its plist. Linux finalization accepts glibc through 2.36,
-matching Debian 12. AppImage update metadata points to this repository.
+Releases are published to `SSParzival/zap-fastest`. The binary, package names,
+portable payloads and assets for v0.34.0 onward use `zap-fastest`; the application
+name is ZapFastest. Nix reads the version from Cargo.toml and Arch recipes receive
+it from release generation, so neither has an independent version to bump.
 
-The `ZAPFASTER_UPDATE_SIGNING_KEY` Actions secret holds a private Ed25519 PKCS8
-PEM key. Its public key is committed in `assets/update-public-key.hex`; signing
-checks refuse a mismatched key. Never commit the private key. This first published
-ZapFastest release establishes a new key, so development installations trusting
-the earlier key require a manual install. AUR and Homebrew publication remain
-unconfigured.
+The Rust library remains `zapfast` for existing integration consumers. Archive
+keyring services, existing user directories, single-instance wire identity,
+Flatpak application ID and Windows upgrade identifiers remain stable so updates
+retain linked sessions. Old names in these compatibility identities, published
+release notes, receipts and upstream attribution are intentional.
+
+The documentation download menu stays on published assets until v0.34.0 artifacts
+exist. See `docs/verification/release-0.34.0.json` for local verification coverage.

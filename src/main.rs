@@ -761,7 +761,7 @@ fn run() -> eframe::Result<()> {
         }
     };
     let default_filter = default_log_filter(cli.verbose);
-    // A demo must not create empty Zap Faster directories that would prevent a
+    // A demo must not create empty ZapFastest directories that would prevent a
     // later real launch from adopting the existing FastsApp session.
     let dirs = if demo {
         paths::AppDirs::under(&std::env::temp_dir().join(format!(
@@ -979,7 +979,7 @@ fn is_graphics_failure(error: &eframe::Error) -> bool {
     )
 }
 
-/// The text of the dialog shown when Zap Faster cannot start, kept apart from
+/// The text of the dialog shown when ZapFastest cannot start, kept apart from
 /// the dialog so it is tested on every platform.
 #[cfg(any(windows, test))]
 fn startup_failure_text(graphics: bool, details: &str, log: &std::path::Path) -> String {

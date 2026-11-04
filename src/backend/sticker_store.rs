@@ -1,7 +1,7 @@
 //! Sticker files on disk: saved stickers and sticker packs.
 //!
 //! Saved stickers are WebP files named by their content hash. Every pack is a
-//! folder of WebP files under `packs/`. A pack put together in Zap Faster is
+//! folder of WebP files under `packs/`. A pack put together in ZapFastest is
 //! marked local in its `pack.json` and names each file by its content hash, so
 //! a sticker belongs to a local pack by what it is, not where it came from:
 //! the same picture filed from Saved, Recent or another pack is one member,
@@ -21,7 +21,7 @@ const MANIFEST: &str = "pack.json";
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 struct Manifest {
     name: String,
-    /// Put together in Zap Faster rather than imported.
+    /// Put together in ZapFastest rather than imported.
     #[serde(default)]
     local: bool,
     /// Creation time in Unix seconds, which orders local packs.

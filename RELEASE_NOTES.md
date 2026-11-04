@@ -2,7 +2,7 @@
 
 ## Version 0.31.0
 
-ZapFastest 0.31.0 is the definitive release uniting upstream ZapFast v0.20+ core protocol improvements with ZapFastest's distinct multi-account architecture, durable SQLite offline queue, and privacy-preserving power-user ergonomics. Every change has been thoroughly verified with 1,968 unit and integration tests passing.
+ZapFastest 0.31.0 is the definitive release uniting upstream ZapFastest v0.20+ core protocol improvements with ZapFastest's distinct multi-account architecture, durable SQLite offline queue, and privacy-preserving power-user ergonomics. Every change has been thoroughly verified with 1,968 unit and integration tests passing.
 
 ---
 

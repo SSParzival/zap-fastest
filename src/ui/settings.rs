@@ -1247,7 +1247,7 @@ fn screen_privacy_rows(locale: Locale, privacy: &mut Section) {
     privacy.toggle(translated(locale, "Avatars"), Text::default(), avatars);
 }
 
-/// The app lock: a password, how long Zap Faster may go unused, and the form
+/// The app lock: a password, how long ZapFastest may go unused, and the form
 /// that sets, changes, or removes the password.
 fn app_lock_rows(app: &App, privacy: &mut Section) {
     use crate::app_lock::FormMode;
@@ -2203,7 +2203,7 @@ fn profile_field(
     response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter))
 }
 
-/// The version, links to more about Zap Faster, and who made it.
+/// The version, links to more about ZapFastest, and who made it.
 fn about(app: &mut App, ui: &mut egui::Ui) {
     let palette = app.palette;
     ui.horizontal(|ui| {

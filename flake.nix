@@ -108,8 +108,8 @@
             libxi
             libxrandr
           ];
-          zap-faster = rustPlatform.buildRustPackage rec {
-            pname = "zap-faster";
+          zap-fastest = rustPlatform.buildRustPackage rec {
+            pname = "zap-fastest";
             version = (pkgs.lib.importTOML ./Cargo.toml).package.version;
             src = self;
 
@@ -154,52 +154,40 @@
             postFixup =
               # The GUI dlopens its Wayland, X11 and GL libraries at run time.
               pkgs.lib.optionalString isLinux ''
-                for b in $out/bin/zap-fastest $out/bin/zap-faster; do
-                  if [ -f "$b" ]; then
-                    wrapProgram "$b" \
-                      --prefix LD_LIBRARY_PATH : ${pkgs.lib.makeLibraryPath runtimeLibs}
-                  fi
-                done
-                if [ -f $out/bin/zap-fastest ] && [ ! -f $out/bin/zap-faster ]; then
-                  ln -sf zap-fastest $out/bin/zap-faster
-                elif [ -f $out/bin/zap-faster ] && [ ! -f $out/bin/zap-fastest ]; then
-                  ln -sf zap-faster $out/bin/zap-fastest
-                fi
+                wrapProgram "$out/bin/zap-fastest" \
+                  --prefix LD_LIBRARY_PATH : ${pkgs.lib.makeLibraryPath runtimeLibs}
               ''
               # Sign after the strip hook, which would invalidate the signature.
               # The entitlement allows microphone access for voice messages.
               + pkgs.lib.optionalString isDarwin ''
                 rcodesign sign \
                   --entitlements-xml-file packaging/macos/entitlements.plist \
-                  "$out/Applications/Zap Faster.app"
+                  "$out/Applications/ZapFastest.app"
               '';
 
             postInstall =
               pkgs.lib.optionalString isLinux ''
-                install -Dm644 packaging/applications/zap-faster.desktop \
-                  $out/share/applications/zap-faster.desktop
-                install -Dm644 packaging/icons/zap-faster.svg \
-                  $out/share/icons/hicolor/scalable/apps/zap-faster.svg
-                install -Dm644 contrib/omarchy/zap-faster.json.tpl \
-                  $out/share/zap-faster/omarchy/zap-faster.json.tpl
-                install -Dm755 contrib/omarchy/zap-faster-theme \
-                  $out/share/zap-faster/omarchy/zap-faster-theme
+                install -Dm644 packaging/applications/zap-fastest.desktop \
+                  $out/share/applications/zap-fastest.desktop
+                install -Dm644 packaging/icons/zap-fastest.svg \
+                  $out/share/icons/hicolor/scalable/apps/zap-fastest.svg
+                install -Dm644 contrib/omarchy/zap-fastest.json.tpl \
+                  $out/share/zap-fastest/omarchy/zap-fastest.json.tpl
+                install -Dm755 contrib/omarchy/zap-fastest-theme \
+                  $out/share/zap-fastest/omarchy/zap-fastest-theme
               ''
-              # Mirrors packaging/macos/bundle.sh: Zap Faster.app around the built
+              # Mirrors packaging/macos/bundle.sh: ZapFastest.app around the built
               # binary, with the version stripped of any prerelease suffix.
               + pkgs.lib.optionalString isDarwin ''
-                app="$out/Applications/Zap Faster.app"
+                app="$out/Applications/ZapFastest.app"
                 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
                 bin="$out/bin/zap-fastest"
-                [ -f "$bin" ] || bin="$out/bin/zap-faster"
                 mv "$bin" "$app/Contents/MacOS/zap-fastest"
                 chmod 755 "$app/Contents/MacOS/zap-fastest"
-                ln -sf zap-fastest "$app/Contents/MacOS/zap-faster"
                 # The command runs the bundled executable, so macOS applies the
                 # bundle's Info.plist and entitlements, and start at login
                 # records the bundled path.
                 makeWrapper "$app/Contents/MacOS/zap-fastest" "$out/bin/zap-fastest"
-                ln -sf zap-fastest "$out/bin/zap-faster"
                 sed "s/__VERSION__/''${version%%-*}/g" packaging/macos/Info.plist \
                   > "$app/Contents/Info.plist"
                 icnsify packaging/macos/icon-1024.png \
@@ -218,8 +206,8 @@
           };
         in
         {
-          default = zap-faster;
-          inherit zap-faster;
+          default = zap-fastest;
+          inherit zap-fastest;
         }
       );
 

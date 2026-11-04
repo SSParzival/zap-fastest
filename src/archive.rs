@@ -3210,7 +3210,8 @@ impl Archive {
     /// The phone's "Disable link previews": `Some(true)` when it is on.
     /// `None` until the phone has said.
     pub fn link_previews_disabled(&self) -> Result<Option<bool>> {
-        Ok(self.meta(LINK_PREVIEWS_DISABLED)?.map(|value| value == "1"))
+        // Only a recognized opt-in allows network requests; corrupt values stay off.
+        Ok(self.meta(LINK_PREVIEWS_DISABLED)?.map(|value| value != "0"))
     }
 
     /// Records the phone's "Disable link previews" changed at `timestamp`
@@ -4943,6 +4944,13 @@ pub(crate) mod tests {
             .ensure_chat("1@s.whatsapp.net", "Initial history")
             .unwrap();
         assert!(!fresh.take_preferences_refresh().unwrap());
+    }
+
+    #[test]
+    fn unrecognized_preview_privacy_values_fail_closed() {
+        let archive = Archive::in_memory().unwrap();
+        archive.set_meta(LINK_PREVIEWS_DISABLED, "corrupt").unwrap();
+        assert_eq!(archive.link_previews_disabled().unwrap(), Some(true));
     }
 
     #[test]

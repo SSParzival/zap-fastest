@@ -117,8 +117,8 @@ mod tests {
     #[test]
     fn launcher_uri_names_the_desktop_file() {
         assert_eq!(
-            launcher_uri("zap-faster"),
-            "application://zap-faster.desktop"
+            launcher_uri("zap-fastest"),
+            "application://zap-fastest.desktop"
         );
         assert_eq!(
             launcher_uri("io.github.eternalwaitt.ZapFaster"),

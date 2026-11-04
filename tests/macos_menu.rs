@@ -4,7 +4,7 @@
 //! muda keeps the first menu-event handler it is given and ignores later
 //! ones, and fastframe-tray installs one when it makes its item on the first
 //! window. If that came first, Settings… (and its ⌘, shortcut), About, Quit
-//! and every other Zap Faster menu item did nothing.
+//! and every other ZapFastest menu item did nothing.
 //!
 //! AppKit menus work only on the main thread, where libtest never runs a
 //! test, so this file has no harness and does its work in `main`.

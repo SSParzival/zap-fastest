@@ -17202,7 +17202,7 @@ mod tests {
         );
     }
 
-    /// A video sent before Zap Faster made thumbnails has none. With its file
+    /// A video sent before ZapFastest made thumbnails has none. With its file
     /// here it still shows as a video; only without either is it a file card.
     #[test]
     fn a_video_without_a_thumbnail_shows_from_its_file() {

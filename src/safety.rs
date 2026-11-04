@@ -60,7 +60,7 @@ pub fn external_url(value: &str) -> Option<String> {
     }
 }
 
-/// Image formats decoded by Zap Faster's in-process preview.
+/// Image formats decoded by ZapFastest's in-process preview.
 pub fn can_preview_image(path: &Path) -> bool {
     let Some(extension) = path.extension().and_then(|value| value.to_str()) else {
         return false;

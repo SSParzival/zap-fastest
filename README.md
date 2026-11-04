@@ -2,7 +2,7 @@
 
 **Native WhatsApp for power users. Built on the best of ZapFast and ZapFaster.**
 
-ZapFastest is the next-generation fork uniting [ZapFast](https://github.com/crmne/zapfast) (v0.20+) and [ZapFaster](https://github.com/eternalwaitt/zap-faster) (v0.30.0). The mission is simple: keep in continuous lockstep with the core performance and protocol updates of official ZapFast upstream (such as group calls, AEC3 acoustic echo cancellation, and server-time synchronization) while retaining the power-user ergonomics, multi-account isolation, and workflow reliability pioneered by ZapFaster.
+ZapFastest integrates [ZapFast](https://github.com/crmne/zapfast) v0.21 with the workflows inherited from [ZapFaster](https://github.com/eternalwaitt/zap-faster). It combines upstream protocol and media improvements with multi-account isolation and local archive features.
 
 ZapFastest is a compact native WhatsApp companion client for Windows, Linux, and macOS, built with Rust, [egui](https://github.com/emilk/egui), [whatsapp-rust](https://github.com/oxidezap/whatsapp-rust), and [fastframe](https://github.com/crmne/fastframe). It links directly to your phone as an authorized companion device. No browser engine, telemetry, hosted cloud servers, or third-party accounts are ever used.
 
@@ -24,7 +24,7 @@ Linux builds need the development packages for ALSA, OpenGL, Wayland, and xkbcom
 
 ZapFastest combines the advances of upstream ZapFast and the ZapFaster fork:
 
-- **Upstream v0.20+ Synchronization**: Integrated group calling, WebRTC audio echo cancellation (AEC3), adaptive video bitrates, server timestamp synchronization, and group member administration.
+- **Upstream v0.21 integration**: Integrated group calling, WebRTC audio echo cancellation (AEC3), adaptive video bitrates, server timestamp synchronization, and group member administration.
 - **Power User Ergonomics**: Media albums, attachment drafts tied to their chat, crop/rotate before sending, and an archive-backed gallery and media viewer.
 - **Resilient Delivery**: Durable waiting sends, conservative recovery after reconnects, and cancellable attachment transfers with progress indicators.
 - **Privacy & Transcription**: On-demand local Whisper voice transcripts (100% offline), private group replies, screen privacy guards, and multi-recipient forwarding.
@@ -40,7 +40,7 @@ Quit ZapFast before starting ZapFastest. The fork intentionally retains ZapFast'
 
 ZapFastest checks its own GitHub releases for updates and verifies them with its own Ed25519 signing key. It does not consume upstream ZapFast updates. Update signatures are separate from Windows Authenticode and Apple notarization; download pages state any platform signing limitations.
 
-The [settings and files guide](docs/_reference/settings-and-files.md) describes local storage, encryption and network behavior. GIF search contacts Giphy only when used and configured; preview links and location map links may contact the relevant website when opened. Whisper downloads its 1.5 GB multilingual model from Hugging Face when first requested, verifies its pinned SHA-256 digest, and transcribes on your CPU. Transcripts are stored in the encrypted account archive; model files are in the account cache. No feature uploads message content to a transcription or analytics service.
+The [settings and files guide](docs/_reference/settings-and-files.md) describes local storage, encryption and network behavior. GIF search contacts Giphy only when used and configured; outgoing link previews can contact the typed URL and its Open Graph image host before sending, subject to the phone privacy choice and network guards. Proxied connections skip previews. Opening links and location maps contacts their websites. Whisper downloads its 1.5 GB multilingual model from Hugging Face when first requested, verifies its pinned SHA-256 digest, and transcribes on your CPU. Transcripts are stored in the encrypted account archive; model files are in the account cache. No feature uploads message content to a transcription or analytics service.
 
 ## Contribute
 

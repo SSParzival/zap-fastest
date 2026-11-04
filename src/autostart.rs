@@ -1,4 +1,4 @@
-//! Starting Zap Faster in the tray when the person logs in.
+//! Starting ZapFastest in the tray when the person logs in.
 //!
 //! The platform's own login-item entry is the only record: Settings reads it
 //! back rather than keeping a copy that could disagree with it.
@@ -6,7 +6,7 @@
 use std::io;
 use std::path::{Path, PathBuf};
 
-/// Argument that starts Zap Faster without a window.
+/// Argument that starts ZapFastest without a window.
 pub const HIDDEN: &str = "--start-hidden";
 
 /// Whether this installation can register itself to start at login.
@@ -16,7 +16,7 @@ pub fn supported() -> bool {
     std::env::var_os("FLATPAK_ID").is_none() && executable().is_some()
 }
 
-/// Whether Zap Faster is registered to start at login.
+/// Whether ZapFastest is registered to start at login.
 pub fn enabled() -> bool {
     platform::enabled()
 }
@@ -27,7 +27,7 @@ pub fn set(enabled: bool) -> io::Result<()> {
         return platform::remove();
     }
     let executable = executable()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "cannot locate Zap Faster"))?;
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "cannot locate ZapFastest"))?;
     platform::install(&executable)
 }
 
@@ -172,6 +172,7 @@ mod platform {
     };
 
     const RUN: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
+    // Retain the existing login-item identity when upgrading.
     const VALUE: &str = "ZapFast";
 
     fn wide(text: &str) -> Vec<u16> {

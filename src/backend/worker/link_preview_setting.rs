@@ -2,7 +2,7 @@
 //!
 //! The setting lives in the phone's `regular` app-state collection, and an
 //! incremental sync brings only what changed since the last one. A choice made
-//! before ZapFast followed it was consumed by earlier syncs and never comes
+//! before ZapFastest followed it was consumed by earlier syncs and never comes
 //! again, and a phone that never touched the setting says nothing at all, so
 //! silence alone cannot mean previews are allowed. Until the phone has said,
 //! they stay off, and `regular` is rebuilt once from a snapshot, which replays
@@ -121,6 +121,28 @@ mod tests {
                     .build(),
             )))
             .await;
+    }
+
+    #[tokio::test]
+    async fn disabling_previews_cancels_in_flight_network_work() {
+        let (mut worker, _, _, _) = worker();
+        let task = tokio::spawn(std::future::pending::<()>());
+        let aborted = task.abort_handle();
+        worker.preview_fetch = Some(task);
+        phone_says(&mut worker, true, 200).await;
+        assert!(worker.link_previews_disabled);
+        assert!(worker.preview_fetch.is_none());
+        tokio::task::yield_now().await;
+        assert!(aborted.is_finished());
+    }
+
+    #[tokio::test]
+    async fn dismissing_a_preview_cancels_without_starting_another_fetch() {
+        let (mut worker, events, _, _) = worker();
+        worker.preview_fetch = Some(tokio::spawn(std::future::pending::<()>()));
+        worker.handle_command(Command::CancelLinkPreview).await;
+        assert!(worker.preview_fetch.is_none());
+        assert!(events.try_recv().is_err());
     }
 
     #[test]

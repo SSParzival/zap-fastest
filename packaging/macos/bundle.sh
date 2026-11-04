@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build Zap Faster.app from a GUI binary on macOS.
+# Build ZapFastest.app from a GUI binary on macOS.
 #
 #   packaging/macos/bundle.sh <binary> <output.app> <version>
 #
@@ -23,7 +23,7 @@ cp "$binary" "$app/Contents/MacOS/zap-fastest"
 chmod 755 "$app/Contents/MacOS/zap-fastest"
 sed "s/__VERSION__/$numeric_version/g" "$here/Info.plist" > "$app/Contents/Info.plist"
 
-iconset="$(mktemp -d)/zap-faster.iconset"
+iconset="$(mktemp -d)/zap-fastest.iconset"
 mkdir -p "$iconset"
 # iconutil reads these base sizes and optional @2x versions. It ignores 64x64.
 for size in 16 32 128 256 512; do

@@ -71,6 +71,7 @@ enum Entry {
 #[derive(Default)]
 struct Animations {
     entries: HashMap<PathBuf, Entry>,
+    seen: HashMap<PathBuf, u64>,
     /// Paths a sweep found idle. A `frame` call for the path clears the mark,
     /// so only an animation that misses a whole sweep interval undrawn is
     /// evicted.
@@ -131,6 +132,9 @@ pub fn frame(ui: &egui::Ui, path: &Path, rect: egui::Rect, animate: bool) -> Fra
     let arrived: Vec<Delivery> =
         std::mem::take(&mut *inbox.0.lock().unwrap_or_else(|p| p.into_inner()));
     let mut animations = cache.0.lock().unwrap_or_else(|p| p.into_inner());
+    animations
+        .seen
+        .insert(path.to_path_buf(), ctx.cumulative_frame_nr());
     let uploaded = !arrived.is_empty();
     for (arrived_path, decoded, complete) in arrived {
         let entry = match decoded {
@@ -291,6 +295,26 @@ pub fn frame(ui: &egui::Ui, path: &Path, rect: egui::Rect, animate: bool) -> Fra
     }
 }
 
+/// Drop textures and decoded deliveries after a frame that no longer draws them.
+/// This also runs when no animation is visible, so closing the last preview does
+/// not leave its GPU frames waiting for another sticker to trigger a sweep.
+pub(crate) fn release_unseen(ctx: &egui::Context) {
+    let cache = cache(ctx);
+    let mut animations = cache.0.lock().unwrap_or_else(|p| p.into_inner());
+    let pass = ctx.cumulative_frame_nr();
+    let seen = std::mem::take(&mut animations.seen);
+    animations
+        .entries
+        .retain(|path, _| seen.get(path) == Some(&pass));
+    animations.idle.retain(|path| seen.get(path) == Some(&pass));
+    animations.seen = seen.into_iter().filter(|(_, at)| *at == pass).collect();
+    inbox(ctx)
+        .0
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .retain(|(path, _, _)| animations.entries.contains_key(path));
+}
+
 /// Forgets what is known of `path`, a failure included, so the file there is
 /// decoded afresh the next time it is drawn.
 pub fn forget(ctx: &egui::Context, path: &Path) {
@@ -311,10 +335,21 @@ enum Start {
 /// Decodes `path` on a thread, every frame when `all` and otherwise only the
 /// poster, and delivers the result to `inbox`.
 fn start_decode(ctx: &egui::Context, inbox: &Inbox, path: &Path, all: bool) -> Start {
-    if DECODING.load(std::sync::atomic::Ordering::Acquire) >= MAX_DECODERS {
-        return Start::Busy;
+    let mut running = DECODING.load(std::sync::atomic::Ordering::Acquire);
+    loop {
+        if running >= MAX_DECODERS {
+            return Start::Busy;
+        }
+        match DECODING.compare_exchange_weak(
+            running,
+            running + 1,
+            std::sync::atomic::Ordering::AcqRel,
+            std::sync::atomic::Ordering::Acquire,
+        ) {
+            Ok(_) => break,
+            Err(actual) => running = actual,
+        }
     }
-    DECODING.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
     let slot = DecodeSlot;
     let file = path.to_path_buf();
     let ctx = ctx.clone();
@@ -1074,6 +1109,42 @@ mod tests {
         assert_eq!(decoded.frames.len(), 1);
         assert!(decode(&still, MAX_FRAMES).is_none(), "a plain still is not");
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn closing_the_last_animation_releases_its_texture_without_another_sticker() {
+        let ctx = egui::Context::default();
+        let path = PathBuf::from("closed.gif");
+        let texture = ctx.load_texture(
+            "closed-frame",
+            ColorImage::new([1, 1], vec![egui::Color32::WHITE]),
+            TextureOptions::LINEAR,
+        );
+        let texture_id = texture.id();
+        cache(&ctx).0.lock().unwrap().entries.insert(
+            path.clone(),
+            Entry::Ready(Playing {
+                frames: vec![(texture, Duration::from_secs(1))],
+                total: Duration::from_secs(1),
+                started: Instant::now(),
+                last_drawn: Instant::now(),
+                animating: false,
+                played_in: 0,
+                complete: true,
+                upgrading: false,
+            }),
+        );
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let (rect, _) = ui.allocate_exact_size(egui::vec2(20.0, 20.0), egui::Sense::hover());
+            assert!(matches!(frame(ui, &path, rect, false), Frame::Ready(_)));
+            release_unseen(ui.ctx());
+        });
+        output.textures_delta.clear();
+        assert!(cache(&ctx).0.lock().unwrap().entries.contains_key(&path));
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| release_unseen(ui.ctx()));
+        assert!(!cache(&ctx).0.lock().unwrap().entries.contains_key(&path));
+        assert!(output.textures_delta.free.contains(&texture_id));
+        output.textures_delta.clear();
     }
 
     #[test]
