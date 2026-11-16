@@ -41,6 +41,7 @@ pub mod markup;
 pub mod media_pause;
 pub mod model;
 pub mod motion;
+pub mod mp4_guard;
 pub mod nav;
 pub mod new_group;
 pub mod notify;

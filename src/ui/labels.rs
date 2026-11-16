@@ -52,7 +52,7 @@ pub fn swatch_id(hex: &str) -> egui::Id {
 /// Reads a `#rrggbb` colour, falling back to the theme accent.
 pub fn color_of(palette: &Palette, hex: &str) -> Color32 {
     let digits = hex.trim_start_matches('#');
-    if digits.len() != 6 {
+    if digits.len() != 6 || !digits.is_ascii() {
         return palette.accent;
     }
     let channel = |at: usize| u8::from_str_radix(&digits[at..at + 2], 16).ok();

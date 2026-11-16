@@ -934,7 +934,8 @@ fn list(app: &mut App, ui: &mut egui::Ui) {
         results(app, ui);
         return;
     }
-    let chats: Vec<Chat> = app.visible_chats().into_iter().cloned().collect();
+    // Positions only: each row copies its own chat when it draws.
+    let chats = app.visible_chat_indices();
     if chats.is_empty() {
         // The favorites title is translated, so it is bound here: the tuple
         // below borrows it for this frame, and every other arm stays a literal.
@@ -968,17 +969,17 @@ fn list(app: &mut App, ui: &mut egui::Ui) {
     ui.spacing_mut().item_spacing.y = 0.0;
     let row_height = theme::ROW_HEIGHT;
     let grouped = app.chat_filter != ChatFilter::Favorites && app.label_filter.is_none();
-    let rows = community_rows(&chats, &app.collapsed_communities, |chat| {
+    let rows = community_rows(&app.chats, &chats, &app.collapsed_communities, |chat| {
         grouped && !chat.pinned && !app.has_draft(&chat.id)
     });
     let total = rows.len();
     if ui.is_enabled() && !egui::Popup::is_any_open(ui.ctx()) {
         let ids: Vec<_> = rows
             .iter()
-            .map(|row| chat_row_id(&chats[row.chat].id).with("focus"))
+            .map(|row| chat_row_id(&app.chats[row.chat].id).with("focus"))
             .collect();
         if let Some(index) = super::accessibility::navigate(ui.ctx(), &ids) {
-            app.scroll_chat_into_view = Some(chats[rows[index].chat].id.clone());
+            app.scroll_chat_into_view = Some(app.chats[rows[index].chat].id.clone());
         }
     }
     let mut scroll_area = egui::ScrollArea::vertical()
@@ -989,16 +990,19 @@ fn list(app: &mut App, ui: &mut egui::Ui) {
     }
     let target_row = app.scroll_chat_into_view.as_ref().and_then(|target| {
         rows.iter()
-            .position(|entry| chats[entry.chat].id == *target)
+            .position(|entry| app.chats[entry.chat].id == *target)
             .or_else(|| {
-                let child = chats.iter().find(|chat| chat.id == *target)?;
+                let child = chats
+                    .iter()
+                    .map(|&index| &app.chats[index])
+                    .find(|chat| chat.id == *target)?;
                 let crate::model::CommunityRole::Member { parent, .. } =
                     child.community.as_ref()?
                 else {
                     return None;
                 };
                 rows.iter()
-                    .position(|entry| chats[entry.chat].id == *parent)
+                    .position(|entry| app.chats[entry.chat].id == *parent)
             })
     });
     // The copies a narrow window's slide draws have widget ids of their own:
@@ -1047,8 +1051,10 @@ fn list(app: &mut App, ui: &mut egui::Ui) {
             );
         }
         for index in range {
-            let entry = &rows[index];
-            let chat = &chats[entry.chat];
+            let entry = rows[index];
+            let Some(chat) = app.chats.get(entry.chat).cloned() else {
+                continue;
+            };
             // Key by chat so an open menu survives list reordering.
             let response = ui
                 .push_id(("chat", &chat.id), |ui| {
@@ -1090,11 +1096,11 @@ fn list(app: &mut App, ui: &mut egui::Ui) {
                             } else {
                                 ui.add_space(24.0);
                             }
-                            row(app, ui, chat)
+                            row(app, ui, &chat)
                         })
                         .inner
                     } else {
-                        row(app, ui, chat)
+                        row(app, ui, &chat)
                     }
                 })
                 .inner;
@@ -1148,7 +1154,7 @@ fn list(app: &mut App, ui: &mut egui::Ui) {
         .data_mut(|data| data.insert_temp(list_offset_id(), output.state.offset.y));
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct CommunityRow {
     chat: usize,
     parent: bool,
@@ -1158,21 +1164,29 @@ struct CommunityRow {
 /// Group only known visible parents. Pins, drafts, Favorites, locks, filters and
 /// unknown membership retain the ordinary list, without exposing another chat.
 fn community_rows(
-    chats: &[Chat],
+    all: &[Chat],
+    visible: &[usize],
     collapsed: &std::collections::HashSet<String>,
     eligible: impl Fn(&Chat) -> bool,
 ) -> Vec<CommunityRow> {
     use crate::model::CommunityRole;
-    let parents: std::collections::HashMap<_, _> = chats
+    let parents: std::collections::HashMap<_, _> = visible
         .iter()
-        .enumerate()
-        .filter(|(_, chat)| eligible(chat) && matches!(chat.community, Some(CommunityRole::Parent)))
-        .map(|(index, chat)| (chat.id.as_str(), index))
+        .copied()
+        .filter(|&index| {
+            let chat = &all[index];
+            eligible(chat) && matches!(chat.community, Some(CommunityRole::Parent))
+        })
+        .map(|index| (all[index].id.as_str(), index))
         .collect();
     let mut children: std::collections::HashMap<usize, Vec<usize>> =
         std::collections::HashMap::new();
     let mut membership = std::collections::HashMap::new();
-    for (index, chat) in chats.iter().enumerate().filter(|(_, chat)| eligible(chat)) {
+    for &index in visible {
+        let chat = &all[index];
+        if !eligible(chat) {
+            continue;
+        }
         if let Some(CommunityRole::Member { parent, .. }) = &chat.community
             && let Some(&owner) = parents.get(parent.as_str())
         {
@@ -1181,8 +1195,8 @@ fn community_rows(
         }
     }
     let mut emitted = std::collections::HashSet::new();
-    let mut rows = Vec::with_capacity(chats.len());
-    for index in 0..chats.len() {
+    let mut rows = Vec::with_capacity(visible.len());
+    for &index in visible {
         let owner = membership.get(&index).copied().unwrap_or(index);
         if let Some(members) = children.get(&owner) {
             if emitted.insert(owner) {
@@ -1191,7 +1205,7 @@ fn community_rows(
                     parent: true,
                     child: false,
                 });
-                if !collapsed.contains(&chats[owner].id) {
+                if !collapsed.contains(&all[owner].id) {
                     rows.extend(members.iter().map(|&chat| CommunityRow {
                         chat,
                         parent: false,
@@ -1269,7 +1283,7 @@ fn locked_entry(app: &mut App, ui: &mut egui::Ui) {
 /// The authenticated folder, including archived chats and local title search.
 fn locked_list(app: &mut App, ui: &mut egui::Ui) {
     let palette = app.palette;
-    let chats = app.visible_chats();
+    let chats = app.visible_chat_indices();
     if chats.is_empty() {
         widgets::empty_state(
             ui,
@@ -1280,15 +1294,15 @@ fn locked_list(app: &mut App, ui: &mut egui::Ui) {
         );
         return;
     }
-    let chats: Vec<Chat> = chats.into_iter().cloned().collect();
     ui.spacing_mut().item_spacing.y = 0.0;
     let mut scroll_area = egui::ScrollArea::vertical()
         .id_salt("locked-chats")
         .auto_shrink([false, false]);
-    let target_row = app
-        .scroll_chat_into_view
-        .as_ref()
-        .and_then(|target| chats.iter().position(|chat| chat.id == *target));
+    let target_row = app.scroll_chat_into_view.as_ref().and_then(|target| {
+        chats
+            .iter()
+            .position(|&index| app.chats[index].id == *target)
+    });
     if let Some(target_row) = target_row {
         let id = ui.make_persistent_id(egui::IdSalt::new("locked-chats"));
         let current = egui::scroll_area::State::load(ui.ctx(), id)
@@ -1306,8 +1320,11 @@ fn locked_list(app: &mut App, ui: &mut egui::Ui) {
         app.scroll_chat_into_view = None;
     }
     scroll_area.show_rows(ui, theme::ROW_HEIGHT, chats.len(), |ui, range| {
-        for chat in &chats[range] {
-            ui.push_id(("chat", &chat.id), |ui| row(app, ui, chat));
+        for &index in &chats[range] {
+            let Some(chat) = app.chats.get(index).cloned() else {
+                continue;
+            };
+            ui.push_id(("chat", &chat.id), |ui| row(app, ui, &chat));
         }
     });
 }
@@ -1334,16 +1351,18 @@ fn row_scroll_offset(
 /// Search results grouped into chats, messages, and contacts.
 fn results(app: &mut App, ui: &mut egui::Ui) {
     let palette = app.palette;
-    let chats: Vec<Chat> = app.visible_chats().into_iter().cloned().collect();
-    let hits: Vec<Message> = app.search_hits.clone();
+    // Chats and hits are positions: each row copies its own while it draws,
+    // so no frame holds a second copy of every result.
+    let chats = app.visible_chat_indices();
+    let hits = app.search_hits.len();
     let contacts: Vec<Contact> = app.matching_contacts().into_iter().cloned().collect();
     let needle = crate::util::search_key(app.search.trim());
     let offer_self = !needle.is_empty()
         && app.offers_self(&needle)
         && !chats
             .iter()
-            .any(|chat| app.me.as_deref() == Some(chat.id.as_str()));
-    if chats.is_empty() && hits.is_empty() && contacts.is_empty() && !offer_self {
+            .any(|&index| app.me.as_deref() == Some(app.chats[index].id.as_str()));
+    if chats.is_empty() && hits == 0 && contacts.is_empty() && !offer_self {
         widgets::empty_state(
             ui,
             &palette,
@@ -1361,15 +1380,18 @@ fn results(app: &mut App, ui: &mut egui::Ui) {
             super::accessibility::begin_results(
                 ui,
                 "Search results",
-                chats.len() + hits.len() + contacts.len() + usize::from(offer_self),
+                chats.len() + hits + contacts.len() + usize::from(offer_self),
             );
             if !chats.is_empty() {
                 section(ui, &palette, "Chats");
-                for chat in &chats {
+                for &index in &chats {
+                    let Some(chat) = app.chats.get(index).cloned() else {
+                        continue;
+                    };
                     let reveal = ui.is_enabled()
                         && app.scroll_chat_into_view.as_deref() == Some(chat.id.as_str());
                     let response = ui
-                        .push_id(("chat", &chat.id), |ui| row(app, ui, chat))
+                        .push_id(("chat", &chat.id), |ui| row(app, ui, &chat))
                         .inner;
                     if reveal {
                         response.scroll_to_me(None);
@@ -1377,10 +1399,13 @@ fn results(app: &mut App, ui: &mut egui::Ui) {
                     }
                 }
             }
-            if !hits.is_empty() {
+            if hits > 0 {
                 section(ui, &palette, "Messages");
-                for hit in &hits {
-                    ui.push_id(("hit", &hit.chat, &hit.id), |ui| hit_row(app, ui, hit));
+                for index in 0..hits {
+                    let Some(hit) = app.search_hits.get(index).cloned() else {
+                        continue;
+                    };
+                    ui.push_id(("hit", &hit.chat, &hit.id), |ui| hit_row(app, ui, &hit));
                 }
             }
             if !contacts.is_empty() || offer_self {
@@ -1389,7 +1414,9 @@ fn results(app: &mut App, ui: &mut egui::Ui) {
                     ui.push_id("self", |ui| self_row(app, ui));
                 }
                 for contact in &contacts {
-                    ui.push_id(("contact", &contact.id), |ui| contact_row(app, ui, contact));
+                    ui.push_id(("contact", &contact.id), |ui| {
+                        contact_row(app, ui, contact, false)
+                    });
                 }
             }
             ui.add_space(8.0);
@@ -1547,10 +1574,10 @@ fn hit_row(app: &mut App, ui: &mut egui::Ui, hit: &Message) {
 }
 
 /// A contact without a chat. Clicking starts one.
-pub(super) fn contact_row(app: &mut App, ui: &mut egui::Ui, contact: &Contact) {
+pub(super) fn contact_row(app: &mut App, ui: &mut egui::Ui, contact: &Contact, selected: bool) {
     let name = app.display_name(&contact.id);
     let detail = crate::model::phone_of(&contact.id).map(crate::util::phone);
-    if person_row(app, ui, &contact.id, &name, detail.as_deref()).clicked() {
+    if person_row(app, ui, &contact.id, &name, detail.as_deref(), selected).clicked() {
         app.actions.push(Action::StartChat {
             id: contact.id.clone(),
             name,
@@ -1566,9 +1593,14 @@ pub(super) fn self_row(app: &mut App, ui: &mut egui::Ui) {
     };
     let name = app.self_title();
     let detail = crate::i18n::gettext(app.locale, "Message yourself");
-    if person_row(app, ui, &me, &name, Some(detail.as_ref())).clicked() {
+    if person_row(app, ui, &me, &name, Some(detail.as_ref()), false).clicked() {
         app.actions.push(Action::MessageYourself);
     }
+}
+
+/// The contact whose row New chat last scrolled into view as its first match.
+pub(super) fn revealed_row_id() -> egui::Id {
+    egui::Id::new("person-row-revealed")
 }
 
 /// A row that starts something, drawn like a person's: an icon on the
@@ -1615,6 +1647,7 @@ fn person_row(
     id: &str,
     name: &str,
     detail: Option<&str>,
+    selected: bool,
 ) -> egui::Response {
     let palette = app.palette;
     let (rect, response) = ui.allocate_exact_size(
@@ -1623,6 +1656,29 @@ fn person_row(
     );
     theme::reveal_focus(&response);
     super::accessibility::result_item(&response);
+    // The highlighted row is scrolled into view once each time it changes, so
+    // Enter never opens a chat the list has scrolled past. Scrolling again
+    // every frame would fight the reader.
+    let revealed = revealed_row_id();
+    if selected {
+        if ui
+            .ctx()
+            .data(|data| data.get_temp::<String>(revealed))
+            .as_deref()
+            != Some(id)
+        {
+            response.scroll_to_me(Some(egui::Align::Center));
+            ui.ctx()
+                .data_mut(|data| data.insert_temp(revealed, id.to_owned()));
+        }
+    } else if ui
+        .ctx()
+        .data(|data| data.get_temp::<String>(revealed))
+        .as_deref()
+        == Some(id)
+    {
+        ui.ctx().data_mut(|data| data.remove::<String>(revealed));
+    }
     let hidden_avatar = app.settings.screen_privacy.hides(
         crate::settings::ScreenPrivacyWhat::Avatar,
         response.hovered(),
@@ -1645,7 +1701,9 @@ fn person_row(
         }
     });
     if ui.is_rect_visible(rect) {
-        if response.hovered() {
+        if selected {
+            widgets::row_highlight(ui, &palette, rect, palette.surface_active);
+        } else if response.hovered() {
             widgets::row_highlight(ui, &palette, rect, palette.surface_hover);
         }
         let avatar_rect =
@@ -2161,7 +2219,7 @@ fn compact_list(app: &mut App, ui: &mut egui::Ui) {
         compact_locked_entry(app, ui);
         return;
     }
-    let chats: Vec<Chat> = app.visible_chats().into_iter().cloned().collect();
+    let chats = app.visible_chat_indices();
     let mut scroll_area = egui::ScrollArea::vertical()
         .id_salt("chat-rail")
         .auto_shrink([false, false]);
@@ -2169,10 +2227,11 @@ fn compact_list(app: &mut App, ui: &mut egui::Ui) {
         scroll_area = scroll_area.vertical_scroll_offset(0.0);
     }
     // Alt+Up/Down reveals the chat it opens here too.
-    let target_row = app
-        .scroll_chat_into_view
-        .as_ref()
-        .and_then(|target| chats.iter().position(|chat| chat.id == *target));
+    let target_row = app.scroll_chat_into_view.as_ref().and_then(|target| {
+        chats
+            .iter()
+            .position(|&index| app.chats[index].id == *target)
+    });
     if let Some(target_row) = target_row {
         let id = ui.make_persistent_id(egui::IdSalt::new("chat-rail"));
         let current = egui::scroll_area::State::load(ui.ctx(), id)
@@ -2198,9 +2257,12 @@ fn compact_list(app: &mut App, ui: &mut egui::Ui) {
                 egui::style::ScrollAnimation::none(),
             );
         }
-        for chat in &chats[range] {
+        for &index in &chats[range] {
+            let Some(chat) = app.chats.get(index).cloned() else {
+                continue;
+            };
             let response = ui
-                .push_id(("chat", &chat.id), |ui| compact_row(app, ui, chat))
+                .push_id(("chat", &chat.id), |ui| compact_row(app, ui, &chat))
                 .inner;
             if response.clicked() && !app.locked_folder_open() && !app.show_archived {
                 app.actions.push(Action::KeepUnread(chat.id.clone()));
@@ -2676,20 +2738,24 @@ mod tests {
             member("older@g.us", "community@g.us"),
             member("unknown@g.us", "hidden@g.us"),
         ];
-        let rows = community_rows(&chats, &HashSet::new(), |chat| !chat.pinned);
+        let visible: Vec<usize> = (0..chats.len()).collect();
+        let rows = community_rows(&chats, &visible, &HashSet::new(), |chat| !chat.pinned);
         assert_eq!(
             rows.iter().map(|row| row.chat).collect::<Vec<_>>(),
             vec![0, 3, 1, 4, 2, 5]
         );
         assert!(rows[1].parent && rows[2].child && rows[3].child);
-        let closed = community_rows(&chats, &HashSet::from(["community@g.us".into()]), |chat| {
-            !chat.pinned
-        });
+        let closed = community_rows(
+            &chats,
+            &visible,
+            &HashSet::from(["community@g.us".into()]),
+            |chat| !chat.pinned,
+        );
         assert_eq!(
             closed.iter().map(|row| row.chat).collect::<Vec<_>>(),
             vec![0, 3, 2, 5]
         );
-        let flat = community_rows(&chats, &HashSet::new(), |_| false);
+        let flat = community_rows(&chats, &visible, &HashSet::new(), |_| false);
         assert_eq!(
             flat.iter().map(|row| row.chat).collect::<Vec<_>>(),
             (0..chats.len()).collect::<Vec<_>>()

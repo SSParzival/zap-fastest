@@ -2,6 +2,9 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use zapfast::{app, backend, paths, settings, single_instance};
 
 use clap::Parser;
@@ -796,6 +799,7 @@ fn run() -> eframe::Result<()> {
     logging
         .init()
         .map_err(|error| eframe::Error::AppCreation(error.into()))?;
+    contain_panics();
     // Moving a single-account setup into its account folder needs the
     // keyring; when it cannot finish, the log says why.
     if !demo && let Err(error) = dirs.adopt_single_account() {
@@ -966,6 +970,31 @@ fn run() -> eframe::Result<()> {
         })?;
     drop(instance);
     Ok(())
+}
+
+/// Decoder threads that wrap their work in `catch_unwind` so a malformed media
+/// file degrades to "unsupported file" instead of terminating the app.
+const CONTAINED_THREADS: &[&str] = &[
+    "animation-decode",
+    "video-decode",
+    "video-sound",
+    "fit-pictures",
+];
+
+/// Aborts on panics outside contained decoder threads while preserving unwind
+/// semantics where `catch_unwind` handles corrupted media.
+fn contain_panics() {
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        previous(info);
+        if !is_contained(std::thread::current().name()) {
+            std::process::abort();
+        }
+    }));
+}
+
+fn is_contained(thread: Option<&str>) -> bool {
+    thread.is_some_and(|name| CONTAINED_THREADS.contains(&name))
 }
 
 /// Whether eframe stopped because the graphics driver gave it no usable
@@ -1647,5 +1676,18 @@ mod log_filter_tests {
             log::Level::Warn,
             "arboard::platform::linux"
         ));
+    }
+
+    #[test]
+    fn only_contained_decoder_threads_survive_a_panic() {
+        assert!(super::is_contained(Some("animation-decode")));
+        assert!(super::is_contained(Some("video-decode")));
+        assert!(super::is_contained(Some("video-sound")));
+        assert!(super::is_contained(Some("fit-pictures")));
+        assert!(!super::is_contained(Some("main")));
+        assert!(!super::is_contained(Some("tokio-runtime-worker")));
+        assert!(!super::is_contained(None));
+        assert!(include_str!("animation.rs").contains(r#".name("animation-decode".into())"#));
+        assert!(include_str!("video.rs").contains(r#".name("video-decode".into())"#));
     }
 }

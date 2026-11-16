@@ -113,10 +113,10 @@ pub(crate) fn show(app: &mut App, ui: &mut egui::Ui) {
                                 {
                                     // Stay in this account's filtered Status view. A generic
                                     // image preview would lose this sender's expiry/lock scope.
+                                    let bounds = egui::vec2(ui.available_width().min(640.0), 480.0);
                                     ui.add(
-                                        egui::Image::new(crate::util::image_uri(path)).max_size(
-                                            egui::vec2(ui.available_width().min(640.0), 480.0),
-                                        ),
+                                        super::widgets::fitted_image_within(ui, path, bounds)
+                                            .max_size(bounds),
                                     );
                                 } else if super::widgets::menu_item(
                                     ui,

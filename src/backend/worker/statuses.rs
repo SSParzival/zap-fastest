@@ -369,16 +369,19 @@ impl Worker {
 mod tests {
     use super::*;
     fn revoke(id: &str) -> Arc<wa::Message> {
-        Arc::new(wa::Message {
-            protocol_message: MessageField::some(wa::message::ProtocolMessage {
-                r#type: Some(wa::message::protocol_message::Type::REVOKE),
-                key: MessageField::some(wa::MessageKey {
-                    id: Some(id.into()),
-                    ..Default::default()
-                }),
-                ..Default::default()
-            }),
-            ..Default::default()
+        Arc::new({
+            let mut proto = wa::Message::default();
+            proto.protocol_message = MessageField::some({
+                let mut proto = wa::message::ProtocolMessage::default();
+                proto.r#type = Some(wa::message::protocol_message::Type::REVOKE);
+                proto.key = MessageField::some({
+                    let mut proto = wa::MessageKey::default();
+                    proto.id = Some(id.into());
+                    proto
+                });
+                proto
+            });
+            proto
         })
     }
     #[test]
@@ -400,9 +403,10 @@ mod tests {
     fn oversized_raw_and_full_revocation_barriers_fail_closed() {
         let (mut worker, _, _, _) = super::super::receipt_tests::worker();
         let (_, info) = delivery("too-large", crate::util::now());
-        let oversized = Arc::new(wa::Message {
-            conversation: Some("x".repeat(RAW_LIMIT + 1)),
-            ..Default::default()
+        let oversized = Arc::new({
+            let mut proto = wa::Message::default();
+            proto.conversation = Some("x".repeat(RAW_LIMIT + 1));
+            proto
         });
         worker.ingest(&oversized, &info);
         assert!(worker.stories.rows.is_empty());
@@ -454,9 +458,10 @@ mod tests {
         assert!(!path.exists());
     }
     fn delivery(id: &str, at: i64) -> (Arc<wa::Message>, MessageInfo) {
-        let raw = Arc::new(wa::Message {
-            conversation: Some("Synthetic story".into()),
-            ..Default::default()
+        let raw = Arc::new({
+            let mut proto = wa::Message::default();
+            proto.conversation = Some("Synthetic story".into());
+            proto
         });
         let info = MessageInfo {
             id: id.into(),

@@ -345,6 +345,25 @@ pub fn file_image(ui: &Ui, path: &Path) -> egui::Image<'static> {
     egui::Image::new(uri)
 }
 
+/// A file image decoded off the interface thread at the size it is drawn
+/// (rounded up to a step in [`crate::image_cache`]), large enough to cover a
+/// cropped frame of `size` points.
+pub fn fitted_image(ui: &Ui, path: &Path, size: Vec2) -> egui::Image<'static> {
+    egui::Image::new(crate::image_cache::fit_uri(ui.ctx(), path, size))
+}
+
+/// A still sticker decoded off the interface thread at `size` points, for a
+/// WebP `crate::ui::picker::moves` already saw does not animate.
+pub fn fitted_sticker(ui: &Ui, path: &Path, size: Vec2) -> egui::Image<'static> {
+    egui::Image::new(crate::image_cache::fit_still_uri(ui.ctx(), path, size))
+}
+
+/// A file image decoded off the interface thread to fit wholly inside
+/// `bounds` points, rather than covering the larger square.
+pub fn fitted_image_within(ui: &Ui, path: &Path, bounds: Vec2) -> egui::Image<'static> {
+    egui::Image::new(crate::image_cache::fit_uri_within(ui.ctx(), path, bounds))
+}
+
 /// Round profile picture, or id-colored initials when no picture is available.
 pub fn avatar(
     ui: &mut Ui,
@@ -397,7 +416,7 @@ pub fn paint_avatar(
     let size = rect.width();
     let mut painted = false;
     if let Some(picture) = picture {
-        let image = file_image(ui, picture)
+        let image = fitted_image(ui, picture, Vec2::splat(size))
             .fit_to_exact_size(Vec2::splat(size))
             .corner_radius(size / 2.0);
         if let Ok(egui::load::TexturePoll::Ready { .. }) =
@@ -417,7 +436,7 @@ pub fn paint_avatar(
                 rect.center(),
                 egui::Align2::CENTER_CENTER,
                 crate::util::initials(name),
-                theme::semibold(size * 0.38),
+                theme::semibold((size * 0.38).round()),
                 Color32::WHITE,
             );
         }

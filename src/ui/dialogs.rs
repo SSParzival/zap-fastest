@@ -625,10 +625,18 @@ fn new_chat(app: &mut App, ui: &mut egui::Ui) {
     let palette = app.palette;
     title(ui, app, "New chat");
     let width = ui.available_width();
+    let field = egui::Id::new("new-chat-search");
+    // Enter opens the first match the list highlights. It is taken before
+    // the field reads the key, so the field does not lose focus first. The
+    // matches are worked out after the field, so they include this frame's
+    // typing.
+    let open_first = !app.new_chat_search.trim().is_empty()
+        && ui.memory(|memory| memory.has_focus(field))
+        && ui.input_mut(|input| super::keys::take_plain(input, egui::Key::Enter));
     let search = super::widgets::search_field(
         ui,
         &palette,
-        egui::Id::new("new-chat-search"),
+        field,
         &mut app.new_chat_search,
         "Search contacts",
         width,
@@ -638,9 +646,34 @@ fn new_chat(app: &mut App, ui: &mut egui::Ui) {
     }
     let needle = crate::util::search_key(app.new_chat_search.trim());
     let contacts = contact_choices(app, &needle);
+    let offer_self = app.offers_self(&needle);
+    if let Some(contact) = contacts
+        .first()
+        .filter(|_| open_first && !needle.is_empty())
+    {
+        let name = app.display_name(&contact.id);
+        app.actions.push(Action::StartChat {
+            id: contact.id.clone(),
+            name,
+            dismiss_dialog: true,
+        });
+    }
+    // The list is as tall as its rows, up to the space the dialog has, so a
+    // search with few matches gives a short list and many give a full one.
+    // Its height comes from this frame's rows, not last frame's size.
+    let listed = if contacts.is_empty() && !offer_self {
+        1
+    } else {
+        contacts.len() + usize::from(offer_self)
+    };
+    let rows = 3 + listed;
+    let spacing = ui.spacing().item_spacing.y;
+    let content_height = rows as f32 * theme::ROW_HEIGHT + (rows - 1) as f32 * spacing;
+    let room = (ui.ctx().content_rect().height() - 280.0).clamp(100.0, 420.0);
+    let list_height = content_height.min(room);
     egui::ScrollArea::vertical()
         .id_salt("new-chat-contacts")
-        .max_height((ui.ctx().content_rect().height() - 280.0).clamp(100.0, 420.0))
+        .max_height(list_height)
         .auto_shrink([false, true])
         .show(ui, |ui| {
             // New group and Add contact head the list, then "Message
@@ -657,11 +690,13 @@ fn new_chat(app: &mut App, ui: &mut egui::Ui) {
             if super::chats::action_row(app, ui, Icon::MessageCircle, &message_number).clicked() {
                 app.actions.push(Action::ShowDialog(Dialog::MessageNumber));
             }
-            let offer_self = app.offers_self(&needle);
             if offer_self {
                 super::chats::self_row(app, ui);
             }
             if contacts.is_empty() && !offer_self {
+                // No row is drawn to forget the one scrolled into view last.
+                ui.ctx()
+                    .data_mut(|data| data.remove::<String>(super::chats::revealed_row_id()));
                 theme::text(
                     ui,
                     "No matching contacts",
@@ -669,44 +704,146 @@ fn new_chat(app: &mut App, ui: &mut egui::Ui) {
                     palette.secondary,
                 );
             }
-            for contact in contacts {
+            for (index, contact) in contacts.into_iter().enumerate() {
+                let selected = index == 0 && !needle.is_empty();
                 ui.push_id(&contact.id, |ui| {
-                    super::chats::contact_row(app, ui, &contact)
+                    super::chats::contact_row(app, ui, &contact, selected)
                 });
             }
         });
 }
 
 pub(super) fn contact_choices(app: &App, needle: &str) -> Vec<crate::model::Contact> {
-    let mut contacts = app.contacts.clone();
+    let wanted = |contact: &crate::model::Contact| {
+        crate::model::phone_of(&contact.id).is_some()
+            && app.me.as_deref() != Some(contact.id.as_str())
+            && !app.chat(&contact.id).is_some_and(|chat| chat.locked)
+            && (needle.is_empty()
+                || app.name_matches(&app.display_name(&contact.id), needle)
+                || crate::model::phone_of(&contact.id).is_some_and(|phone| phone.contains(needle)))
+    };
+    // Only the people kept are copied, not the whole contact book.
+    let mut contacts: Vec<_> = app
+        .contacts
+        .values()
+        .filter(|contact| wanted(contact))
+        .cloned()
+        .collect();
     for chat in &app.chats {
-        if chat.kind == crate::model::ChatKind::Direct {
-            contacts
-                .entry(chat.id.clone())
-                .or_insert_with(|| crate::model::Contact {
-                    id: chat.id.clone(),
-                    full_name: Some(app.chat_title(chat)),
-                    ..Default::default()
-                });
+        if chat.kind == crate::model::ChatKind::Direct && !app.contacts.contains_key(&chat.id) {
+            let contact = crate::model::Contact {
+                id: chat.id.clone(),
+                full_name: Some(app.chat_title(chat)),
+                ..Default::default()
+            };
+            if wanted(&contact) {
+                contacts.push(contact);
+            }
         }
     }
-    let mut contacts: Vec<_> = contacts
-        .into_values()
-        .filter(|contact| {
-            crate::model::phone_of(&contact.id).is_some()
-                && app.me.as_deref() != Some(contact.id.as_str())
-                && !app.chat(&contact.id).is_some_and(|chat| chat.locked)
-                && (needle.is_empty()
-                    || crate::util::search_matches(
-                        &crate::util::search_key(&app.display_name(&contact.id)),
-                        needle,
-                    )
-                    || crate::model::phone_of(&contact.id)
-                        .is_some_and(|phone| phone.contains(needle)))
-        })
-        .collect();
-    contacts.sort_by_key(|contact| crate::util::search_key(&app.display_name(&contact.id)));
+    contacts.sort_by_cached_key(|contact| crate::util::search_key(&app.display_name(&contact.id)));
     contacts
+}
+
+/// The groups `person` shares with us, by name, as `(id, name)`: those whose
+/// member list includes them and us. Groups we left are not shared any more,
+/// and a locked group stays in the locked folder rather than showing here.
+fn groups_in_common(app: &App, person: &str) -> Vec<(String, String)> {
+    let ours = app.our_ids();
+    let mut groups: Vec<(String, String)> = app
+        .chats
+        .iter()
+        .filter(|chat| chat.is_group() && !chat.left && !chat.locked)
+        // A member list without us is a group we are out of, however we got
+        // out of it.
+        .filter(|chat| {
+            let has = |id: &str| chat.participants.iter().any(|member| member == id);
+            has(person) && ours.iter().any(|me| has(me))
+        })
+        .map(|chat| (chat.id.clone(), app.chat_title(chat)))
+        .collect();
+    groups.sort_by(|a, b| {
+        a.1.to_lowercase()
+            .cmp(&b.1.to_lowercase())
+            .then_with(|| a.0.cmp(&b.0))
+    });
+    groups
+}
+
+/// Lists the groups we share with a contact inside their details dialog.
+fn common_groups(
+    app: &mut App,
+    ui: &mut egui::Ui,
+    person: &str,
+    groups: &[(String, String)],
+    max_height: f32,
+) {
+    let palette = app.palette;
+    theme::text(
+        ui,
+        crate::i18n::gettext(app.locale, "Groups in common"),
+        theme::medium(12.5),
+        palette.secondary,
+    );
+    ui.add_space(4.0);
+    let row_height = 30.0;
+    let mut open = None;
+    egui::ScrollArea::vertical()
+        .id_salt(("common-groups", person))
+        .max_height(max_height)
+        .min_scrolled_height(0.0)
+        .auto_shrink([false, true])
+        .show_rows(ui, row_height, groups.len(), |ui, range| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            for (group, name) in &groups[range] {
+                let (rect, response) = ui.allocate_exact_size(
+                    egui::vec2(ui.available_width(), row_height),
+                    egui::Sense::click(),
+                );
+                if ui.is_rect_visible(rect) {
+                    if response.hovered() {
+                        super::widgets::dialog_row_highlight(ui, rect, palette.surface_hover);
+                    }
+                    let picture = app.avatar(group);
+                    let avatar = egui::Rect::from_center_size(
+                        egui::pos2(rect.left() + 16.0, rect.center().y),
+                        egui::Vec2::splat(24.0),
+                    );
+                    super::widgets::paint_avatar(
+                        ui,
+                        &palette,
+                        avatar,
+                        name,
+                        group,
+                        picture.as_deref(),
+                    );
+                    let line = super::widgets::line(
+                        ui,
+                        name,
+                        theme::regular(13.0),
+                        palette.text,
+                        rect.width() - 40.0,
+                        1,
+                    );
+                    line.paint(
+                        ui,
+                        egui::pos2(rect.left() + 34.0, rect.center().y - line.size().y / 2.0),
+                        palette.text,
+                    );
+                }
+                if response
+                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                    .clicked()
+                {
+                    open = Some(group.clone());
+                }
+            }
+        });
+    if let Some(group) = open {
+        app.actions
+            .extend([Action::OpenChat(group), Action::CloseDialog]);
+    }
+    ui.add_space(6.0);
 }
 
 /// Draws international-number entry, validation feedback and lookup submission.
@@ -2919,6 +3056,23 @@ fn chat_info(app: &mut App, ui: &mut egui::Ui, id: &str) {
         }
         ui.add_space(6.0);
     }
+    if !chat.is_group() && !chat.is_channel() && !app.our_ids().contains(&id) {
+        let groups = groups_in_common(app, id);
+        if !groups.is_empty() {
+            common_groups(
+                app,
+                ui,
+                id,
+                &groups,
+                (content_cap
+                    - (ui.cursor().top() - content_top)
+                    - footer_height
+                    - muted_height
+                    - 28.0)
+                    .clamp(0.0, 30.0 * 6.0),
+            );
+        }
+    }
     if let Some(until) = chat.muted_until {
         theme::text(
             ui,
@@ -3518,14 +3672,11 @@ mod reaction_result_tests {
             ("actor-one", "First reactor"),
             ("actor-two", "Second reactor"),
         ] {
-            app.contacts.insert(
-                id.into(),
-                crate::model::Contact {
-                    id: id.into(),
-                    full_name: Some(name.into()),
-                    ..Default::default()
-                },
-            );
+            app.contacts.insert(crate::model::Contact {
+                id: id.into(),
+                full_name: Some(name.into()),
+                ..Default::default()
+            });
         }
         let ctx = egui::Context::default();
         app.attach(&ctx);
@@ -3567,5 +3718,44 @@ mod reaction_result_tests {
             app.actions.is_empty(),
             "opening results must not send reactions"
         );
+    }
+
+    #[test]
+    fn groups_in_common_are_the_groups_we_still_share_by_name() {
+        use crate::model::Chat;
+        let directory = tempfile::tempdir().unwrap();
+        let (mut app, _events) = App::headless(
+            crate::paths::AppDirs::under(directory.path()),
+            crate::settings::Settings::default(),
+        );
+        let me = "15550001111@s.whatsapp.net";
+        app.me = Some(me.to_owned());
+        let ada = "1@s.whatsapp.net";
+        let group = |id: &str, name: &str, members: &[&str]| {
+            let mut chat = Chat::new(id.into(), name.into());
+            chat.group_subject_known = true;
+            chat.participants = members.iter().map(|member| (*member).to_owned()).collect();
+            chat
+        };
+        let mut left = group("3@g.us", "Left", &[ada, me]);
+        left.left = true;
+        let mut locked = group("4@g.us", "Locked", &[ada, me]);
+        locked.locked = true;
+        app.chats = vec![
+            group("1@g.us", "Zeta", &[ada, "2@s.whatsapp.net", me]),
+            group("2@g.us", "alpha", &[ada, me]),
+            group("5@g.us", "Without Ada", &["2@s.whatsapp.net", me]),
+            // A member list without us: Ada is still in it, we are not.
+            group("6@g.us", "Removed", &[ada]),
+            left,
+            locked,
+            Chat::new(ada.into(), "Ada".into()),
+        ];
+        let names: Vec<String> = super::groups_in_common(&app, ada)
+            .into_iter()
+            .map(|(_, name)| name)
+            .collect();
+        assert_eq!(names, ["alpha", "Zeta"]);
+        assert!(super::groups_in_common(&app, "9@s.whatsapp.net").is_empty());
     }
 }

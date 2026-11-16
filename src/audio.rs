@@ -238,7 +238,11 @@ pub struct Player {
 
 struct Loaded {
     message: String,
+    /// The decoded clip; empty once playback is done (see `len`).
     samples: Arc<Vec<f32>>,
+    /// Length of the decoded clip in samples, kept after `samples` is freed
+    /// so the finished clip still reports its duration.
+    len: usize,
     /// Samples queued in the sink: the clip itself or its compression.
     buffer: Arc<Vec<f32>>,
     /// Speed the queued buffer represents; 1 plays the clip as recorded.
@@ -358,7 +362,7 @@ impl Player {
         if Arc::ptr_eq(&wanted, &loaded.buffer) {
             return;
         }
-        let total = clip_length(loaded.samples.len());
+        let total = clip_length(loaded.len);
         let fraction = if total > Duration::ZERO {
             (self.status(&loaded.message).position.as_secs_f64() / total.as_secs_f64()) as f32
         } else {
@@ -396,6 +400,10 @@ impl Player {
         let Some(loaded) = &self.loaded else {
             return;
         };
+        if loaded.done {
+            // The decoded clip was freed when it ended; a replay decodes anew.
+            return;
+        }
         let samples = Arc::clone(&loaded.samples);
         let waker = self.waker.clone();
         let slot: StretchedSlot = Default::default();
@@ -427,7 +435,8 @@ impl Player {
         match self.loaded.as_mut() {
             Some(loaded) if loaded.message == message => {
                 if loaded.done {
-                    return self.restart(0.0);
+                    // Its samples were freed at the end: decode again.
+                    return self.load(message, path, 0.0);
                 }
                 if self.output.is_none() {
                     // Paused clips release their player so the shared device
@@ -438,7 +447,7 @@ impl Player {
                 if let Some((_, sink)) = &self.output {
                     sink.pause();
                     loaded.base = (loaded.base + sink.get_pos().mul_f32(loaded.factor))
-                        .min(clip_length(loaded.samples.len()));
+                        .min(clip_length(loaded.len));
                     loaded.paused = true;
                 }
                 // A paused rodio player still produces silence forever and
@@ -453,7 +462,7 @@ impl Player {
     /// Seeks to a fraction from 0 to 1 and starts playback.
     pub fn seek(&mut self, message: &str, path: &Path, fraction: f32) -> Result<(), String> {
         match &self.loaded {
-            Some(loaded) if loaded.message == message => self.restart(fraction),
+            Some(loaded) if loaded.message == message && !loaded.done => self.restart(fraction),
             _ => self.load(message, path, fraction),
         }
     }
@@ -492,6 +501,7 @@ impl Player {
         let samples = Arc::new(vec![0.0; 48_000 * 4]);
         self.loaded = Some(Loaded {
             message: message.to_owned(),
+            len: samples.len(),
             buffer: samples.clone(),
             samples,
             factor: 1.0,
@@ -527,7 +537,7 @@ impl Player {
         }
         match &self.loaded {
             Some(loaded) if loaded.message == message => {
-                let total = clip_length(loaded.samples.len());
+                let total = clip_length(loaded.len);
                 if loaded.done {
                     return Status {
                         state: State::Idle,
@@ -581,6 +591,7 @@ impl Player {
                 .or_insert_with(|| voice::waveform(&samples));
             self.loaded = Some(Loaded {
                 message,
+                len: samples.len(),
                 buffer: Arc::clone(&samples),
                 factor: 1.0,
                 samples,
@@ -644,6 +655,16 @@ impl Player {
             // Release the device after playback ends.
             self.output = None;
             self.finished = self.loaded.as_ref().map(|loaded| loaded.message.clone());
+            // Free the decoded clip and its compressions; a replay decodes
+            // again instead of holding minutes of samples while idle.
+            if let Some(loaded) = self.loaded.as_mut() {
+                let empty = Arc::new(Vec::new());
+                loaded.samples = Arc::clone(&empty);
+                loaded.buffer = empty;
+                loaded.factor = 1.0;
+            }
+            self.stretches = Vec::new();
+            self.stretching = None;
         }
         Ok(())
     }
@@ -682,7 +703,7 @@ impl Player {
         } else {
             0.0
         };
-        let position = clip_length(loaded.samples.len()).mul_f64(f64::from(fraction));
+        let position = clip_length(loaded.len).mul_f64(f64::from(fraction));
         self.restart_at(position)
     }
 
@@ -694,7 +715,7 @@ impl Player {
         // The sink always plays at 1x: running it faster sharpens the voice,
         // so speeds above 1x queue a time-compressed copy of the clip.
         let (buffer, factor) = Self::buffer_for(loaded, &self.stretches, self.speed);
-        let total = clip_length(loaded.samples.len());
+        let total = clip_length(loaded.len);
         let position = position.min(total);
         let offset = sample_offset(position, factor, buffer.len());
         if self.output.is_none() {
@@ -1355,6 +1376,7 @@ mod tests {
         let double = Arc::new(vec![0.0; 6]);
         let loaded = Loaded {
             message: "clip".to_owned(),
+            len: samples.len(),
             samples: Arc::clone(&samples),
             buffer: Arc::clone(&one_and_a_half),
             factor: 1.5,
@@ -1386,6 +1408,7 @@ mod tests {
         let mut player = Player::new(Waker::default());
         player.loaded = Some(Loaded {
             message: "clip".to_owned(),
+            len: samples.len(),
             buffer: Arc::clone(&samples),
             samples,
             factor: 1.0,
@@ -1445,6 +1468,7 @@ mod tests {
         let mut player = Player::new(Waker::default());
         player.loaded = Some(Loaded {
             message: "clip".to_owned(),
+            len: samples.len(),
             buffer: Arc::clone(&samples),
             samples,
             factor: 2.0,
@@ -1470,6 +1494,34 @@ mod tests {
             assert_eq!(player.status("clip").position, position);
             assert!(player.take_finished().is_none(), "pausing is not finishing");
         }
+    }
+
+    #[test]
+    fn a_finished_clip_frees_its_samples_but_keeps_its_length() {
+        let samples = Arc::new(vec![0.0; 4_800]);
+        let mut player = Player::new(Waker::default());
+        player.stretches.push((2.0, Arc::new(vec![0.0; 2_400])));
+        player.loaded = Some(Loaded {
+            message: "clip".to_owned(),
+            len: samples.len(),
+            buffer: Arc::clone(&samples),
+            samples,
+            factor: 1.0,
+            base: Duration::ZERO,
+            paused: false,
+            done: false,
+        });
+        player.speed = 2.0;
+        if let Some(loaded) = player.loaded.as_mut() {
+            loaded.done = true;
+            loaded.samples = Arc::new(Vec::new());
+            loaded.buffer = Arc::clone(&loaded.samples);
+        }
+        player.ensure_stretch();
+        assert!(player.stretching.is_none(), "nothing to compress once done");
+        let status = player.status("clip");
+        assert_eq!(status.state, State::Idle);
+        assert_eq!(status.total, clip_length(4_800));
     }
 
     /// Plays a one-second test tone:

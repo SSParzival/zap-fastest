@@ -2570,7 +2570,7 @@ struct View<'a> {
     /// Resolves mention names without replacing our name with "You".
     mention_names: &'a dyn Fn(&str) -> String,
     avatars: &'a HashMap<String, Option<PathBuf>>,
-    contacts: &'a HashMap<String, crate::model::Contact>,
+    contacts: &'a crate::model::Contacts,
     now: i64,
     screen_privacy: ScreenPrivacy,
     /// Animate media only while this window is active.
@@ -3344,6 +3344,9 @@ fn messages(app: &mut App, ui: &mut egui::Ui, chat: &Chat, under: f32) {
                             {
                                 let id = bubble_id(&chat.id, &message.id).with("body");
                                 ui.ctx().data_mut(|data| data.remove::<Rect>(id));
+                                for member in album.unwrap_or(std::slice::from_ref(message)) {
+                                    forget_bubble(ui.ctx(), &chat.id, &member.id);
+                                }
                             }
                             ui.add_space(height);
                             placed += here;
@@ -4968,6 +4971,34 @@ pub fn bubble_id(chat: &str, message: &str) -> egui::Id {
     egui::Id::new(("bubble", chat, message))
 }
 
+/// Lets go of what a message's row left in `ctx.data` once the row has left the
+/// layout. egui never frees temporary data, and every message that was ever on
+/// screen would keep a dozen entries for the whole session. These are only
+/// where the row's parts were last drawn, and the row writes them again
+/// whenever it is laid out.
+fn forget_bubble(ctx: &egui::Context, chat: &str, message: &str) {
+    let id = bubble_id(chat, message);
+    ctx.data_mut(|data| {
+        for part in [
+            "rect",
+            "footer",
+            "picture",
+            "preview",
+            "quote",
+            "card",
+            "call-box",
+            "album-tile",
+            "forwarded",
+            "carousel-viewport",
+            "motion",
+        ] {
+            data.remove::<Rect>(id.with(part));
+        }
+        data.remove::<std::path::PathBuf>(id.with("audio-file"));
+        data.remove::<bool>(id.with("swiping"));
+    });
+}
+
 /// Where a voice message's speed chip was drawn, for interaction tests.
 pub fn speed_chip_id(chat: &str, message: &str) -> egui::Id {
     egui::Id::new(("speed-chip", chat, message))
@@ -6510,8 +6541,8 @@ fn reactions(ui: &mut egui::Ui, view: &View<'_>, message: &Message, actions: &mu
         }
         let response = response
             .on_hover_cursor(egui::CursorIcon::PointingHand)
-            .on_hover_text(
-                if view
+            .on_hover_ui(|ui| {
+                let text = if view
                     .screen_privacy
                     .hides(crate::settings::ScreenPrivacyWhat::Name, false)
                 {
@@ -6531,8 +6562,9 @@ fn reactions(ui: &mut egui::Ui, view: &View<'_>, message: &Message, actions: &mu
                         })
                         .collect::<Vec<_>>()
                         .join(", ")
-                },
-            );
+                };
+                ui.label(text);
+            });
         response.widget_info(|| {
             egui::WidgetInfo::labeled(egui::WidgetType::Button, response.enabled(), &label)
         });
@@ -8414,11 +8446,7 @@ fn album_tile(
             .path
             .as_ref()
             .filter(|_| matches!(message.content, Content::Image { .. }))
-            .map(|path| {
-                let uri = crate::util::image_uri(path);
-                crate::image_cache::touch(ui.ctx(), &uri);
-                uri
-            })
+            .map(|path| crate::image_cache::fit_uri(ui.ctx(), path, size))
             .or_else(|| {
                 message.thumbnail.as_deref().map(|bytes| {
                     thumbnail_uri(
@@ -8536,11 +8564,7 @@ fn carousel_picture(
         let uri = media
             .path
             .as_ref()
-            .map(|path| {
-                let uri = crate::util::image_uri(path);
-                crate::image_cache::touch(ui.ctx(), &uri);
-                uri
-            })
+            .map(|path| crate::image_cache::fit_uri(ui.ctx(), path, size))
             .or_else(|| {
                 card.thumbnail.as_deref().map(|bytes| {
                     thumbnail_uri(
@@ -9709,8 +9733,13 @@ fn picture(
         if !ui.is_rect_visible(Rect::from_min_size(position, reserved)) {
             return ui.allocate_exact_size(reserved, Sense::hover()).0;
         }
-        let image = widgets::file_image(ui, path);
-        return match image.load_for_size(ui.ctx(), vec2(max_width, max_height)) {
+        let bounds = vec2(max_width, max_height);
+        let image = if sticker.is_some() {
+            widgets::fitted_sticker(ui, path, bounds)
+        } else {
+            widgets::fitted_image_within(ui, path, bounds)
+        };
+        return match image.load_for_size(ui.ctx(), bounds) {
             Ok(egui::load::TexturePoll::Ready { texture }) => {
                 if drawn != Some(texture.size) {
                     ui.ctx()
@@ -12705,7 +12734,7 @@ mod reaction_tests {
         );
         let ctx = egui::Context::default();
         app.attach(&ctx);
-        let frame = |app: &mut App, height: f32| {
+        let frame = |app: &mut App, height: f32, id: &str| {
             let mut output = ctx.run_ui(
                 egui::RawInput {
                     screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(640.0, height))),
@@ -12714,17 +12743,16 @@ mod reaction_tests {
                 |ui| messages(app, ui, &chat, 0.0),
             );
             output.textures_delta.clear();
-            ctx.data(|data| data.get_temp::<Rect>(bubble_id(&chat.id, "m1").with("rect")))
-                .unwrap()
+            ctx.data(|data| data.get_temp::<Rect>(bubble_id(&chat.id, id).with("rect")))
         };
-        frame(&mut app, 500.0);
-        let short = frame(&mut app, 500.0);
+        frame(&mut app, 500.0, "m1").unwrap();
+        let short = frame(&mut app, 500.0, "m1").unwrap();
         assert!(
             short.top() > 350.0,
             "short transcript must leave space above the message: {short:?}"
         );
         assert!(app.at_bottom);
-        let taller = frame(&mut app, 700.0);
+        let taller = frame(&mut app, 700.0, "m1").unwrap();
         assert!((taller.bottom() - short.bottom() - 200.0).abs() < 2.0);
         app.conversations.get_mut(&chat.id).unwrap().messages = (0..80)
             .map(|index| {
@@ -12734,8 +12762,13 @@ mod reaction_tests {
                 row
             })
             .collect();
-        frame(&mut app, 500.0);
-        frame(&mut app, 500.0);
+        frame(&mut app, 500.0, "m79");
+        assert!(frame(&mut app, 500.0, "m79").is_some());
+        assert!(
+            ctx.data(|data| data.get_temp::<Rect>(bubble_id(&chat.id, "m1").with("rect")))
+                .is_none(),
+            "off-screen rows forget their layout rects"
+        );
         let (offset, _) = ctx
             .data(|data| data.get_temp::<(f32, f32)>(scroll_metrics_id(&chat.id)))
             .unwrap();
@@ -12745,8 +12778,8 @@ mod reaction_tests {
         );
         app.scroll_anchor = Some("m0".into());
         app.scroll_to_bottom = false;
-        frame(&mut app, 500.0);
-        frame(&mut app, 500.0);
+        frame(&mut app, 500.0, "m0");
+        assert!(frame(&mut app, 500.0, "m0").is_some());
         assert!(
             app.scroll_anchor.is_none(),
             "an explicit message jump still resolves"
@@ -13188,10 +13221,11 @@ fn pending_strip(app: &mut App, ui: &mut egui::Ui) {
                                     ((*width as f32 * scale) as u32).max(1),
                                     ((*height as f32 * scale) as u32).max(1),
                                 );
-                                match image::RgbaImage::from_raw(
+                                // Borrowed: a copy of a 4K bitmap is 33 MB.
+                                match image::ImageBuffer::<image::Rgba<u8>, &[u8]>::from_raw(
                                     *width as u32,
                                     *height as u32,
-                                    rgba.to_vec(),
+                                    rgba.as_slice(),
                                 ) {
                                     Some(full) => {
                                         let small = image::imageops::resize(
@@ -13228,7 +13262,7 @@ fn pending_strip(app: &mut App, ui: &mut egui::Ui) {
                     }
                     crate::app::Pending::File(path) => {
                         if crate::app::Pending::is_picture_file(path) {
-                            widgets::file_image(ui, path)
+                            widgets::fitted_image(ui, path, Vec2::splat(tile - 8.0))
                                 .fit_to_exact_size(Vec2::splat(tile - 8.0))
                                 .corner_radius(6.0)
                                 .paint_at(ui, rect.shrink(4.0));

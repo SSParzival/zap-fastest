@@ -24,17 +24,40 @@ const MAX_FRAMES: usize = 150;
 const IDLE: Duration = Duration::from_secs(20);
 /// Maximum concurrent decoders.
 const MAX_DECODERS: usize = 2;
+/// How long a decoder holds its slot. One still running after this, stuck
+/// on a broken file, no longer keeps other animations from decoding.
+const DECODE_DEADLINE: Duration = Duration::from_secs(10);
 /// Global texture-frame budget. Least-recently-used animations are removed first.
 const MAX_RESIDENT_FRAMES: usize = 450;
 
-static DECODING: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+/// The decoders holding a slot, by number, and when each started.
+static DECODING: Mutex<Vec<(u64, Instant)>> = Mutex::new(Vec::new());
+static NEXT_SLOT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Guard for one decoder slot.
-struct DecodeSlot;
+struct DecodeSlot(u64);
+
+impl DecodeSlot {
+    /// Takes a slot when fewer than `MAX_DECODERS` decoders started within
+    /// the deadline.
+    fn take(now: Instant) -> Option<Self> {
+        let mut decoding = DECODING.lock().unwrap_or_else(|p| p.into_inner());
+        decoding.retain(|(_, started)| now.saturating_duration_since(*started) < DECODE_DEADLINE);
+        if decoding.len() >= MAX_DECODERS {
+            return None;
+        }
+        let id = NEXT_SLOT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        decoding.push((id, now));
+        Some(Self(id))
+    }
+}
 
 impl Drop for DecodeSlot {
     fn drop(&mut self) {
-        DECODING.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
+        DECODING
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .retain(|(id, _)| *id != self.0);
     }
 }
 
@@ -103,6 +126,19 @@ fn inbox(ctx: &egui::Context) -> Inbox {
         data.get_temp_mut_or_default::<Inbox>(egui::Id::new("animation-inbox"))
             .clone()
     })
+}
+
+/// Drops every decoded animation: a minimized window shows none, and decodes
+/// them again once it is back.
+pub fn release(ctx: &egui::Context) {
+    let cache = cache(ctx);
+    let mut animations = cache.0.lock().unwrap_or_else(|p| p.into_inner());
+    // A decode under way still delivers, and a failed file is not tried again.
+    animations
+        .entries
+        .retain(|_, entry| !matches!(entry, Entry::Ready(_)));
+    animations.seen.clear();
+    animations.idle.clear();
 }
 
 /// Current display state for an animated file.
@@ -335,22 +371,9 @@ enum Start {
 /// Decodes `path` on a thread, every frame when `all` and otherwise only the
 /// poster, and delivers the result to `inbox`.
 fn start_decode(ctx: &egui::Context, inbox: &Inbox, path: &Path, all: bool) -> Start {
-    let mut running = DECODING.load(std::sync::atomic::Ordering::Acquire);
-    loop {
-        if running >= MAX_DECODERS {
-            return Start::Busy;
-        }
-        match DECODING.compare_exchange_weak(
-            running,
-            running + 1,
-            std::sync::atomic::Ordering::AcqRel,
-            std::sync::atomic::Ordering::Acquire,
-        ) {
-            Ok(_) => break,
-            Err(actual) => running = actual,
-        }
-    }
-    let slot = DecodeSlot;
+    let Some(slot) = DecodeSlot::take(Instant::now()) else {
+        return Start::Busy;
+    };
     let file = path.to_path_buf();
     let ctx = ctx.clone();
     let inbox = inbox.clone();
@@ -441,7 +464,8 @@ fn decode_webp(path: &Path, limit: usize) -> Option<Decoded> {
     let mut previous = 0i64;
     // A second frame tells an animation from a still, even for a poster.
     for frame in decoder.into_iter().take(limit.max(2)) {
-        let image = image::RgbaImage::from_raw(width, height, frame.data().to_vec())?;
+        let image =
+            image::ImageBuffer::<image::Rgba<u8>, &[u8]>::from_raw(width, height, frame.data())?;
         let delay = (i64::from(frame.timestamp()) - previous).max(20) as u64;
         previous = i64::from(frame.timestamp());
         decoded.push((to_color_image(&image), Duration::from_millis(delay)));
@@ -456,21 +480,25 @@ fn decode_webp(path: &Path, limit: usize) -> Option<Decoded> {
     Some(Decoded { frames: decoded })
 }
 
-fn to_color_image(image: &image::RgbaImage) -> ColorImage {
-    let image = if image.width() > MAX_WIDTH {
+fn to_color_image<C: std::ops::Deref<Target = [u8]>>(
+    image: &image::ImageBuffer<image::Rgba<u8>, C>,
+) -> ColorImage {
+    if image.width() > MAX_WIDTH {
         let height = (image.height() * MAX_WIDTH / image.width()).max(1);
-        image::imageops::resize(
+        let resized = image::imageops::resize(
             image,
             MAX_WIDTH,
             height,
             image::imageops::FilterType::Triangle,
-        )
-    } else {
-        image.clone()
-    };
+        );
+        return ColorImage::from_rgba_unmultiplied(
+            [resized.width() as usize, resized.height() as usize],
+            resized.as_raw(),
+        );
+    }
     ColorImage::from_rgba_unmultiplied(
         [image.width() as usize, image.height() as usize],
-        image.as_raw(),
+        image.as_ref(),
     )
 }
 
@@ -493,7 +521,7 @@ fn decode_mp4_from<R: std::io::Read + std::io::Seek>(
     size: u64,
     limit: usize,
 ) -> Option<Decoded> {
-    let mut mp4 = mp4::Mp4Reader::read_header(reader, size).ok()?;
+    let mut mp4 = crate::mp4_guard::read_header(reader, size).ok()?;
     let (track_id, timescale, shift, end, sps, pps, count) = {
         let track = mp4
             .tracks()
@@ -528,6 +556,7 @@ fn decode_mp4_from<R: std::io::Read + std::io::Seek>(
     push_annex_b(&mut parameters, &sps);
     push_annex_b(&mut parameters, &pps);
     let _ = decoder.decode(&parameters);
+    let mut annex_b = Vec::new();
     let mut truncated = false;
     for sample_id in 1..=count {
         if images.len() >= limit {
@@ -538,7 +567,7 @@ fn decode_mp4_from<R: std::io::Read + std::io::Seek>(
             break;
         };
         times.push(sample.start_time as i64 + i64::from(sample.rendering_offset));
-        let mut annex_b = Vec::with_capacity(sample.bytes.len() + 16);
+        annex_b.clear();
         avcc_to_annex_b(&mut annex_b, &sample.bytes);
         if let Ok(Some(yuv)) = decoder.decode(&annex_b)
             && let Some(image) = frame_of(&yuv)
@@ -596,7 +625,7 @@ pub(crate) struct Poster {
 /// Reads the size, length, and a poster frame of the MP4 in `bytes`.
 pub(crate) fn poster(bytes: &[u8]) -> Option<Poster> {
     let size = bytes.len() as u64;
-    let mp4 = mp4::Mp4Reader::read_header(std::io::Cursor::new(bytes), size).ok()?;
+    let mp4 = crate::mp4_guard::read_header(std::io::Cursor::new(bytes), size).ok()?;
     let track = mp4
         .tracks()
         .values()
@@ -698,20 +727,12 @@ fn frame_of(yuv: &openh264::decoder::DecodedYUV<'_>) -> Option<ColorImage> {
     }
     let mut rgba = vec![0u8; width * height * 4];
     yuv.write_rgba8(&mut rgba);
-    let image = image::RgbaImage::from_raw(width as u32, height as u32, rgba)?;
-    let out_width = (width as u32).min(MAX_WIDTH);
-    let out_height = ((height as u64 * out_width as u64 / width as u64) as u32).max(1);
-    let scaled = if out_width == width as u32 {
-        image
-    } else {
-        image::imageops::resize(
-            &image,
-            out_width,
-            out_height,
-            image::imageops::FilterType::Triangle,
-        )
-    };
-    Some(to_color_image(&scaled))
+    if (width as u32) <= MAX_WIDTH {
+        return Some(ColorImage::from_rgba_unmultiplied([width, height], &rgba));
+    }
+    let image =
+        image::ImageBuffer::<image::Rgba<u8>, &[u8]>::from_raw(width as u32, height as u32, &rgba)?;
+    Some(to_color_image(&image))
 }
 
 /// Media time an MP4's edit list starts showing from, in track time units.
@@ -1776,6 +1797,33 @@ mod tests {
             first_textures[1],
             "the sibling keeps its decoded frames instead of re-decoding"
         );
+    }
+
+    #[test]
+    fn an_mp4_with_a_box_of_size_zero_fails_instead_of_hanging() {
+        let bytes = crate::mp4_guard::tests::zero_size_box();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let size = bytes.len() as u64;
+            let decoded = decode_mp4_from(std::io::Cursor::new(&bytes), size, MAX_FRAMES);
+            let _ = sender.send((decoded.is_none(), poster(&bytes).is_none()));
+        });
+        let failed = receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("the decoder returns instead of hanging");
+        assert_eq!(failed, (true, true));
+    }
+
+    #[test]
+    fn a_stuck_decoder_gives_up_its_slot_after_the_deadline() {
+        // Far ahead of every other test's slots, which the deadline clears.
+        let start = Instant::now() + Duration::from_secs(3600);
+        let held: Vec<_> = (0..MAX_DECODERS)
+            .map_while(|_| DecodeSlot::take(start))
+            .collect();
+        assert_eq!(held.len(), MAX_DECODERS);
+        assert!(DecodeSlot::take(start + Duration::from_secs(1)).is_none());
+        assert!(DecodeSlot::take(start + DECODE_DEADLINE).is_some());
     }
 }
 

@@ -36,7 +36,7 @@ pub struct Look {
     /// Whether the doodles are drawn over the colour.
     pub doodles: bool,
     /// A decoded image of the reader's, which wins over colour and doodles.
-    pub image: Option<(u64, Arc<ColorImage>)>,
+    pub image: Option<(u64, Arc<Pixels>)>,
 }
 
 /// Paint the wallpaper over the conversation panel.
@@ -53,9 +53,10 @@ pub fn paint_rect(ui: &egui::Ui, rect: Rect, look: &Look) {
 
     match &look.image {
         Some(image) => {
-            let texture = image_texture(ui.ctx(), image);
-            let uv = cover_uv(texture.size_vec2(), rect.size());
-            painter.image(texture.id(), rect, uv, Color32::WHITE);
+            if let Some(texture) = image_texture(ui.ctx(), image) {
+                let uv = cover_uv(texture.size_vec2(), rect.size());
+                painter.image(texture.id(), rect, uv, Color32::WHITE);
+            }
             return;
         }
         None => forget_image(ui.ctx()),
@@ -139,19 +140,60 @@ fn image_texture_id() -> egui::Id {
 }
 
 /// The custom image's texture, uploaded once per image and window.
+/// The custom image's pixels, held on the CPU only until a window uploads
+/// them. The texture is the one copy after that; a window that needs one again,
+/// because the last was destroyed with its window or dropped by [`forget_image`],
+/// decodes the file once more.
+pub struct Pixels {
+    path: PathBuf,
+    held: Mutex<Option<ColorImage>>,
+    /// Demos and tests have no file to decode again, so they keep the pixels.
+    retain: bool,
+}
+
+impl Pixels {
+    fn new(path: &Path, image: ColorImage, retain: bool) -> Self {
+        Self {
+            path: path.to_path_buf(),
+            held: Mutex::new(Some(image)),
+            retain,
+        }
+    }
+
+    /// The pixels for an upload: the held ones, which are let go unless kept,
+    /// else the file decoded again.
+    fn take(&self) -> Option<ColorImage> {
+        let mut held = self
+            .held
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if self.retain {
+            return held.clone();
+        }
+        held.take().or_else(|| match decode(&self.path) {
+            Ok(image) => Some(image),
+            Err(error) => {
+                log::debug!("wallpaper image could not be decoded again: {error}");
+                None
+            }
+        })
+    }
+}
+
+/// The custom image's texture, uploaded once per image and window.
 fn image_texture(
     ctx: &egui::Context,
-    (generation, image): &(u64, Arc<ColorImage>),
-) -> TextureHandle {
+    (generation, image): &(u64, Arc<Pixels>),
+) -> Option<TextureHandle> {
     let cached = ctx.data(|data| data.get_temp::<ImageTexture>(image_texture_id()));
     if let Some(cached) = cached.filter(|cached| cached.generation == *generation) {
-        return cached.texture;
+        return Some(cached.texture);
     }
     let options = TextureOptions {
         mipmap_mode: Some(egui::TextureFilter::Linear),
         ..TextureOptions::LINEAR
     };
-    let texture = ctx.load_texture("chat-wallpaper-image", Arc::clone(image), options);
+    let texture = ctx.load_texture("chat-wallpaper-image", image.take()?, options);
     ctx.data_mut(|data| {
         data.insert_temp(
             image_texture_id(),
@@ -161,7 +203,7 @@ fn image_texture(
             },
         );
     });
-    texture
+    Some(texture)
 }
 
 /// Drops the custom image's texture, which frees it once nothing draws it.
@@ -236,7 +278,7 @@ pub struct CustomImage {
     /// Bumped for every new file, so a window's texture of an earlier one is
     /// replaced even when the copy kept its name.
     generation: u64,
-    image: Option<Arc<ColorImage>>,
+    image: Option<Arc<Pixels>>,
     pending: Option<mpsc::Receiver<Result<ColorImage, String>>>,
 }
 
@@ -269,7 +311,9 @@ impl CustomImage {
         };
         match pending.try_recv() {
             Ok(Ok(image)) => {
-                self.image = Some(Arc::new(image));
+                if let Some(path) = &self.path {
+                    self.image = Some(Arc::new(Pixels::new(path, image, false)));
+                }
                 self.pending = None;
             }
             Ok(Err(error)) => {
@@ -294,7 +338,7 @@ impl CustomImage {
     }
 
     /// The decoded image, if one is ready, with its generation.
-    pub fn ready(&self) -> Option<(u64, Arc<ColorImage>)> {
+    pub fn ready(&self) -> Option<(u64, Arc<Pixels>)> {
         self.image
             .as_ref()
             .map(|image| (self.generation, Arc::clone(image)))
@@ -305,7 +349,7 @@ impl CustomImage {
     pub fn show_now(&mut self, path: &Path, image: ColorImage) {
         self.path = Some(path.to_path_buf());
         self.generation += 1;
-        self.image = Some(Arc::new(image));
+        self.image = Some(Arc::new(Pixels::new(path, image, true)));
         self.pending = None;
     }
 }
@@ -551,7 +595,10 @@ mod tests {
             custom.sync(Some(&path), &waker);
         }
         let (generation, image) = custom.ready().expect("decoded");
-        assert_eq!(image.size, [20, 10]);
+        // The first upload takes the pixels; a later one decodes the file again.
+        assert_eq!(image.take().expect("first upload").size, [20, 10]);
+        assert!(image.held.lock().unwrap().is_none());
+        assert_eq!(image.take().expect("decoded again").size, [20, 10]);
         custom.reload();
         custom.sync(Some(&path), &waker);
         assert!(custom.ready().is_none_or(|(next, _)| next > generation));

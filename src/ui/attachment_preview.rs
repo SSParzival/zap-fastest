@@ -59,7 +59,12 @@ fn editable(item: &Pending) -> bool {
 }
 
 /// Reuses one bounded preview texture for a pasted picture, in its tile and on the stage.
-fn image(ui: &egui::Ui, item: &mut Pending) -> Option<egui::Image<'static>> {
+fn image(
+    ui: &egui::Ui,
+    item: &mut Pending,
+    bounds: Vec2,
+    within: bool,
+) -> Option<egui::Image<'static>> {
     let media = match item {
         Pending::Recovered { item, .. } => item.as_mut(),
         item => item,
@@ -83,9 +88,11 @@ fn image(ui: &egui::Ui, item: &mut Pending) -> Option<egui::Image<'static>> {
             });
             Some(egui::Image::from_texture(&*handle))
         }
-        Pending::File(path) if Pending::is_picture_file(path) => {
-            Some(widgets::file_image(ui, path))
-        }
+        Pending::File(path) if Pending::is_picture_file(path) => Some(if within {
+            widgets::fitted_image_within(ui, path, bounds)
+        } else {
+            widgets::fitted_image(ui, path, bounds)
+        }),
         _ => None,
     }
 }
@@ -248,7 +255,7 @@ fn tile(
         return (false, false);
     }
     ui.painter().rect_filled(rect, 6.0, palette.surface_hover);
-    if let Some(image) = image(ui, item) {
+    if let Some(image) = image(ui, item, rect.size() - Vec2::splat(8.0), false) {
         image
             .fit_to_exact_size(rect.size() - Vec2::splat(8.0))
             .corner_radius(4.0)
@@ -335,7 +342,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     });
     let rect = ui.available_rect_before_wrap().shrink(20.0);
     if rect.is_positive() {
-        if let Some(image) = image(ui, item) {
+        if let Some(image) = image(ui, item, rect.size(), true) {
             if let Ok(egui::load::TexturePoll::Ready { texture }) =
                 image.load_for_size(ui.ctx(), rect.size())
             {

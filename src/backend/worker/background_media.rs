@@ -594,13 +594,15 @@ mod tests {
         worker.background_media_enabled = true;
         worker.privacy_ready = true;
         worker.archive.ensure_chat(chat, "Synthetic").unwrap();
-        let raw = wa::Message {
-            image_message: MessageField::some(wa::message::ImageMessage {
-                mimetype: Some("image/jpeg".into()),
-                file_length: Some(1),
-                ..Default::default()
-            }),
-            ..Default::default()
+        let raw = {
+            let mut proto = wa::Message::default();
+            proto.image_message = MessageField::some({
+                let mut proto = wa::message::ImageMessage::default();
+                proto.mimetype = Some("image/jpeg".into());
+                proto.file_length = Some(1);
+                proto
+            });
+            proto
         };
         let mut row = crate::archive::tests::message(chat, "photo", 100, false);
         row.content = classify(&raw).unwrap();
@@ -658,12 +660,14 @@ mod tests {
         worker.download_folder = Some(PathBuf::from("selected-user-folder"));
         worker.descriptive_download_names = true;
         worker.archive.ensure_chat(chat, "Synthetic").unwrap();
-        let raw = wa::Message {
-            image_message: MessageField::some(wa::message::ImageMessage {
-                mimetype: Some("image/jpeg".into()),
-                ..Default::default()
-            }),
-            ..Default::default()
+        let raw = {
+            let mut proto = wa::Message::default();
+            proto.image_message = MessageField::some({
+                let mut proto = wa::message::ImageMessage::default();
+                proto.mimetype = Some("image/jpeg".into());
+                proto
+            });
+            proto
         };
         let mut row = crate::archive::tests::message(chat, "photo", 100, false);
         row.content = classify(&raw).unwrap();
@@ -675,12 +679,14 @@ mod tests {
             .archive
             .put_media_path_at(chat, "photo", None, Some(Path::new("parent.jpg")))
             .unwrap();
-        let mut clip = wa::Message {
-            video_message: MessageField::some(wa::message::VideoMessage {
-                mimetype: Some("video/mp4".into()),
-                ..Default::default()
-            }),
-            ..Default::default()
+        let mut clip = {
+            let mut proto = wa::Message::default();
+            proto.video_message = MessageField::some({
+                let mut proto = wa::message::VideoMessage::default();
+                proto.mimetype = Some("video/mp4".into());
+                proto
+            });
+            proto
         };
         worker
             .archive

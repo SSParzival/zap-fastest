@@ -1058,7 +1058,7 @@ fn gif_tab(app: &mut App, ui: &mut egui::Ui, palette: &Palette) {
                         if ui.is_rect_visible(rect) {
                             ui.painter().rect_filled(rect, 6.0, palette.surface);
                             if let Some(still) = &gif.still {
-                                widgets::file_image(ui, still)
+                                widgets::fitted_image(ui, still, size)
                                     .fit_to_exact_size(size)
                                     .corner_radius(6.0)
                                     .paint_at(ui, rect);
@@ -1890,7 +1890,7 @@ fn probe_motion(path: &Path) -> Option<bool> {
 }
 
 fn sticker_picture(ui: &egui::Ui, path: &Path, rect: Rect) {
-    widgets::file_image(ui, path)
+    widgets::fitted_sticker(ui, path, rect.size())
         .fit_to_exact_size(rect.size())
         .paint_at(ui, rect);
 }

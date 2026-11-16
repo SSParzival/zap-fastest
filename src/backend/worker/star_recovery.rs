@@ -108,8 +108,10 @@ mod tests {
                 .message_id("old-star".to_owned())
                 .from_me(false)
                 .timestamp(whatsapp_rust::wacore::time::from_secs(200).unwrap())
-                .action(Box::new(wa::sync_action_value::StarAction {
-                    starred: Some(true),
+                .action(Box::new({
+                    let mut proto = wa::sync_action_value::StarAction::default();
+                    proto.starred = Some(true);
+                    proto
                 }))
                 .from_full_sync(true)
                 .build(),

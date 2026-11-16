@@ -1549,14 +1549,15 @@ mod tests {
             super::super::offline_worker("15550000000@s.whatsapp.net");
         worker.privacy_ready = true;
         let creator: Jid = "15550000001@s.whatsapp.net".parse().unwrap();
-        let record = wa::CallLogRecord {
-            call_id: Some("fixture-call".into()),
-            call_result: Some(wa::call_log_record::CallResult::MISSED),
-            start_time: Some(1234),
-            is_incoming: Some(false),
-            is_video: Some(true),
-            duration: Some(999),
-            ..Default::default()
+        let record = {
+            let mut proto = wa::CallLogRecord::default();
+            proto.call_id = Some("fixture-call".into());
+            proto.call_result = Some(wa::call_log_record::CallResult::MISSED);
+            proto.start_time = Some(1234);
+            proto.is_incoming = Some(false);
+            proto.is_video = Some(true);
+            proto.duration = Some(999);
+            proto
         };
         for _ in 0..2 {
             worker.file_synced_call(
@@ -1600,11 +1601,13 @@ mod tests {
 
     #[test]
     fn call_message_seconds_are_explicit_and_negative_duration_stays_unknown() {
-        let mut call = wa::message::CallLogMessage {
-            is_video: Some(true),
-            duration_secs: Some(91),
-            call_outcome: Some(wa::message::call_log_message::CallOutcome::ACCEPTED_ELSEWHERE),
-            ..Default::default()
+        let mut call = {
+            let mut proto = wa::message::CallLogMessage::default();
+            proto.is_video = Some(true);
+            proto.duration_secs = Some(91);
+            proto.call_outcome =
+                Some(wa::message::call_log_message::CallOutcome::ACCEPTED_ELSEWHERE);
+            proto
         };
         assert!(matches!(
             message_content(&call),
@@ -1628,15 +1631,17 @@ mod tests {
         worker.privacy_ready = true;
         worker.learn_lid("9000001", "15550000001");
         let creator: Jid = "15550000000@s.whatsapp.net".parse().unwrap();
-        let record = wa::CallLogRecord {
-            call_id: Some("measured".into()),
-            start_time: Some(4567),
-            call_result: Some(wa::call_log_record::CallResult::CONNECTED),
-            participants: vec![wa::call_log_record::ParticipantInfo {
-                user_jid: Some("9000001@lid".into()),
-                ..Default::default()
-            }],
-            ..Default::default()
+        let record = {
+            let mut proto = wa::CallLogRecord::default();
+            proto.call_id = Some("measured".into());
+            proto.start_time = Some(4567);
+            proto.call_result = Some(wa::call_log_record::CallResult::CONNECTED);
+            proto.participants = vec![{
+                let mut proto = wa::call_log_record::ParticipantInfo::default();
+                proto.user_jid = Some("9000001@lid".into());
+                proto
+            }];
+            proto
         };
         worker
             .archive
@@ -1668,25 +1673,30 @@ mod tests {
 
     #[test]
     fn missed_history_stubs_are_chronological_entries() {
-        let info = wa::WebMessageInfo {
-            key: Some(wa::MessageKey {
-                id: Some("fixture-stub".into()),
-                remote_jid: Some("15550000001@s.whatsapp.net".into()),
-                from_me: Some(false),
-                ..Default::default()
+        let info = {
+            let mut proto = wa::WebMessageInfo::default();
+            proto.key = Some({
+                let mut proto = wa::MessageKey::default();
+                proto.id = Some("fixture-stub".into());
+                proto.remote_jid = Some("15550000001@s.whatsapp.net".into());
+                proto.from_me = Some(false);
+                proto
             })
-            .into(),
-            message_timestamp: Some(1234),
-            message_stub_type: Some(wa::web_message_info::StubType::CALL_MISSED_VIDEO),
-            ..Default::default()
+            .into();
+            proto.message_timestamp = Some(1234);
+            proto.message_stub_type = Some(wa::web_message_info::StubType::CALL_MISSED_VIDEO);
+            proto
         };
-        let chat = super::super::parse_conversation(wa::Conversation {
-            id: "15550000001@s.whatsapp.net".into(),
-            messages: vec![wa::HistorySyncMsg {
-                message: Some(info).into(),
-                msg_order_id: Some(7),
-            }],
-            ..Default::default()
+        let chat = super::super::parse_conversation({
+            let mut proto = wa::Conversation::default();
+            proto.id = "15550000001@s.whatsapp.net".into();
+            proto.messages = vec![{
+                let mut proto = wa::HistorySyncMsg::default();
+                proto.message = Some(info).into();
+                proto.msg_order_id = Some(7);
+                proto
+            }];
+            proto
         });
         assert_eq!(chat.messages.len(), 1);
         assert_eq!(chat.messages[0].timestamp, 1234);
@@ -1813,14 +1823,16 @@ mod tests {
         assert_eq!(worker.archive.chat(chat).unwrap().unwrap().unread, 0);
         assert_eq!(worker.archive.history_unread(chat, 1).unwrap(), 0);
         let creator: Jid = worker.me().parse().unwrap();
-        let synced = wa::CallLogRecord {
-            call_result: Some(wa::call_log_record::CallResult::CONNECTED),
-            start_time: Some(row.timestamp),
-            participants: vec![wa::call_log_record::ParticipantInfo {
-                user_jid: Some(chat.into()),
-                ..Default::default()
-            }],
-            ..Default::default()
+        let synced = {
+            let mut proto = wa::CallLogRecord::default();
+            proto.call_result = Some(wa::call_log_record::CallResult::CONNECTED);
+            proto.start_time = Some(row.timestamp);
+            proto.participants = vec![{
+                let mut proto = wa::call_log_record::ParticipantInfo::default();
+                proto.user_jid = Some(chat.into());
+                proto
+            }];
+            proto
         };
         worker.file_synced_call(&synced, Some(&creator), Some(true), Some("test-call"));
         assert_eq!(worker.archive.call_records().unwrap().len(), 1);

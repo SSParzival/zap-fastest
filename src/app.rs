@@ -3,6 +3,9 @@
 //! Views queue [`Action`]s while drawing. The app applies them after the frame
 //! and processes backend events.
 
+mod conversations;
+pub(crate) use conversations::PhoneHistory;
+
 use crate::backend::{EditDraft, EditFailure};
 use crate::model::ComposerMention;
 use std::collections::{HashMap, HashSet};
@@ -161,6 +164,26 @@ const TYPING_TIMEOUT: Duration = Duration::from_secs(12);
 /// How long other apps' media stays paused while the next voice message of a
 /// run downloads. A stalled download must not keep music paused for good.
 const VOICE_FETCH_HOLD: Duration = Duration::from_secs(10);
+/// How long the zoom and display scale hold still before the font atlas is
+/// rebuilt for them, so a drag between displays or a run of zoom steps
+/// rebuilds it once.
+const ATLAS_SETTLE: Duration = Duration::from_secs(2);
+/// How long the window stays unfocused before the font atlas is rebuilt.
+const ATLAS_IDLE: Duration = Duration::from_secs(5 * 60);
+
+/// What `App::follow_font_atlas` has seen of the scale and of the window's
+/// focus, to know when the font atlas has gathered glyphs nobody draws now.
+#[derive(Default)]
+struct AtlasWatch {
+    /// The zoom factor and native pixels per point last seen.
+    scale: Option<(f32, f32)>,
+    /// When that scale last changed, until the atlas is rebuilt for it.
+    changed: Option<Instant>,
+    /// Since when the window has been unfocused.
+    away: Option<Instant>,
+    /// Whether the atlas was rebuilt during this unfocused spell.
+    rebuilt_away: bool,
+}
 
 /// Loaded chat history and paging state.
 #[derive(Default)]
@@ -446,6 +469,13 @@ fn composer_link(text: &str) -> Option<String> {
     crate::safety::first_link(text).filter(|url| crate::safety::preview_url(url).is_some())
 }
 
+/// How long typing pauses before a search is sent to the archive. Letters
+/// typed in quick succession then make one search rather than one each.
+#[cfg(not(test))]
+const SEARCH_DEBOUNCE: Duration = Duration::from_millis(150);
+#[cfg(test)]
+const SEARCH_DEBOUNCE: Duration = Duration::ZERO;
+
 pub struct App {
     pub dirs: AppDirs,
     pub settings: Settings,
@@ -470,6 +500,7 @@ pub struct App {
     /// no screenshots and would hold the old palette.
     pub reveal_theme_changes: bool,
     zoom_applied: bool,
+    atlas_watch: AtlasWatch,
     /// The wallpaper image named in the settings, decoded off this thread.
     pub wallpaper_image: crate::wallpaper::CustomImage,
     custom_font_request: u64,
@@ -519,6 +550,10 @@ pub struct App {
     pub chat_search_truncated: bool,
     /// Whether an answer for the current query and day is still due.
     pub chat_search_pending: bool,
+    /// When the typed chat search is due to be sent, once typing pauses.
+    pub chat_search_send_at: Option<Instant>,
+    /// When the typed global search is due to be sent, once typing pauses.
+    search_send_at: Option<Instant>,
     /// The result the arrow keys have reached, if any.
     pub chat_search_selected: Option<usize>,
     /// Local day the in-chat search is limited to, if any.
@@ -540,6 +575,9 @@ pub struct App {
     pub new_chat_search: String,
     /// Last answer from the slow code verifier, keyed by what was checked.
     chat_lock_check: std::cell::RefCell<Option<(String, Option<String>, bool)>>,
+    /// Normalized search keys cached while typing a query, bounded and cleared
+    /// once search is empty so long chats lists do not retain extra allocations.
+    search_keys: std::cell::RefCell<HashMap<String, String>>,
     /// Receipts of the message whose "Message info" is open.
     pub message_receipts: Option<crate::model::MessageReceipts>,
     /// The group message the backend is following receipts for.
@@ -630,6 +668,9 @@ pub struct App {
     pauses_media: bool,
     /// Image currently shown in the native preview.
     pub image_preview: Option<PreviewState>,
+    /// The full-size picture the viewer showed last, let go of once it shows
+    /// another or closes ([`App::release_viewer_picture`]).
+    viewer_picture: Option<PathBuf>,
     pub sticker_view: Option<crate::image_preview::StickerPreview>,
     /// Whether the loaded video covers the window instead of its bubble.
     pub video_expanded: bool,
@@ -1325,6 +1366,7 @@ impl App {
             theme_transition: fastframe_theme::Transition::default(),
             reveal_theme_changes: !cfg!(test),
             zoom_applied: false,
+            atlas_watch: AtlasWatch::default(),
             wallpaper_image: crate::wallpaper::CustomImage::default(),
             custom_font_request: 0,
             custom_font_pending: None,
@@ -1351,6 +1393,8 @@ impl App {
             chat_search_hits: Vec::new(),
             chat_search_truncated: false,
             chat_search_pending: false,
+            chat_search_send_at: None,
+            search_send_at: None,
             chat_search_selected: None,
             chat_search_day: None,
             chat_search_month: crate::util::today(),
@@ -1363,6 +1407,7 @@ impl App {
             chat_lock_error: false,
             new_chat_search: String::new(),
             chat_lock_check: Default::default(),
+            search_keys: Default::default(),
             message_receipts: None,
             receipts_watch: None,
             invite: None,
@@ -1408,6 +1453,7 @@ impl App {
             media_hold: None,
             pauses_media: false,
             image_preview: None,
+            viewer_picture: None,
             sticker_view: None,
             video_expanded: false,
             motion_playing: None,
@@ -2181,6 +2227,7 @@ impl App {
             self.search.clear();
             self.search_hits.clear();
         }
+        self.trim_open_conversations();
         self.window_hidden = true;
         self.window_focused = false;
         self.hide_intent = false;
@@ -2270,8 +2317,10 @@ impl App {
     /// Follows the window's own focus, which `window_focused` does not: that
     /// one stays false behind the app lock.
     fn track_focus(&mut self, ctx: &egui::Context, now: Instant) {
-        let focused =
-            !self.window_hidden && ctx.input(|input| input.viewport().focused) == Some(true);
+        let focused = !self.window_hidden
+            && ctx.input(|input| {
+                input.viewport().focused == Some(true) && input.viewport().minimized != Some(true)
+            });
         if self.has_focus && !focused {
             self.focus_left = Some(now);
         }
@@ -2795,7 +2844,7 @@ impl App {
         // the tray installs one when it makes its item on the first window.
         // Ours hands the tray its own events (#215).
         #[cfg(target_os = "macos")]
-        crate::macos::attach(ctx);
+        crate::macos::attach(ctx, &self.waker);
         if let Some(tray) = &mut self.tray {
             tray.attach();
         }
@@ -2859,6 +2908,8 @@ impl App {
         self.leave_chat(id);
         self.chats.retain(|chat| chat.id != id);
         self.conversations.remove(id);
+        self.left_chats.retain(|left| left != id);
+        self.phone_history.remove(id);
         // The recorded places belong to the account on screen, and chat ids
         // repeat across accounts.
         if !self.events_hidden {
@@ -3163,7 +3214,7 @@ impl App {
             "Message yourself",
         ]
         .iter()
-        .any(|text| crate::util::search_matches(&crate::util::search_key(text), needle))
+        .any(|text| self.name_matches(text, needle))
             || crate::model::phone_of(me).is_some_and(|phone| phone.contains(needle))
     }
 
@@ -3440,23 +3491,40 @@ impl App {
     }
 
     pub fn visible_chats(&self) -> Vec<&Chat> {
+        self.visible_chat_indices()
+            .into_iter()
+            .map(|index| &self.chats[index])
+            .collect()
+    }
+
+    /// `visible_chats` as positions in `chats`, so a list can copy just the
+    /// rows it draws instead of every chat each frame.
+    pub fn visible_chat_indices(&self) -> Vec<usize> {
         let needle = crate::util::search_key(self.search.trim());
+        if needle.is_empty() && self.new_chat_search.trim().is_empty() {
+            let mut keys = self.search_keys.borrow_mut();
+            if !keys.is_empty() {
+                keys.clear();
+                keys.shrink_to_fit();
+            }
+        }
         let locked = self.locked_folder_open();
         let filtering = !locked && needle.is_empty() && !self.show_archived;
-        let mut chats: Vec<&Chat> = self
+        let mut indices: Vec<usize> = self
             .chats
             .iter()
-            .filter(|chat| chat.locked == locked)
-            .filter(|chat| self.focus_allows_chat(chat))
-            .filter(|chat| locked || chat.archived == self.show_archived || !needle.is_empty())
+            .enumerate()
+            .filter(|(_, chat)| chat.locked == locked)
+            .filter(|(_, chat)| self.focus_allows_chat(chat))
+            .filter(|(_, chat)| locked || chat.archived == self.show_archived || !needle.is_empty())
             // Searching still finds people never written to, and one being
             // opened stays.
-            .filter(|chat| {
+            .filter(|(_, chat)| {
                 !needle.is_empty()
                     || self.open_chat.as_deref() == Some(chat.id.as_str())
                     || !self.unlisted_stranger(chat)
             })
-            .filter(|chat| match &self.label_filter {
+            .filter(|(_, chat)| match &self.label_filter {
                 // A label lists every chat wearing it, channels included,
                 // because someone put each of them there.
                 _ if !filtering => true,
@@ -3467,21 +3535,24 @@ impl App {
                             && self.unread_kept.contains(&chat.id))
                 }
             })
-            .filter(|chat| {
+            .filter(|(_, chat)| {
                 // Inside the locked folder the typed text is the secret code,
                 // not a query to match.
                 (self.locked_folder && !self.chat_lock_authenticated())
                     || needle.is_empty()
-                    || crate::util::search_key(&self.chat_title(chat)).contains(&needle)
+                    || self.name_matches(&self.chat_title(chat), &needle)
                     || chat.phone().is_some_and(|phone| phone.contains(&needle))
-                    || chat.last.as_ref().is_some_and(|last| {
-                        crate::util::search_key(&last.summary).contains(&needle)
-                    })
+                    || chat
+                        .last
+                        .as_ref()
+                        .is_some_and(|last| self.text_matches(&last.summary, &needle))
             })
+            .map(|(index, _)| index)
             .collect();
         // Pinned chats come first, then Favorites order, then parked drafts, then last activity.
         let favorites_order = self.favorites_order();
-        chats.sort_by(|a, b| {
+        indices.sort_by(|&a, &b| {
+            let (a, b) = (&self.chats[a], &self.chats[b]);
             b.pinned.cmp(&a.pinned).then_with(|| {
                 if a.pinned && b.pinned {
                     b.pinned_at.cmp(&a.pinned_at).then(a.id.cmp(&b.id))
@@ -3497,7 +3568,7 @@ impl App {
                 }
             })
         });
-        chats
+        indices
     }
 
     /// Whether the chat list keeps the phone's favorites order instead of the
@@ -3526,7 +3597,7 @@ impl App {
             .filter(|contact| {
                 contact
                     .display_name()
-                    .is_some_and(|name| crate::util::search_key(name).contains(&needle))
+                    .is_some_and(|name| self.name_matches(name, &needle))
                     || contact
                         .id
                         .split('@')
@@ -3879,6 +3950,8 @@ impl App {
         for index in removed.into_iter().rev() {
             self.finish_removed(index);
         }
+        // A lock or a hidden account's event may have closed a chat.
+        self.settle_conversations();
     }
     /// Applies an event to its owning account while protecting other accounts' visible state.
     fn apply_backend_event(&mut self, event: Event, live: bool) {
@@ -4152,7 +4225,12 @@ impl App {
                 older,
                 complete,
             } => {
-                let conversation = self.conversations.entry(chat.clone()).or_default();
+                // Only a conversation in memory takes the message. Any other
+                // chat finds it in the archive when it opens; keeping it here
+                // would hold every chat's messages for good.
+                let Some(conversation) = self.resident_conversation(&chat) else {
+                    return;
+                };
                 let was_empty = conversation.messages.is_empty();
                 if older && !messages.is_empty() {
                     conversation.phone_delivered = true;
@@ -4350,8 +4428,9 @@ impl App {
             Event::MessageUpdated(message) => self.message_updated(*message, false),
             Event::MessageRequeued(message) => self.message_updated(*message, true),
             Event::Contacts(contacts) => {
+                // The worker's own allocations: kept, never copied.
                 for contact in contacts {
-                    self.contacts.insert(contact.id.clone(), contact);
+                    self.contacts.insert(contact);
                 }
             }
             Event::Typing {
@@ -4580,15 +4659,20 @@ impl App {
                 message,
                 text,
             } => {
-                let conversation = self.conversations.entry(chat).or_default();
-                conversation.transcribing.remove(&message);
-                conversation.transcription_progress.remove(&message);
-                match text {
-                    Ok(text) => {
-                        conversation.transcripts.insert(message, text);
+                if let Some(conversation) = self.resident_conversation(&chat) {
+                    conversation.transcribing.remove(&message);
+                    conversation.transcription_progress.remove(&message);
+                    match text {
+                        Ok(text) => {
+                            conversation.transcripts.insert(message, text);
+                        }
+                        Err(error) if live => self.toast_error(error),
+                        Err(_) => {}
                     }
-                    Err(error) if live => self.toast_error(error),
-                    Err(_) => {}
+                } else if let Err(error) = text
+                    && live
+                {
+                    self.toast_error(error);
                 }
             }
             Event::TranscriptionProgress {
@@ -4596,15 +4680,16 @@ impl App {
                 message,
                 progress,
             } => {
-                self.conversations
-                    .entry(chat)
-                    .or_default()
-                    .transcription_progress
-                    .insert(message, progress);
+                if let Some(conversation) = self.resident_conversation(&chat) {
+                    conversation
+                        .transcription_progress
+                        .insert(message, progress);
+                }
             }
             Event::Transcripts { chat, transcripts } => {
-                let conversation = self.conversations.entry(chat).or_default();
-                conversation.transcripts.extend(transcripts);
+                if let Some(conversation) = self.resident_conversation(&chat) {
+                    conversation.transcripts.extend(transcripts);
+                }
             }
             Event::MotionTransferProgress {
                 chat,
@@ -4666,7 +4751,11 @@ impl App {
             }
             Event::SyncProgress(percent) => self.sync_percent = Some(percent),
             Event::OlderFetched { chat, more } => {
-                let conversation = self.conversations.entry(chat).or_default();
+                // A chat not in memory pages the archive afresh when it opens,
+                // and the worker keeps what the phone said about it.
+                let Some(conversation) = self.resident_conversation(&chat) else {
+                    return;
+                };
                 conversation.fetching_phone = false;
                 conversation.phone_explicit = false;
                 conversation.phone_exhausted = !more;
@@ -4970,6 +5059,7 @@ impl App {
             },
             Event::PictureEdited { index, result } => {
                 self.picture_edit = None;
+                self.picture_texture = None;
                 match result {
                     Ok(path) => {
                         if index < self.pending.len() {
@@ -5273,6 +5363,8 @@ impl App {
                 self.chats.clear();
                 self.chats_loaded = false;
                 self.conversations.clear();
+                self.left_chats.clear();
+                self.phone_history.clear();
                 self.pins.clear();
                 self.chat_pins.clear();
                 self.pin_notices.clear();
@@ -5466,41 +5558,50 @@ impl App {
         let editing = self.editing.clone();
         let reply = self.reply_to.clone();
         let reaction = self.reaction_target.clone();
-        let (editing_gone, reply_gone, reaction_gone) = {
-            let conversation = self.conversations.entry(id.to_owned()).or_default();
-            conversation
-                .messages
-                .retain(|message| message.timestamp > through);
-            let remaining: HashSet<_> = conversation
-                .messages
-                .iter()
-                .map(|message| message.id.clone())
-                .collect();
-            conversation
-                .transcripts
-                .retain(|id, _| remaining.contains(id));
-            conversation
-                .transcribing
-                .retain(|id| remaining.contains(id));
-            conversation
-                .transcription_progress
-                .retain(|id, _| remaining.contains(id));
-            conversation.requested = true;
-            conversation.complete = true;
-            conversation.phone_exhausted = true;
-            conversation.loading_older = false;
-            (
-                editing
-                    .as_ref()
-                    .is_some_and(|edit| conversation.message(edit).is_none()),
-                reply.as_ref().is_some_and(|reply| {
-                    reply.source_chat(id) == id && conversation.message(&reply.id).is_none()
-                }),
-                reaction
-                    .as_ref()
-                    .is_some_and(|(_, target)| conversation.message(target).is_none()),
-            )
-        };
+        let (editing_gone, reply_gone, reaction_gone) =
+            if let Some(conversation) = self.resident_conversation(id) {
+                conversation
+                    .messages
+                    .retain(|message| message.timestamp > through);
+                let remaining: HashSet<_> = conversation
+                    .messages
+                    .iter()
+                    .map(|message| message.id.clone())
+                    .collect();
+                conversation
+                    .transcripts
+                    .retain(|id, _| remaining.contains(id));
+                conversation
+                    .transcribing
+                    .retain(|id| remaining.contains(id));
+                conversation
+                    .transcription_progress
+                    .retain(|id, _| remaining.contains(id));
+                conversation.requested = true;
+                conversation.complete = true;
+                conversation.phone_exhausted = true;
+                conversation.loading_older = false;
+                (
+                    editing
+                        .as_ref()
+                        .is_some_and(|edit| conversation.message(edit).is_none()),
+                    reply.as_ref().is_some_and(|reply| {
+                        reply.source_chat(id) == id && conversation.message(&reply.id).is_none()
+                    }),
+                    reaction
+                        .as_ref()
+                        .is_some_and(|(_, target)| conversation.message(target).is_none()),
+                )
+            } else {
+                // A chat not in memory reads what is left from the archive
+                // when it opens. Only the phone's word goes with it: what was
+                // cleared is not asked for again.
+                self.phone_history
+                    .entry(id.to_owned())
+                    .or_default()
+                    .exhausted = true;
+                (false, false, false)
+            };
         if open && live {
             if editing_gone {
                 self.editing = None;
@@ -5526,6 +5627,33 @@ impl App {
         self.sticker_packs.iter().find(|pack| pack.dir == *dir)
     }
 
+    /// Whether `text` holds `needle` once both are normalized, remembering
+    /// the normalized form so the next frame does not pay for it again.
+    pub(crate) fn text_matches(&self, text: &str, needle: &str) -> bool {
+        self.cached_key(text, |key| key.contains(needle))
+    }
+
+    /// Whether a name finds `needle` as the whole text or word by word (see
+    /// `util::search_matches`), sharing `text_matches`' cache.
+    pub(crate) fn name_matches(&self, name: &str, needle: &str) -> bool {
+        self.cached_key(name, |key| crate::util::search_matches(key, needle))
+    }
+
+    fn cached_key(&self, text: &str, hit: impl Fn(&str) -> bool) -> bool {
+        const SEARCH_KEY_CACHE_LIMIT: usize = 4096;
+        if let Some(key) = self.search_keys.borrow().get(text) {
+            return hit(key.as_str());
+        }
+        let key = crate::util::search_key(text);
+        let found = hit(key.as_str());
+        let mut keys = self.search_keys.borrow_mut();
+        if keys.len() >= SEARCH_KEY_CACHE_LIMIT {
+            keys.clear();
+        }
+        keys.insert(text.to_owned(), key);
+        found
+    }
+
     /// Whether the search pane is on screen: it belongs to the open chat and
     /// only the chat view shows it.
     pub fn chat_search_visible(&self) -> bool {
@@ -5549,6 +5677,7 @@ impl App {
 
     fn close_chat_search(&mut self) {
         self.chat_search_open = false;
+        self.chat_search_send_at = None;
         self.chat_search.clear();
         self.chat_search_hits.clear();
         self.chat_search_truncated = false;
@@ -6100,10 +6229,17 @@ impl App {
 
     fn ensure_loaded(&mut self, chat: &str) {
         let request = {
-            let conversation = self.conversations.entry(chat.to_owned()).or_default();
+            let account = &mut self.accounts[self.active];
+            // A chat dropped from memory opens as it first did, knowing what
+            // the phone said about its history.
+            let phone = account.phone_history.remove(chat);
+            let conversation = account.conversations.entry(chat.to_owned()).or_default();
             if conversation.requested {
                 false
             } else {
+                if let Some(phone) = phone {
+                    conversation.resume_phone(phone);
+                }
                 conversation.requested = true;
                 true
             }
@@ -6322,6 +6458,7 @@ impl App {
             self.emoji_jump = None;
             self.jump_highlight = None;
             if let Some(previous) = self.open_chat.take() {
+                self.account_mut().note_left(&previous);
                 self.save_attachment_draft(&previous);
                 let draft = self.take_composer_text();
                 // Discard an unfinished edit instead of keeping it as a draft.
@@ -6865,8 +7002,33 @@ impl App {
         self.follow_outgoing();
     }
 
+    /// Sends the typed searches whose pause in typing has run out at `now`,
+    /// and asks for another frame when one is still waiting.
+    fn send_due_searches(&mut self, ctx: &egui::Context, now: Instant) {
+        if let Some(due) = self.search_send_at {
+            if now >= due {
+                self.search_send_at = None;
+                let query = self.search.trim().to_owned();
+                if !query.is_empty() && !self.locked_folder_open() && !self.secret_code_matched() {
+                    self.backend.send(Command::SearchMessages { query });
+                }
+            } else {
+                ctx.request_repaint_after(due - now);
+            }
+        }
+        if let Some(due) = self.chat_search_send_at {
+            if now >= due {
+                self.chat_search_send_at = None;
+                self.request_chat_search();
+            } else {
+                ctx.request_repaint_after(due - now);
+            }
+        }
+    }
+
     fn tick(&mut self, ctx: &egui::Context) {
         let now = Instant::now();
+        self.send_due_searches(ctx, now);
         if self.composing
             && let Some(last) = self.last_keystroke
             && now.duration_since(last) > COMPOSING_TIMEOUT
@@ -7008,6 +7170,11 @@ impl App {
     /// from `eframe::App::logic`, after [`Self::background_frame`].
     pub fn window_logic(&mut self, ctx: &egui::Context) {
         self.sync_window_state(ctx);
+        // A minimized window shows no pictures or stickers, so it keeps none.
+        if ctx.input(|input| input.viewport().minimized) == Some(true) {
+            crate::image_cache::release(ctx);
+            crate::animation::release(ctx);
+        }
         // Close the window and continue headless when background mode is
         // enabled. Decided here rather than in `frame_ui`, which eframe skips
         // for a minimized window: closing one from the taskbar quit instead.
@@ -7188,6 +7355,9 @@ impl App {
         // A frame with no queued action still fixes the opening place, so the
         // first navigation has somewhere to return to.
         self.record_location();
+        // After every action, so a quote started as its chat was left still
+        // holds its message when that chat is trimmed.
+        self.settle_conversations();
     }
 
     /// Resets egui drag state only after native drag success; failures retain input state.
@@ -7550,6 +7720,7 @@ impl App {
             }
             Action::CloseChat => {
                 if let Some(chat) = self.open_chat.take() {
+                    self.account_mut().note_left(&chat);
                     self.invalidate_composer_undo();
                     self.save_attachment_draft(&chat);
                     if let Some(target) =
@@ -8566,6 +8737,7 @@ impl App {
             },
             Action::ApplyPictureEdit => {
                 if let Some(edit) = self.picture_edit.take() {
+                    self.picture_texture = None;
                     // Held until the file lands, so it can be filed under the
                     // path the cropped picture is written to.
                     self.picture_applying = Some(crate::model::PictureOrigin {
@@ -8585,7 +8757,10 @@ impl App {
                     });
                 }
             }
-            Action::CancelPictureEdit => self.picture_edit = None,
+            Action::CancelPictureEdit => {
+                self.picture_edit = None;
+                self.picture_texture = None;
+            }
             Action::ClearPending => {
                 self.pending.clear();
                 self.pending_view_once = false;
@@ -9553,8 +9728,12 @@ impl App {
                 }
                 if query.is_empty() || self.locked_folder_open() || self.secret_code_matched() {
                     self.search_hits.clear();
+                    self.search_send_at = None;
                 } else {
-                    self.backend.send(Command::SearchMessages { query });
+                    // The archive is searched once typing pauses, so letters
+                    // typed in quick succession make one scan, not one each.
+                    self.search_send_at = Some(Instant::now() + SEARCH_DEBOUNCE);
+                    ctx.request_repaint_after(SEARCH_DEBOUNCE);
                 }
             }
             Action::OpenChatSearch => self.open_chat_search(),
@@ -9564,7 +9743,13 @@ impl App {
             }
             Action::ChatSearch(query) => {
                 self.chat_search = query;
-                self.request_chat_search();
+                if self.chat_search.trim().is_empty() {
+                    self.chat_search_send_at = None;
+                    self.request_chat_search();
+                } else {
+                    self.chat_search_send_at = Some(Instant::now() + SEARCH_DEBOUNCE);
+                    ctx.request_repaint_after(SEARCH_DEBOUNCE);
+                }
             }
             Action::SetChatSearchDay(day) => {
                 self.chat_search_day = day;
@@ -10675,10 +10860,12 @@ impl App {
         self.tick_audio(ctx);
         self.tick_video(ctx);
         self.apply_actions(ctx);
+        self.release_viewer_picture(ctx);
         self.hold_media();
         self.follow_receipts();
         self.sync_badge();
         self.request_attention(ctx);
+        self.follow_font_atlas(ctx);
         #[cfg(target_os = "windows")]
         self.sync_native_notifications(ctx);
     }
@@ -11030,6 +11217,76 @@ impl App {
             if !left.is_zero() {
                 self.waker.wake_after(left);
             }
+        }
+    }
+
+    /// Rebuilds the font atlas once the zoom or the display's scale has held
+    /// for `ATLAS_SETTLE`, and once the window has been unfocused for
+    /// `ATLAS_IDLE`: epaint never forgets a glyph it drew, so the old scale's
+    /// glyphs would stay in the atlas, on the CPU and on the GPU. The wait ends
+    /// in a repaint request, never a timer, and the rebuild of an unfocused
+    /// window runs then, not as a hitch when the reader comes back.
+    fn follow_font_atlas(&mut self, ctx: &egui::Context) {
+        if self.window_hidden {
+            // The window's context, and its atlas, went with it.
+            self.atlas_watch = AtlasWatch::default();
+            return;
+        }
+        let now = Instant::now();
+        let scale = (
+            ctx.zoom_factor(),
+            ctx.native_pixels_per_point().unwrap_or(1.0),
+        );
+        let focused = self.window_focused;
+        let watch = &mut self.atlas_watch;
+        match watch.scale {
+            Some(seen) if seen == scale => {}
+            Some(_) => {
+                watch.scale = Some(scale);
+                watch.changed = Some(now);
+            }
+            None => watch.scale = Some(scale),
+        }
+        let mut rebuild = false;
+        if let Some(changed) = watch.changed {
+            let left = ATLAS_SETTLE.saturating_sub(now.saturating_duration_since(changed));
+            if left.is_zero() {
+                watch.changed = None;
+                rebuild = true;
+            } else {
+                ctx.request_repaint_after(left);
+            }
+        }
+        if focused {
+            watch.away = None;
+            watch.rebuilt_away = false;
+        } else if !watch.rebuilt_away {
+            let since = *watch.away.get_or_insert(now);
+            let left = ATLAS_IDLE.saturating_sub(now.saturating_duration_since(since));
+            if left.is_zero() {
+                watch.rebuilt_away = true;
+                rebuild = true;
+            } else {
+                ctx.request_repaint_after(left);
+            }
+        }
+        if rebuild {
+            crate::theme::rebuild_font_atlas(ctx);
+        }
+    }
+
+    /// Lets go of the full-size picture the viewer showed once it shows
+    /// another or closes, however it closed. Bubbles draw their own fitted
+    /// copies, so nothing in the chat reloads.
+    fn release_viewer_picture(&mut self, ctx: &egui::Context) {
+        let shown = self
+            .image_preview
+            .as_ref()
+            .map(|preview| preview.path().to_path_buf());
+        if shown != self.viewer_picture
+            && let Some(old) = std::mem::replace(&mut self.viewer_picture, shown)
+        {
+            crate::image_cache::forget(ctx, &crate::util::image_uri(&old));
         }
     }
 
@@ -11392,6 +11649,7 @@ impl App {
         crate::ui::show(self, ui);
         crate::animation::release_unseen(ctx);
         self.apply_actions(ctx);
+        self.release_viewer_picture(ctx);
         // After the view and its actions, so a change this frame starts the
         // pause from now. Nobody types behind the lock screen.
         if !locked && let Some(wait) = self.watch_link_preview(ctx.input(|input| input.time)) {
@@ -16399,6 +16657,192 @@ mod tests {
     }
 
     #[test]
+    fn the_viewer_releases_the_pictures_it_leaves() {
+        let ctx = egui::Context::default();
+        egui_extras::install_image_loaders(&ctx);
+        crate::image_cache::install_preview_limit(&ctx);
+        let mut app = app();
+        let dir = tempfile::tempdir().unwrap();
+        let write_png = |name: &str, rgb: [u8; 3]| {
+            let path = dir.path().join(name);
+            let image =
+                image::RgbaImage::from_pixel(2, 2, image::Rgba([rgb[0], rgb[1], rgb[2], 255]));
+            image.save(&path).unwrap();
+            path
+        };
+        let first = write_png("first.png", [255, 0, 0]);
+        let second = write_png("second.png", [0, 255, 0]);
+        let uri_of = |path: &std::path::Path| crate::util::image_uri(path);
+
+        let load_into_cache = |uri: &str| {
+            let started = Instant::now();
+            loop {
+                let mut ready = false;
+                let mut output = ctx.run_ui(egui::RawInput::default(), |_| {
+                    if let Ok(egui::load::TexturePoll::Ready { .. }) = ctx.try_load_texture(
+                        uri,
+                        egui::TextureOptions::default(),
+                        egui::SizeHint::default(),
+                    ) {
+                        ready = true;
+                    }
+                });
+                output.textures_delta.clear();
+                if ready {
+                    break;
+                }
+                assert!(
+                    started.elapsed() < Duration::from_secs(2),
+                    "texture never loaded"
+                );
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        };
+
+        load_into_cache(&uri_of(&first));
+        load_into_cache(&uri_of(&second));
+        assert!(
+            ctx.try_load_texture(
+                &uri_of(&first),
+                egui::TextureOptions::default(),
+                egui::SizeHint::default(),
+            )
+            .is_ok_and(|poll| matches!(poll, egui::load::TexturePoll::Ready { .. }))
+        );
+
+        app.apply(Action::PreviewImage(first.clone()), &ctx);
+        app.release_viewer_picture(&ctx);
+        assert_eq!(app.viewer_picture.as_deref(), Some(first.as_path()));
+        let mut output = ctx.run_ui(egui::RawInput::default(), |_| {});
+        output.textures_delta.clear();
+        assert!(
+            matches!(
+                ctx.try_load_texture(
+                    &uri_of(&first),
+                    egui::TextureOptions::default(),
+                    egui::SizeHint::default(),
+                ),
+                Ok(egui::load::TexturePoll::Ready { .. })
+            ),
+            "the picture on screen stays"
+        );
+
+        app.apply(Action::PreviewImage(second.clone()), &ctx);
+        app.release_viewer_picture(&ctx);
+        assert_eq!(app.viewer_picture.as_deref(), Some(second.as_path()));
+        let mut output = ctx.run_ui(egui::RawInput::default(), |_| {});
+        output.textures_delta.clear();
+        assert!(
+            matches!(
+                ctx.try_load_texture(
+                    &uri_of(&first),
+                    egui::TextureOptions::default(),
+                    egui::SizeHint::default(),
+                ),
+                Ok(egui::load::TexturePoll::Pending { .. })
+            ),
+            "stepping to another picture forgets the old one"
+        );
+
+        app.apply(Action::CloseImagePreview, &ctx);
+        app.release_viewer_picture(&ctx);
+        assert!(app.viewer_picture.is_none());
+        let mut output = ctx.run_ui(egui::RawInput::default(), |_| {});
+        output.textures_delta.clear();
+        assert!(
+            matches!(
+                ctx.try_load_texture(
+                    &uri_of(&second),
+                    egui::TextureOptions::default(),
+                    egui::SizeHint::default(),
+                ),
+                Ok(egui::load::TexturePoll::Pending { .. })
+            ),
+            "closing forgets the picture it showed"
+        );
+    }
+
+    #[test]
+    fn follow_font_atlas_rebuilds_only_after_settle_or_idle() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut output = ctx.run_ui(egui::RawInput::default(), |_| {});
+        output.textures_delta.clear();
+        let mut app = app();
+        let marker = |ctx: &egui::Context| -> String {
+            ctx.fonts(|fonts| {
+                fonts
+                    .definitions()
+                    .families
+                    .keys()
+                    .find_map(|family| match family {
+                        egui::FontFamily::Name(name) if name.starts_with("zapfast-atlas-") => {
+                            Some(name.to_string())
+                        }
+                        _ => None,
+                    })
+                    .unwrap()
+            })
+        };
+        let initial = marker(&ctx);
+        app.window_focused = true;
+        app.follow_font_atlas(&ctx);
+        let mut output = ctx.run_ui(egui::RawInput::default(), |_| {});
+        output.textures_delta.clear();
+        assert_eq!(marker(&ctx), initial);
+
+        ctx.set_zoom_factor(1.25);
+        ctx.run_ui(egui::RawInput::default(), |_| {})
+            .textures_delta
+            .clear();
+        app.follow_font_atlas(&ctx);
+        ctx.run_ui(egui::RawInput::default(), |_| {})
+            .textures_delta
+            .clear();
+        assert_eq!(
+            marker(&ctx),
+            initial,
+            "does not rebuild immediately on zoom"
+        );
+        assert!(app.atlas_watch.changed.is_some());
+
+        app.atlas_watch.changed = Some(Instant::now() - ATLAS_SETTLE - Duration::from_millis(1));
+        app.follow_font_atlas(&ctx);
+        ctx.run_ui(egui::RawInput::default(), |_| {})
+            .textures_delta
+            .clear();
+        let settled = marker(&ctx);
+        assert_ne!(settled, initial, "rebuilds once zoom settles");
+
+        app.follow_font_atlas(&ctx);
+        let mut output = ctx.run_ui(egui::RawInput::default(), |_| {});
+        output.textures_delta.clear();
+        assert_eq!(marker(&ctx), settled, "rebuilds only once per zoom settle");
+
+        app.window_focused = false;
+        app.follow_font_atlas(&ctx);
+        let mut output = ctx.run_ui(egui::RawInput::default(), |_| {});
+        output.textures_delta.clear();
+        assert_eq!(
+            marker(&ctx),
+            settled,
+            "does not rebuild immediately on blur"
+        );
+
+        app.atlas_watch.away = Some(Instant::now() - ATLAS_IDLE - Duration::from_millis(1));
+        app.follow_font_atlas(&ctx);
+        let mut output = ctx.run_ui(egui::RawInput::default(), |_| {});
+        output.textures_delta.clear();
+        let idle = marker(&ctx);
+        assert_ne!(idle, settled, "rebuilds once unfocused past ATLAS_IDLE");
+
+        app.follow_font_atlas(&ctx);
+        let mut output = ctx.run_ui(egui::RawInput::default(), |_| {});
+        output.textures_delta.clear();
+        assert_eq!(marker(&ctx), idle, "rebuilds only once per unfocused spell");
+    }
+
+    #[test]
     fn image_navigation_stays_in_chat_order_and_skips_unavailable_media() {
         let ctx = egui::Context::default();
         let mut app = app();
@@ -18246,14 +18690,11 @@ mod tests {
         let ctx = egui::Context::default();
         let ada = "15550000001@s.whatsapp.net";
         let grace = "15550000002@s.whatsapp.net";
-        app.contacts.insert(
-            grace.into(),
-            Contact {
-                id: grace.into(),
-                full_name: Some("Grace Hopper".into()),
-                ..Default::default()
-            },
-        );
+        app.contacts.insert(Contact {
+            id: grace.into(),
+            full_name: Some("Grace Hopper".into()),
+            ..Default::default()
+        });
         app.apply(Action::ShowDialog(Dialog::NewChat), &ctx);
         app.apply(Action::StartNewGroup, &ctx);
         app.apply(Action::ToggleNewGroupMember(ada.into()), &ctx);
@@ -19189,6 +19630,7 @@ mod tests {
         let (backend, _, events) = Backend::recording_with_events();
         app.accounts[1].backend = backend;
         let chat = "fixture@s.whatsapp.net";
+        app.accounts[1].open_chat = Some(chat.into());
         app.accounts[0]
             .conversations
             .entry(chat.into())
@@ -21485,10 +21927,13 @@ mod tests {
         assert!(searches(&mut commands).is_empty(), "nothing to ask yet");
         app.apply(Action::ChatSearch("eng".into()), &ctx);
         app.apply(Action::ChatSearch(" engine ".into()), &ctx);
-        assert_eq!(
-            searches(&mut commands),
-            [("eng".to_owned(), false), ("engine".to_owned(), false)]
+        assert!(
+            searches(&mut commands).is_empty(),
+            "the search waits for a pause in typing"
         );
+        // Letters typed in quick succession are one search, for the last text.
+        app.send_due_searches(&ctx, Instant::now());
+        assert_eq!(searches(&mut commands), [("engine".to_owned(), false)]);
         assert!(app.chat_search_pending);
         let hits =
             |query: &str, from: Option<i64>, until: Option<i64>, ids: &[&str]| Event::ChatHits {
@@ -21595,26 +22040,19 @@ mod tests {
             push_name: None,
         };
         // Exclude contacts that already have chats.
-        app.contacts.insert(
-            "491700000001@s.whatsapp.net".into(),
-            contact("491700000001@s.whatsapp.net", "Ada Lovelace"),
-        );
+        app.contacts
+            .insert(contact("491700000001@s.whatsapp.net", "Ada Lovelace"));
         app.chats.push(Chat::new(
             "491700000001@s.whatsapp.net".into(),
             "Ada Lovelace".into(),
         ));
         // Include contacts without chats.
-        app.contacts.insert(
-            "491700000002@s.whatsapp.net".into(),
-            contact("491700000002@s.whatsapp.net", "Adele Goldberg"),
-        );
-        // Exclude groups and our own id.
         app.contacts
-            .insert("12345@g.us".into(), contact("12345@g.us", "Adventurers"));
-        app.contacts.insert(
-            "490000000000@s.whatsapp.net".into(),
-            contact("490000000000@s.whatsapp.net", "Adah Me"),
-        );
+            .insert(contact("491700000002@s.whatsapp.net", "Adele Goldberg"));
+        // Exclude groups and our own id.
+        app.contacts.insert(contact("12345@g.us", "Adventurers"));
+        app.contacts
+            .insert(contact("490000000000@s.whatsapp.net", "Adah Me"));
         app.search = "ad".into();
         let names: Vec<&str> = app
             .matching_contacts()
@@ -22484,7 +22922,7 @@ mod tests {
             first_name: None,
             push_name: None,
         };
-        app.contacts.insert(contact.id.clone(), contact);
+        app.contacts.insert(contact);
         for query in ["angel", "ÁNGEL", "A\u{301}ngel"] {
             app.search = query.into();
             assert_eq!(app.visible_chats().len(), 1, "{query}");
@@ -22492,6 +22930,30 @@ mod tests {
         }
         assert_eq!(app.chats[0].name, "Ángel");
         app.search = "bob".into();
+        assert!(app.visible_chats().is_empty());
+        assert!(app.matching_contacts().is_empty());
+    }
+
+    #[test]
+    fn chat_and_contact_search_match_the_start_of_each_word() {
+        let mut app = app();
+        app.chats.push(Chat::new(
+            "1@s.whatsapp.net".into(),
+            "William Shakespeare".into(),
+        ));
+        let contact = Contact {
+            id: "2@s.whatsapp.net".into(),
+            full_name: Some("John Doe".into()),
+            first_name: None,
+            push_name: None,
+        };
+        app.contacts.insert(contact);
+        app.search = "will shak".into();
+        assert_eq!(app.visible_chats().len(), 1);
+        app.search = "j d".into();
+        assert!(app.visible_chats().is_empty());
+        assert_eq!(app.matching_contacts().len(), 1);
+        app.search = "will x".into();
         assert!(app.visible_chats().is_empty());
         assert!(app.matching_contacts().is_empty());
     }
@@ -22843,33 +23305,57 @@ mod tests {
     #[test]
     fn names_fall_back_from_contacts_to_phones() {
         let mut app = app();
-        app.contacts.insert(
-            "1@s.whatsapp.net".into(),
-            Contact {
-                id: "1@s.whatsapp.net".into(),
-                full_name: Some("Ada".into()),
-                first_name: None,
-                push_name: None,
-            },
-        );
+        app.contacts.insert(Contact {
+            id: "1@s.whatsapp.net".into(),
+            full_name: Some("Ada".into()),
+            first_name: None,
+            push_name: None,
+        });
         assert_eq!(app.display_name("1@s.whatsapp.net"), "Ada");
         assert_eq!(
             app.display_name("393331234567@s.whatsapp.net"),
             "+39 333 123 4567"
         );
         assert_eq!(app.display_name("42@lid"), "Unknown");
-        app.contacts.insert(
-            "42@lid".into(),
-            Contact {
-                id: "42@lid".into(),
-                full_name: None,
-                first_name: None,
-                push_name: Some("Bob".into()),
-            },
-        );
+        app.contacts.insert(Contact {
+            id: "42@lid".into(),
+            full_name: None,
+            first_name: None,
+            push_name: Some("Bob".into()),
+        });
         assert_eq!(app.display_name("42@lid"), "~Bob");
         app.me = Some("42@lid".into());
         assert_eq!(app.display_name("42@lid"), "You");
+    }
+
+    /// The window keeps the contact the worker sent, not a copy of it, until
+    /// a newer one for the same person replaces it.
+    #[test]
+    fn the_window_keeps_the_contact_the_worker_sent() {
+        let mut app = app();
+        let sent = std::sync::Arc::new(Contact {
+            id: "1@s.whatsapp.net".into(),
+            full_name: Some("Ada".into()),
+            ..Contact::default()
+        });
+        app.apply_backend_event(Event::Contacts(vec![std::sync::Arc::clone(&sent)]), true);
+        assert!(std::ptr::eq(
+            app.contacts.get("1@s.whatsapp.net").unwrap(),
+            &*sent
+        ));
+        assert_eq!(app.display_name("1@s.whatsapp.net"), "Ada");
+
+        let renamed = Contact {
+            full_name: Some("Ada Lovelace".into()),
+            ..(*sent).clone()
+        };
+        app.apply_backend_event(Event::Contacts(vec![renamed.into()]), true);
+        assert_eq!(app.display_name("1@s.whatsapp.net"), "Ada Lovelace");
+        assert_eq!(
+            sent.full_name.as_deref(),
+            Some("Ada"),
+            "the old one is left as it was"
+        );
     }
 
     #[test]
@@ -22880,17 +23366,16 @@ mod tests {
         app.search = "title".into();
         assert_eq!(app.chat_title(&app.chats[0]), "Chat title");
 
-        app.contacts.insert(
-            id.into(),
-            Contact {
-                id: id.into(),
-                full_name: None,
-                first_name: None,
-                push_name: Some("Profile name".into()),
-            },
-        );
+        app.contacts.insert(Contact {
+            id: id.into(),
+            full_name: None,
+            first_name: None,
+            push_name: Some("Profile name".into()),
+        });
         assert_eq!(app.chat_title(&app.chats[0]), "~Profile name");
-        app.contacts.get_mut(id).unwrap().full_name = Some("Saved name".into());
+        app.contacts.edit(id, |contact| {
+            std::sync::Arc::make_mut(contact).full_name = Some("Saved name".into());
+        });
         assert_eq!(app.chat_title(&app.chats[0]), "Saved name");
         app.contacts.remove(id);
         assert_eq!(app.chat_title(&app.chats[0]), "Chat title");
@@ -23082,24 +23567,18 @@ mod name_tests {
         let (mut app, _events) = App::headless(AppDirs::under(&root), Settings::default());
         app.me = Some("15550001111@s.whatsapp.net".into());
         app.me_name = Some("Carmine".into());
-        app.contacts.insert(
-            "1@s.whatsapp.net".into(),
-            Contact {
-                id: "1@s.whatsapp.net".into(),
-                full_name: Some("Ada Lovelace".into()),
-                first_name: None,
-                push_name: Some("Ada".into()),
-            },
-        );
-        app.contacts.insert(
-            "2@s.whatsapp.net".into(),
-            Contact {
-                id: "2@s.whatsapp.net".into(),
-                full_name: None,
-                first_name: None,
-                push_name: Some("Bob".into()),
-            },
-        );
+        app.contacts.insert(Contact {
+            id: "1@s.whatsapp.net".into(),
+            full_name: Some("Ada Lovelace".into()),
+            first_name: None,
+            push_name: Some("Ada".into()),
+        });
+        app.contacts.insert(Contact {
+            id: "2@s.whatsapp.net".into(),
+            full_name: None,
+            first_name: None,
+            push_name: Some("Bob".into()),
+        });
         app
     }
 
@@ -23114,21 +23593,23 @@ mod name_tests {
             (3, "Stray Name", Some("")),
         ] {
             let id = format!("1555000001{index}@s.whatsapp.net");
-            app.contacts.insert(
-                id.clone(),
-                Contact {
-                    id: id.clone(),
-                    full_name: Some(full_name.into()),
-                    first_name: first_name.map(Into::into),
-                    push_name: None,
-                },
-            );
+            app.contacts.insert(Contact {
+                id: id.clone(),
+                full_name: Some(full_name.into()),
+                first_name: first_name.map(Into::into),
+                push_name: None,
+            });
             chat.participants.push(id);
         }
         // Without a saved first name (a profile name, or a contact synced
         // before first names were kept) the line keeps the first word.
         chat.participants.push("2@s.whatsapp.net".into());
-        app.contacts.get_mut("2@s.whatsapp.net").unwrap().push_name = Some("Bob Builder".into());
+        app.contacts.insert(Contact {
+            id: "2@s.whatsapp.net".into(),
+            full_name: None,
+            first_name: None,
+            push_name: Some("Bob Builder".into()),
+        });
         assert_eq!(
             app.participant_names(&chat),
             "Bob, Grace, Mary, My Dih, Stray"
@@ -23156,15 +23637,12 @@ mod name_tests {
         let mut app = app();
         let ctx = egui::Context::default();
         let saved = |app: &mut App, id: &str, full: &str, first: Option<&str>| {
-            app.contacts.insert(
-                id.into(),
-                Contact {
-                    id: id.into(),
-                    full_name: Some(full.into()),
-                    first_name: first.map(Into::into),
-                    push_name: None,
-                },
-            );
+            app.contacts.insert(Contact {
+                id: id.into(),
+                full_name: Some(full.into()),
+                first_name: first.map(Into::into),
+                push_name: None,
+            });
         };
         let edit = |app: &mut App, id: &str, name: &str| {
             app.apply(
@@ -23225,15 +23703,12 @@ mod name_tests {
         .enumerate()
         {
             let id = format!("1555000000{index}@s.whatsapp.net");
-            app.contacts.insert(
-                id.clone(),
-                Contact {
-                    id: id.clone(),
-                    full_name: Some((*name).into()),
-                    first_name: name.split(' ').next().map(Into::into),
-                    push_name: Some((*name).into()),
-                },
-            );
+            app.contacts.insert(Contact {
+                id: id.clone(),
+                full_name: Some((*name).into()),
+                first_name: name.split(' ').next().map(Into::into),
+                push_name: Some((*name).into()),
+            });
             chat.participants.push(id);
         }
         // Duplicate entries for the same identity must not inflate the count.

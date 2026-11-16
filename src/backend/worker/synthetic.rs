@@ -41,15 +41,12 @@ impl SyntheticLink {
         worker.outgoing.synthetic = Some(Vec::new());
         for (id, name) in chats {
             // A saved contact, so the worker keeps the chat's name.
-            worker.contacts.insert(
-                (*id).to_owned(),
-                crate::model::Contact {
-                    id: (*id).to_owned(),
-                    full_name: Some((*name).to_owned()),
-                    first_name: None,
-                    push_name: None,
-                },
-            );
+            worker.contacts.insert(crate::model::Contact {
+                id: (*id).to_owned(),
+                full_name: Some((*name).to_owned()),
+                first_name: None,
+                push_name: None,
+            });
             let _ = worker.archive.ensure_chat(id, name);
             // Opening a chat would ask the offline client for presence.
             worker.presence_subscribed.insert((*id).to_owned());

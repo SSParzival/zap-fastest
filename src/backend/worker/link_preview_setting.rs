@@ -108,8 +108,11 @@ mod tests {
     }
 
     async fn phone_says(worker: &mut Worker, disabled: bool, at: i64) {
-        let action = wa::sync_action_value::PrivacySettingDisableLinkPreviewsAction {
-            is_previews_disabled: Some(disabled),
+        let action = {
+            let mut proto =
+                wa::sync_action_value::PrivacySettingDisableLinkPreviewsAction::default();
+            proto.is_previews_disabled = Some(disabled);
+            proto
         };
         worker
             .handle_wa_event(Arc::new(wa_events::Event::DisableLinkPreviewsUpdate(

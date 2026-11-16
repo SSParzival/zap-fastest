@@ -388,11 +388,17 @@ pub fn ureq_proxy() -> Option<ureq::Proxy> {
 }
 
 fn http_config(proxy: Option<ureq::Proxy>) -> ureq::config::Config {
+    // Keep proxy/avatar/GIF download buffers and idle connection pools compact
+    // between bursts instead of retaining defaults across ten idle sockets.
     ureq::Agent::config_builder()
         .proxy(proxy)
         // ureq divides this budget between resolved addresses. Without one,
         // a blackholed first address can block version fetching before IPv4.
         .timeout_connect(Some(Duration::from_secs(15)))
+        .input_buffer_size(32 * 1024)
+        .output_buffer_size(16 * 1024)
+        .max_idle_connections(3)
+        .max_idle_connections_per_host(2)
         .build()
 }
 

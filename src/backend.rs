@@ -1362,7 +1362,9 @@ pub enum Event {
         chat: ChatId,
         message: Box<Message>,
     },
-    Contacts(Vec<Contact>),
+    /// Contacts loaded or changed, each the worker's own allocation rather
+    /// than a copy, which the window keeps as it is (`model::Contacts`).
+    Contacts(Vec<std::sync::Arc<Contact>>),
     /// Message search results with their query, newest first.
     SearchHits {
         query: String,

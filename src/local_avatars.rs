@@ -22,20 +22,17 @@ fn folder(state: &Path) -> PathBuf {
     state.join("avatar-overrides")
 }
 fn regular(metadata: &fs::Metadata, directory: bool) -> bool {
-    if metadata.file_type().is_symlink()
+    #[cfg(windows)]
+    let reparse = {
+        use std::os::windows::fs::MetadataExt;
+        metadata.file_attributes() & 0x400 != 0
+    };
+    #[cfg(not(windows))]
+    let reparse = false;
+    !(metadata.file_type().is_symlink()
         || (directory && !metadata.is_dir())
         || (!directory && !metadata.is_file())
-    {
-        return false;
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-        if metadata.file_attributes() & 0x400 != 0 {
-            return false;
-        }
-    }
-    true
+        || reparse)
 }
 fn validate_folder(state: &Path) -> Result<(), String> {
     match fs::symlink_metadata(folder(state)) {

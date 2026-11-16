@@ -21,6 +21,9 @@ name = "zap-fastest"
 path = "src/main.rs"
 
 [dependencies]
+# Global allocator. System allocators retain transient peaks from history sync
+# and media decoding; mimalloc returns freed segments to the OS.
+mimalloc = { version = "0.1.52", default-features = false }
 bytes = "1"
 anyhow = "1"
 # Native call audio queues, already used by the official protocol library.
@@ -56,17 +59,13 @@ egui_extras = { version = "0.36", features = ["file", "image", "svg", "webp", "g
 skrifa = "0.44"
 # Decodes JPEG, PNG, WebP, and GIF images.
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif"] }
-# WhatsApp Web protocol: pairing, encryption, history sync, and media. Version
-# 0.7.0 on crates.io enables `simd`, which needs nightly Rust. This commit builds
-# on stable and includes snapshot recovery and no-progress conflict handling
-# (upstream #1365, #1374 and #1375). Selected features provide Tokio transport, ureq media downloads,
-# and the SQLite device store. The window handles shutdown instead of `signal`.
-# Includes upstream Business pairing (#1440), LockChatUpdate and snapshot replay
-# (#1507), the viewer's channel mute state (#1537), favorite and recent sticker
-# sync events (#1538), boolean AB props (#1539), and favorite chats sync
-# (#1544). Device-store
-# compatibility retains the legacy created_at column.
-whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "94c53e833805c58c9f5966b08d08c990650a651e", default-features = false, features = ["sqlite-storage", "tokio-transport", "tokio-runtime", "ureq-client", "tokio-native", "voip"] }
+# WhatsApp Web protocol: pairing, encryption, history sync, and media. Includes
+# interleaved video FEC (#1789), video timed from capture (#1790), native relay
+# RTC alignment (#1847), caller-supplied dialer routing (#1849), and two pulled
+# offline batches per chat receive queue (#1814, #1823) so long catch-ups do
+# not overflow and stall. Device-store compatibility retains the legacy
+# created_at column.
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "e634d245f71d66e2ae55f79ef714c4ca01615ed8", default-features = false, features = ["sqlite-storage", "tokio-transport", "tokio-runtime", "ureq-client", "tokio-native", "voip"] }
 tokio = { version = "=1.53.3", features = ["rt-multi-thread", "sync", "time", "macros", "fs", "net", "io-util"] }
 # Opens the WhatsApp WebSocket through a proxy. Both crates are already
 # included through the Tokio transport at these versions.
@@ -76,7 +75,7 @@ http = "1"
 base64 = "0.22"
 # SQLCipher encrypts the archive; the device store shares the same library.
 # Bundle OpenSSL so all release platforms use the same encryption provider.
-rusqlite = { version = "0.40", features = ["bundled-sqlcipher-vendored-openssl"] }
+rusqlite = { version = "0.43", features = ["bundled-sqlcipher-vendored-openssl"] }
 keyring-core = "1"
 getrandom = "0.4"
 zeroize = "1"
@@ -290,7 +289,9 @@ opt-level = 3
 lto = "thin"
 codegen-units = 1
 strip = true
-panic = "abort"
+# Unwind so contained decoder threads can catch decoder panics as unsupported
+# media while every other panic aborts in `contain_panics`.
+panic = "unwind"
 
 # Development profile performance: optimizes main crate for responsive UI/media,
 # while dependencies are optimized at level 2.

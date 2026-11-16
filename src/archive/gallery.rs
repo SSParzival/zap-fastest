@@ -1,5 +1,5 @@
 //! Bounded archive-backed gallery queries, adapted from crmne/zapfast#264.
-use super::{Archive, Result, SEARCH_COLUMNS, params, searched_message};
+use super::{Archive, BARE_COLUMNS, Result, SEARCH_COLUMNS, params, searched_message};
 use crate::model::{ChatMedia, Content, MEDIA_LIST_LIMIT, Message};
 use rusqlite::OptionalExtension;
 const LINK_SCAN_LIMIT: i64 = 4096;
@@ -51,14 +51,15 @@ impl Archive {
     /// chat's pictures and videos, its documents, and its text messages that
     /// hold a web link, each kind newest first and cut at `limit`.
     fn media_docs_links(&self, chat: &str, limit: usize) -> Result<(Vec<Message>, bool)> {
-        let mut rows = self.rows_of_kind(chat, "IN ('image', 'video')", limit)?;
-        rows.extend(self.rows_of_kind(chat, "= 'document'", limit)?);
+        // Pictures and videos are drawn from their preview; a document row is
+        // an icon and a name.
+        let mut rows = self.rows_of_kind(chat, "IN ('image', 'video')", SEARCH_COLUMNS, limit)?;
+        rows.extend(self.rows_of_kind(chat, "= 'document'", BARE_COLUMNS, limit)?);
         // Bound every inspected candidate, including rejected URLs. A long
         // archive must not keep the account worker parsing text indefinitely.
         let sql = format!(
-            "SELECT {} FROM messages WHERE chat=?1
-             ORDER BY timestamp DESC,rowid DESC LIMIT ?2",
-            SEARCH_COLUMNS.replace("thumbnail", "NULL AS thumbnail")
+            "SELECT {BARE_COLUMNS} FROM messages WHERE chat=?1
+             ORDER BY timestamp DESC,rowid DESC LIMIT ?2"
         );
         let mut statement = self.connection.prepare(&sql)?;
         let mut scanned = 0;
@@ -78,10 +79,17 @@ impl Archive {
     }
 
     /// One chat's newest messages whose content kind matches the SQL
-    /// comparison `kinds`, such as `= 'document'`.
-    fn rows_of_kind(&self, chat: &str, kinds: &str, limit: usize) -> Result<Vec<Message>> {
+    /// comparison `kinds`, such as `= 'document'`, read as `columns`
+    /// ([`SEARCH_COLUMNS`] or [`BARE_COLUMNS`]).
+    fn rows_of_kind(
+        &self,
+        chat: &str,
+        kinds: &str,
+        columns: &str,
+        limit: usize,
+    ) -> Result<Vec<Message>> {
         let sql = format!(
-            "SELECT {SEARCH_COLUMNS}
+            "SELECT {columns}
              FROM messages
              WHERE chat = ?1 AND json_valid(content)
                AND json_extract(content, '$.kind') {kinds}

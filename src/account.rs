@@ -8,11 +8,11 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::Instant;
 
-use crate::app::{AttachmentDraft, Conversation};
+use crate::app::{AttachmentDraft, Conversation, PhoneHistory};
 use crate::backend::{Backend, LinkStatus, Waker};
 use crate::model::ComposerMention;
 use crate::model::{
-    AccountId, Chat, ChatFilter, ChatId, Contact, Label, Message, PollDraft, StickerPack,
+    AccountId, Chat, ChatFilter, ChatId, Contacts, Label, Message, PollDraft, StickerPack,
 };
 use crate::paths::{AccountDirs, AppDirs};
 use crate::settings::AccountSettings;
@@ -43,8 +43,21 @@ pub struct Account {
     pub chats: Vec<Chat>,
     /// The archive's initial chat list has arrived, including offline.
     pub(crate) chats_loaded: bool,
-    pub contacts: HashMap<String, Contact>,
+    pub contacts: Contacts,
     pub conversations: HashMap<ChatId, Conversation>,
+    /// Chats the reader left, most recently left first, whose conversations
+    /// may still be in memory: the first two stay, trimmed to their newest
+    /// page, so flipping back is instant; the rest are dropped and read from
+    /// the archive again when they open.
+    pub(crate) left_chats: Vec<ChatId>,
+    /// The open chat when the conversations were last settled, so a chat
+    /// left by any route is noticed.
+    pub(crate) settled_open: Option<ChatId>,
+    /// Whether a chat was left since the conversations were last settled.
+    pub(crate) left_pending: bool,
+    /// What each dropped conversation knew of the phone's history, taken
+    /// back when its chat opens again.
+    pub(crate) phone_history: HashMap<ChatId, PhoneHistory>,
     pub open_chat: Option<ChatId>,
     pub scroll_chat_into_view: Option<ChatId>,
     pub drafts: HashMap<ChatId, String>,
@@ -203,8 +216,12 @@ impl Account {
             link_previews_disabled: false,
             chats: Vec::new(),
             chats_loaded: false,
-            contacts: HashMap::new(),
+            contacts: Contacts::default(),
             conversations: HashMap::new(),
+            left_chats: Vec::new(),
+            settled_open: None,
+            left_pending: false,
+            phone_history: HashMap::new(),
             open_chat,
             scroll_chat_into_view: None,
             drafts: HashMap::new(),
@@ -390,6 +407,14 @@ impl Account {
     pub fn phone(&self) -> Option<String> {
         let me = self.me.as_deref()?;
         crate::model::phone_of(me).map(crate::util::phone)
+    }
+
+    /// Puts a chat the reader has just left first among the conversations
+    /// kept for a quick return.
+    pub(crate) fn note_left(&mut self, chat: &str) {
+        self.left_chats.retain(|left| left != chat);
+        self.left_chats.insert(0, chat.to_owned());
+        self.left_pending = true;
     }
 
     pub fn mark_settings_dirty(&mut self) {

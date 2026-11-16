@@ -598,6 +598,11 @@ mod tests {
         let ctx = egui::Context::default();
         let (backend, interface) = crate::backend::Backend::detached();
         app.backend = backend;
+        // Keep all three chats resident in the app mirror (never left or
+        // trimmed) so queued rows in every chat stay observable.
+        for chat in chats {
+            app.conversations.entry(chat.into()).or_default();
+        }
         let mut random = Lcg(0x5eed_cafe);
         let mut log = Vec::new();
         // Every message we sent, by chat and id, in the order sent.
@@ -690,9 +695,12 @@ mod tests {
                     let unsent: Vec<&(String, String)> = sent
                         .iter()
                         .filter(|(chat, id)| {
-                            app.conversations[chat].message(id).is_some_and(|row| {
-                                matches!(row.status, Delivery::Queued | Delivery::Pending)
-                            })
+                            app.conversations
+                                .get(chat)
+                                .and_then(|conversation| conversation.message(id))
+                                .is_some_and(|row| {
+                                    matches!(row.status, Delivery::Queued | Delivery::Pending)
+                                })
                         })
                         .collect();
                     let (chat, id) = if !unsent.is_empty() && random.below(5) > 0 {

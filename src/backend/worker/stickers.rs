@@ -220,35 +220,37 @@ pub(super) struct FavoritePush {
 fn action_of_message(
     sticker: &wa::message::StickerMessage,
 ) -> wa::sync_action_value::StickerAction {
-    wa::sync_action_value::StickerAction {
-        url: sticker.url.clone(),
-        file_enc_sha256: sticker.file_enc_sha256.clone(),
-        media_key: sticker.media_key.clone(),
-        mimetype: sticker.mimetype.clone(),
-        height: sticker.height,
-        width: sticker.width,
-        direct_path: sticker.direct_path.clone(),
-        file_length: sticker.file_length,
-        is_lottie: sticker.is_lottie,
-        is_avatar_sticker: sticker.is_avatar,
-        ..Default::default()
+    {
+        let mut proto = wa::sync_action_value::StickerAction::default();
+        proto.url = sticker.url.clone();
+        proto.file_enc_sha256 = sticker.file_enc_sha256.clone();
+        proto.media_key = sticker.media_key.clone();
+        proto.mimetype = sticker.mimetype.clone();
+        proto.height = sticker.height;
+        proto.width = sticker.width;
+        proto.direct_path = sticker.direct_path.clone();
+        proto.file_length = sticker.file_length;
+        proto.is_lottie = sticker.is_lottie;
+        proto.is_avatar_sticker = sticker.is_avatar;
+        proto
     }
 }
 
 /// References from the phone's recent-sticker list.
 fn action_of_metadata(sticker: &wa::StickerMetadata) -> wa::sync_action_value::StickerAction {
-    wa::sync_action_value::StickerAction {
-        url: sticker.url.clone(),
-        file_enc_sha256: sticker.file_enc_sha256.clone(),
-        media_key: sticker.media_key.clone(),
-        mimetype: sticker.mimetype.clone(),
-        height: sticker.height,
-        width: sticker.width,
-        direct_path: sticker.direct_path.clone(),
-        file_length: sticker.file_length,
-        is_lottie: sticker.is_lottie,
-        is_avatar_sticker: sticker.is_avatar_sticker,
-        ..Default::default()
+    {
+        let mut proto = wa::sync_action_value::StickerAction::default();
+        proto.url = sticker.url.clone();
+        proto.file_enc_sha256 = sticker.file_enc_sha256.clone();
+        proto.media_key = sticker.media_key.clone();
+        proto.mimetype = sticker.mimetype.clone();
+        proto.height = sticker.height;
+        proto.width = sticker.width;
+        proto.direct_path = sticker.direct_path.clone();
+        proto.file_length = sticker.file_length;
+        proto.is_lottie = sticker.is_lottie;
+        proto.is_avatar_sticker = sticker.is_avatar_sticker;
+        proto
     }
 }
 
@@ -269,24 +271,26 @@ async fn push_favorite(client: &Client, push: FavoritePush) -> Result<Vec<u8>, S
             .upload(bytes, MediaType::Sticker, UploadOptions::default())
             .await
             .map_err(|error| error.to_string())?;
-        action = wa::sync_action_value::StickerAction {
-            url: Some(upload.url),
-            file_enc_sha256: Some(upload.file_enc_sha256.to_vec()),
-            media_key: Some(upload.media_key.to_vec()),
-            mimetype: Some("image/webp".to_owned()),
-            width: size.map(|(width, _)| width),
-            height: size.map(|(_, height)| height),
-            direct_path: Some(upload.direct_path),
-            file_length: Some(upload.file_length),
-            ..Default::default()
+        action = {
+            let mut proto = wa::sync_action_value::StickerAction::default();
+            proto.url = Some(upload.url);
+            proto.file_enc_sha256 = Some(upload.file_enc_sha256.to_vec());
+            proto.media_key = Some(upload.media_key.to_vec());
+            proto.mimetype = Some("image/webp".to_owned());
+            proto.width = size.map(|(width, _)| width);
+            proto.height = size.map(|(_, height)| height);
+            proto.direct_path = Some(upload.direct_path);
+            proto.file_length = Some(upload.file_length);
+            proto
         };
     }
     action.is_favorite = Some(push.favorite);
     let encoded = action.encode_to_vec();
-    let value = wa::SyncActionValue {
-        sticker_action: MessageField::some(action),
-        timestamp: Some(push.updated_at),
-        ..Default::default()
+    let value = {
+        let mut proto = wa::SyncActionValue::default();
+        proto.sticker_action = MessageField::some(action);
+        proto.timestamp = Some(push.updated_at);
+        proto
     };
     client
         .send_app_state_action(&schemas::FAVORITE_STICKER, &[&filehash], &value)
@@ -436,14 +440,15 @@ impl Worker {
             return;
         };
         tokio::spawn(async move {
-            let value = wa::SyncActionValue {
-                remove_recent_sticker_action: MessageField::some(
-                    wa::sync_action_value::RemoveRecentStickerAction {
-                        last_sticker_sent_ts: Some(now_millis()),
-                    },
-                ),
-                timestamp: Some(now_millis()),
-                ..Default::default()
+            let value = {
+                let mut proto = wa::SyncActionValue::default();
+                proto.remove_recent_sticker_action = MessageField::some({
+                    let mut proto = wa::sync_action_value::RemoveRecentStickerAction::default();
+                    proto.last_sticker_sent_ts = Some(now_millis());
+                    proto
+                });
+                proto.timestamp = Some(now_millis());
+                proto
             };
             if let Err(error) = client
                 .send_app_state_action(&schemas::REMOVE_RECENT_STICKER, &[&filehash], &value)
@@ -1051,7 +1056,7 @@ impl Worker {
         tokio::spawn(async move {
             let result = async {
                 let zip = client
-                    .download(&pack)
+                    .download(&pack, Default::default())
                     .await
                     .map_err(|error| format!("Could not download the sticker pack: {error}"))?;
                 let stickers: Vec<(String, Vec<String>)> = pack
@@ -1180,15 +1185,17 @@ mod tests {
 
     #[test]
     fn a_shared_sticker_pack_reads_as_a_pack_in_the_chat() {
-        let message = wa::Message {
-            sticker_pack_message: MessageField::some(wa::message::StickerPackMessage {
-                name: Some("Ducks".into()),
-                publisher: Some("Ada".into()),
-                caption: Some("  ".into()),
-                stickers: vec![Default::default(); 3],
-                ..Default::default()
-            }),
-            ..Default::default()
+        let message = {
+            let mut proto = wa::Message::default();
+            proto.sticker_pack_message = MessageField::some({
+                let mut proto = wa::message::StickerPackMessage::default();
+                proto.name = Some("Ducks".into());
+                proto.publisher = Some("Ada".into());
+                proto.caption = Some("  ".into());
+                proto.stickers = vec![Default::default(); 3];
+                proto
+            });
+            proto
         };
         assert_eq!(
             classify(&message),
@@ -1243,18 +1250,20 @@ mod tests {
         use base64::Engine;
         use sha2::{Digest, Sha256};
         let filehash = base64::engine::general_purpose::STANDARD.encode(Sha256::digest(bytes));
-        let action = wa::sync_action_value::StickerAction {
-            url: Some("https://mmg.whatsapp.net/v/t62.15575-24/sticker.enc?oh=x&oe=y".into()),
-            file_enc_sha256: Some(vec![9; 32]),
-            media_key: Some(vec![7; 32]),
-            mimetype: Some("image/webp".into()),
-            height: Some(512),
-            width: Some(512),
-            direct_path: Some("/v/t62.15575-24/sticker.enc?oh=x&oe=y".into()),
-            file_length: Some(bytes.len() as u64),
-            is_favorite: Some(favorite),
-            device_id_hint: Some(0),
-            ..Default::default()
+        let action = {
+            let mut proto = wa::sync_action_value::StickerAction::default();
+            proto.url =
+                Some("https://mmg.whatsapp.net/v/t62.15575-24/sticker.enc?oh=x&oe=y".into());
+            proto.file_enc_sha256 = Some(vec![9; 32]);
+            proto.media_key = Some(vec![7; 32]);
+            proto.mimetype = Some("image/webp".into());
+            proto.height = Some(512);
+            proto.width = Some(512);
+            proto.direct_path = Some("/v/t62.15575-24/sticker.enc?oh=x&oe=y".into());
+            proto.file_length = Some(bytes.len() as u64);
+            proto.is_favorite = Some(favorite);
+            proto.device_id_hint = Some(0);
+            proto
         };
         wa_events::FavoriteStickerUpdate::builder()
             .filehash(filehash)
@@ -1380,14 +1389,15 @@ mod tests {
     async fn recent_and_chat_stickers_share_one_limit() {
         let (mut worker, _root, _bot, _commands, _events) = picker_worker().await;
         for (index, hash) in ["r1", "r2", "r3"].iter().enumerate() {
-            let raw = wa::StickerMetadata {
-                direct_path: Some(format!("/v/t62.15575-24/{hash}.enc")),
-                media_key: Some(vec![1; 32]),
-                file_enc_sha256: Some(vec![2; 32]),
-                file_sha256: Some(vec![3; 32]),
-                file_length: Some(100),
-                mimetype: Some("image/webp".into()),
-                ..Default::default()
+            let raw = {
+                let mut proto = wa::StickerMetadata::default();
+                proto.direct_path = Some(format!("/v/t62.15575-24/{hash}.enc"));
+                proto.media_key = Some(vec![1; 32]);
+                proto.file_enc_sha256 = Some(vec![2; 32]);
+                proto.file_sha256 = Some(vec![3; 32]);
+                proto.file_length = Some(100);
+                proto.mimetype = Some("image/webp".into());
+                proto
             };
             let raw = raw.encode_to_vec();
             worker
@@ -1612,17 +1622,19 @@ mod tests {
             },
             animated: false,
         };
-        let raw = wa::Message {
-            sticker_message: MessageField::some(wa::message::StickerMessage {
-                direct_path: Some(format!("/v/t62.15575-24/{id}.enc")),
-                media_key: Some(vec![1; 32]),
-                file_enc_sha256: Some(vec![2; 32]),
-                file_sha256: Some(vec![3; 32]),
-                file_length: Some(100),
-                mimetype: Some("image/webp".into()),
-                ..Default::default()
-            }),
-            ..Default::default()
+        let raw = {
+            let mut proto = wa::Message::default();
+            proto.sticker_message = MessageField::some({
+                let mut proto = wa::message::StickerMessage::default();
+                proto.direct_path = Some(format!("/v/t62.15575-24/{id}.enc"));
+                proto.media_key = Some(vec![1; 32]);
+                proto.file_enc_sha256 = Some(vec![2; 32]);
+                proto.file_sha256 = Some(vec![3; 32]);
+                proto.file_length = Some(100);
+                proto.mimetype = Some("image/webp".into());
+                proto
+            });
+            proto
         }
         .encode_to_vec();
         worker
@@ -1757,12 +1769,14 @@ mod tests {
             },
             animated: false,
         };
-        let raw = wa::Message {
-            sticker_message: MessageField::some(wa::message::StickerMessage {
-                file_sha256: Some(Sha256::digest(bytes).to_vec()),
-                ..Default::default()
-            }),
-            ..Default::default()
+        let raw = {
+            let mut proto = wa::Message::default();
+            proto.sticker_message = MessageField::some({
+                let mut proto = wa::message::StickerMessage::default();
+                proto.file_sha256 = Some(Sha256::digest(bytes).to_vec());
+                proto
+            });
+            proto
         }
         .encode_to_vec();
         worker

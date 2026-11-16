@@ -32,6 +32,7 @@ pub use media_jobs::MediaJob;
 mod outgoing;
 #[cfg(test)]
 mod performance;
+mod search_index;
 pub use encryption::{archive_key_identity, copy_archive_key, forget_archive_key};
 mod favorites;
 pub use favorites::Favorite;
@@ -119,6 +120,8 @@ CREATE TABLE IF NOT EXISTS chats (
     muted_until INTEGER,
     locked INTEGER NOT NULL DEFAULT 0
 );
+-- The chat list reads newest first; this order spares it a sort of the whole joined result.
+CREATE INDEX IF NOT EXISTS chats_by_activity ON chats (last_activity);
 CREATE TABLE IF NOT EXISTS messages (
     chat TEXT NOT NULL,
     id TEXT NOT NULL,
@@ -437,6 +440,16 @@ fn chat_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Chat> {
 /// The columns [`searched_message`] reads, in its order.
 const SEARCH_COLUMNS: &str = "chat, id, sender, sender_name, from_me, timestamp, content, status, quoted, reactions, edited, thumbnail, mentions, forwarded, delivered_at, read_at, history_order";
 
+/// How many raw protobufs one startup backfill holds at a time.
+///
+/// `messages` is not `WITHOUT ROWID`, and its primary key is `(chat, id)`
+/// rather than an integer, so pages walk the table's implicit `rowid`.
+pub const BACKFILL_BATCH: usize = 256;
+
+/// The same columns without the preview blob, for rows whose preview is
+/// never drawn.
+const BARE_COLUMNS: &str = "chat, id, sender, sender_name, from_me, timestamp, content, status, quoted, reactions, edited, NULL AS thumbnail, mentions, forwarded, delivered_at, read_at, history_order";
+
 /// The lowercased text a search matches: text, captions, file names, poll
 /// questions, contact names and places, one per line.
 /// `Content::text_matching` previews from the same fields.
@@ -463,6 +476,22 @@ fn search_pattern(needle: &str) -> Option<String> {
                 .replace('_', "\\_")
         )
     })
+}
+
+/// The same `LIKE` pattern applied to the stored JSON text rather than to the
+/// parsed fields, or `None` when the needle has a character JSON writes
+/// escaped (a quote, a backslash, a control character) or is blank.
+///
+/// JSON escapes nothing else, so a needle without those characters that
+/// occurs in a field's text occurs verbatim in the stored `content` too. The
+/// scan can therefore skip every row whose raw text lacks it without parsing
+/// the row, and the parsed match then decides the rest.
+fn raw_prefilter(needle: &str) -> Option<String> {
+    let plain = needle
+        .trim()
+        .chars()
+        .all(|c| c != '"' && c != '\\' && c >= ' ');
+    search_pattern(needle).filter(|_| plain)
 }
 
 /// A message from a row of [`SEARCH_COLUMNS`].
@@ -558,6 +587,10 @@ const UNARCHIVE_CHATS_AT: &str = "unarchive_chats_at";
 /// `meta` keys for the phone's "Disable link previews" and when it changed.
 const LINK_PREVIEWS_DISABLED: &str = "link_previews_disabled";
 const LINK_PREVIEWS_DISABLED_AT: &str = "link_previews_disabled_at";
+
+/// Archived `(rowid, chat, id, raw)` tuple returned by cursor-paged raw scans.
+pub type RawMessageRow = (i64, String, String, Vec<u8>);
+
 impl Archive {
     /// Unlocks the on-disk archive with its OS keyring key, migrating plaintext
     /// archives before their first encrypted use. Never falls back to plaintext.
@@ -572,6 +605,14 @@ impl Archive {
 
     pub fn in_memory() -> Result<Self> {
         Self::prepare(Connection::open_in_memory()?)
+    }
+
+    /// Hands the connection's page cache back to the allocator. SQLite keeps
+    /// the pages of the last big read for good otherwise; the next query reads
+    /// what it needs again. Called after a scan and when idle, never per
+    /// message.
+    pub fn release_memory(&self) {
+        let _ = self.connection.release_memory();
     }
 
     fn prepare(connection: Connection) -> Result<Self> {
@@ -593,6 +634,7 @@ impl Archive {
         connection.execute_batch(archive_sync::SCHEMA)?;
         connection.execute_batch(stars::SCHEMA)?;
         connection.execute_batch(pins::SCHEMA)?;
+        connection.execute_batch(&search_index::schema())?;
         for (table, column, definition) in MIGRATIONS {
             let exists = connection
                 .prepare(&format!("PRAGMA table_info({table})"))?
@@ -604,6 +646,12 @@ impl Archive {
                 ))?;
             }
         }
+        // Newest first in the order the search lists, so a search for common
+        // text stops once it has its page of hits instead of parsing every
+        // message. Created after the migrations, which add `history_order`.
+        connection.execute_batch(
+            "CREATE INDEX IF NOT EXISTS messages_by_recency ON messages (timestamp DESC, COALESCE(history_order, 9223372036854775807) DESC);",
+        )?;
         connection.execute_batch(broadcast_lists::INDEX)?;
         Self::add_downloaded_marker(&connection)?;
         media_jobs::install(&connection)?;
@@ -2022,15 +2070,17 @@ impl Archive {
         limit: usize,
     ) -> Result<Vec<Message>> {
         // Concrete bounds rather than `?2 IS NULL OR ...`, so SQLite walks the
-        // `(chat, timestamp)` index over just the range.
+        // `(chat, timestamp)` index over just the range. The pane lists text
+        // and opens the message by id, so the preview blobs stay behind.
         let sql = format!(
-            "SELECT {SEARCH_COLUMNS}
+            "SELECT {BARE_COLUMNS}
              FROM messages
              WHERE chat = ?1 AND timestamp >= ?2 AND timestamp < ?3
+             AND (?4 IS NULL OR content LIKE ?4 ESCAPE '\\')
              AND json_valid(content)
-             AND (?4 IS NULL OR {SEARCHED_TEXT} LIKE ?4 ESCAPE '\\')
+             AND (?5 IS NULL OR {SEARCHED_TEXT} LIKE ?5 ESCAPE '\\')
              ORDER BY timestamp DESC, COALESCE(history_order, 9223372036854775807) DESC, rowid DESC
-             LIMIT ?5"
+             LIMIT ?6"
         );
         let mut statement = self.connection.prepare(&sql)?;
         let rows = statement.query_map(
@@ -2038,6 +2088,7 @@ impl Archive {
                 chat,
                 from.unwrap_or(i64::MIN),
                 until.unwrap_or(i64::MAX),
+                raw_prefilter(needle),
                 search_pattern(needle),
                 limit as i64
             ],
@@ -2049,16 +2100,33 @@ impl Archive {
     /// Searches visible message text, filenames, polls, contacts, and places.
     /// ASCII matching is case-insensitive; other text follows SQLite behavior.
     pub fn search_messages(&self, needle: &str, limit: usize) -> Result<Vec<Message>> {
+        // The result list shows text and opens the message by id, so the
+        // preview blobs stay behind.
+        if let Some(phrase) = search_index::phrase(needle)
+            && self.search_index_ready()?
+        {
+            let sql = format!(
+                "SELECT {BARE_COLUMNS}
+                 FROM messages
+                 WHERE rowid IN (SELECT rowid FROM message_text WHERE message_text MATCH ?1)
+                 ORDER BY timestamp DESC, COALESCE(history_order, 9223372036854775807) DESC, rowid DESC
+                 LIMIT ?2"
+            );
+            let mut statement = self.connection.prepare(&sql)?;
+            let rows = statement.query_map(params![phrase, limit as i64], searched_message)?;
+            return rows.collect();
+        }
         let sql = format!(
-            "SELECT {SEARCH_COLUMNS}
+            "SELECT {BARE_COLUMNS}
              FROM messages
-             WHERE json_valid(content) AND {SEARCHED_TEXT} LIKE ?1 ESCAPE '\\'
+             WHERE (?1 IS NULL OR content LIKE ?1 ESCAPE '\\')
+             AND json_valid(content) AND {SEARCHED_TEXT} LIKE ?2 ESCAPE '\\'
              ORDER BY timestamp DESC, COALESCE(history_order, 9223372036854775807) DESC, rowid DESC
-             LIMIT ?2"
+             LIMIT ?3"
         );
         let mut statement = self.connection.prepare(&sql)?;
         let rows = statement.query_map(
-            params![search_pattern(needle), limit as i64],
+            params![raw_prefilter(needle), search_pattern(needle), limit as i64],
             searched_message,
         )?;
         rows.collect()
@@ -2196,18 +2264,26 @@ impl Archive {
     /// Returns downloaded stickers we sent (`from_me`) or received, newest
     /// first. Received stickers stay out of Recent, as in WhatsApp's own apps,
     /// and get their own shelf, which leaves out locked chats so a sticker
-    /// cannot hint at who is behind the lock.
+    /// cannot hint at who is behind the lock. Grouping and the limit work on
+    /// narrow columns; `raw` is read only for each path's newest row (the bare
+    /// `rowid` beside `MAX` comes from the row holding the maximum).
     pub fn recent_stickers(&self, limit: usize, from_me: bool) -> Result<Vec<ArchivedSticker>> {
         let mut statement = self.connection.prepare(
-            "SELECT json_extract(content, '$.media.path') AS path, MAX(timestamp), raw
-             FROM messages
-             WHERE json_extract(content, '$.kind') = 'sticker' AND path IS NOT NULL
-               AND from_me = ?2
-               AND (from_me OR NOT EXISTS (
-                   SELECT 1 FROM chats WHERE chats.id = messages.chat AND chats.locked))
-             GROUP BY path
-             ORDER BY 2 DESC
-             LIMIT ?1",
+            "SELECT latest.path, latest.used, messages.raw
+             FROM (
+                 SELECT json_extract(content, '$.media.path') AS path,
+                        MAX(timestamp) AS used, rowid AS winner
+                 FROM messages
+                 WHERE json_extract(content, '$.kind') = 'sticker' AND path IS NOT NULL
+                   AND from_me = ?2
+                   AND (from_me OR NOT EXISTS (
+                       SELECT 1 FROM chats WHERE chats.id = messages.chat AND chats.locked))
+                 GROUP BY path
+                 ORDER BY used DESC
+                 LIMIT ?1
+             ) AS latest
+             JOIN messages ON messages.rowid = latest.winner
+             ORDER BY latest.used DESC",
         )?;
         let rows = statement.query_map(params![limit as i64, from_me], |row| {
             Ok(ArchivedSticker {
@@ -2286,57 +2362,75 @@ impl Archive {
         Ok(())
     }
 
-    /// Returns raw messages for re-deriving fields in newer versions.
-    pub fn rows_with_raw(&self) -> Result<Vec<(String, String, Vec<u8>)>> {
-        let mut statement = self
-            .connection
-            .prepare("SELECT chat, id, raw FROM messages WHERE raw IS NOT NULL")?;
-        let rows = statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
+    /// One page of `(rowid, chat, id, raw)` after `after_rowid`, at most [`BACKFILL_BATCH`].
+    fn raw_page(&self, sql: &str, after_rowid: i64) -> Result<Vec<RawMessageRow>> {
+        let mut statement = self.connection.prepare(sql)?;
+        let rows = statement.query_map(params![after_rowid, BACKFILL_BATCH as i64], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })?;
         rows.collect()
     }
 
-    /// Video messages with their raw protobuf.
-    pub fn videos_with_raw(&self) -> Result<Vec<(String, String, Vec<u8>)>> {
-        let mut statement = self.connection.prepare(
-            "SELECT chat, id, raw FROM messages WHERE raw IS NOT NULL AND json_valid(content)
-             AND json_extract(content, '$.kind') = 'video'",
-        )?;
-        let rows = statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
-        rows.collect()
+    /// Raw messages for re-deriving fields, in `rowid` order, after `after_rowid`.
+    pub fn rows_with_raw(&self, after_rowid: i64) -> Result<Vec<RawMessageRow>> {
+        self.raw_page(
+            "SELECT rowid, chat, id, raw FROM messages
+             WHERE raw IS NOT NULL AND rowid > ?1
+             ORDER BY rowid LIMIT ?2",
+            after_rowid,
+        )
     }
 
-    /// Photo, video, and audio messages with their raw protobuf.
-    pub fn media_with_raw(&self) -> Result<Vec<(String, String, Vec<u8>)>> {
-        let mut statement = self.connection.prepare(
-            "SELECT chat, id, raw FROM messages WHERE raw IS NOT NULL AND json_valid(content)
-             AND json_extract(content, '$.kind') IN ('image', 'video', 'audio')",
-        )?;
-        let rows = statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
-        rows.collect()
+    /// Video messages with their raw protobuf, in `rowid` order, after `after_rowid`.
+    pub fn videos_with_raw(&self, after_rowid: i64) -> Result<Vec<RawMessageRow>> {
+        self.raw_page(
+            "SELECT rowid, chat, id, raw FROM messages
+             WHERE raw IS NOT NULL AND json_valid(content)
+             AND json_extract(content, '$.kind') = 'video'
+             AND rowid > ?1
+             ORDER BY rowid LIMIT ?2",
+            after_rowid,
+        )
+    }
+
+    /// Photo, video, and audio messages with their raw protobuf, after `after_rowid`.
+    pub fn media_with_raw(&self, after_rowid: i64) -> Result<Vec<RawMessageRow>> {
+        self.raw_page(
+            "SELECT rowid, chat, id, raw FROM messages
+             WHERE raw IS NOT NULL AND json_valid(content)
+             AND json_extract(content, '$.kind') IN ('image', 'video', 'audio')
+             AND rowid > ?1
+             ORDER BY rowid LIMIT ?2",
+            after_rowid,
+        )
     }
 
     /// Messages filed as unsupported without a named kind, with their raw protobuf.
-    pub fn unsupported_with_raw(&self) -> Result<Vec<(String, String, Vec<u8>)>> {
-        let mut statement = self.connection.prepare(
-            "SELECT chat, id, raw FROM messages WHERE raw IS NOT NULL AND json_valid(content)
+    pub fn unsupported_with_raw(&self, after_rowid: i64) -> Result<Vec<RawMessageRow>> {
+        self.raw_page(
+            "SELECT rowid, chat, id, raw FROM messages
+             WHERE raw IS NOT NULL AND json_valid(content)
              AND json_extract(content, '$.kind') = 'unsupported'
-             AND json_extract(content, '$.what') = 'message'",
-        )?;
-        let rows = statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
-        rows.collect()
+             AND json_extract(content, '$.what') = 'message'
+             AND rowid > ?1
+             ORDER BY rowid LIMIT ?2",
+            after_rowid,
+        )
     }
 
     /// Interactive messages eligible for a derived presentation upgrade.
     /// Deleted and edited rows are left intact; callers preserve local media paths.
-    pub fn interactive_placeholders(&self) -> Result<Vec<(String, String, Vec<u8>)>> {
-        let mut statement = self.connection.prepare(
-            "SELECT chat, id, raw FROM messages WHERE raw IS NOT NULL AND edited = 0 AND json_valid(content)
+    pub fn interactive_placeholders(&self, after_rowid: i64) -> Result<Vec<RawMessageRow>> {
+        self.raw_page(
+            "SELECT rowid, chat, id, raw FROM messages
+             WHERE raw IS NOT NULL AND edited = 0 AND json_valid(content)
              AND ((json_extract(content, '$.kind') = 'unsupported'
                    AND json_extract(content, '$.what') = 'interactive message')
-                  OR json_extract(content, '$.kind') = 'interactive')",
-        )?;
-        let rows = statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
-        rows.collect()
+                  OR json_extract(content, '$.kind') = 'interactive')
+             AND rowid > ?1
+             ORDER BY rowid LIMIT ?2",
+            after_rowid,
+        )
     }
 
     /// Replaces protobuf-derived fields. Callers must retain local media paths.
@@ -2724,10 +2818,20 @@ impl Archive {
     }
 
     pub fn message(&self, chat: &str, id: &str) -> Result<Option<Message>> {
-        let mut statement = self.connection.prepare(
-            "SELECT sender, sender_name, from_me, timestamp, content, status, quoted, reactions, edited, thumbnail, mentions, forwarded, delivered_at, read_at, history_order
-             FROM messages WHERE chat = ?1 AND id = ?2",
-        )?;
+        self.message_with(chat, id, "thumbnail")
+    }
+
+    /// The message without its preview blob, for a row that only lists it.
+    pub fn message_bare(&self, chat: &str, id: &str) -> Result<Option<Message>> {
+        self.message_with(chat, id, "NULL AS thumbnail")
+    }
+
+    /// Reads one message, with `thumbnail` standing for the preview column.
+    fn message_with(&self, chat: &str, id: &str, thumbnail: &str) -> Result<Option<Message>> {
+        let mut statement = self.connection.prepare(&format!(
+            "SELECT sender, sender_name, from_me, timestamp, content, status, quoted, reactions, edited, {thumbnail}, mentions, forwarded, delivered_at, read_at, history_order
+             FROM messages WHERE chat = ?1 AND id = ?2"
+        ))?;
         statement
             .query_row(params![chat, id], |row| {
                 let content: String = row.get(4)?;
@@ -3556,6 +3660,75 @@ pub(crate) mod tests {
             .unwrap();
         assert!(archive.connection.is_autocommit());
         assert_eq!(archive.chat(chat).unwrap().unwrap().last_activity, 300);
+    }
+
+    /// Raw pages stay within one batch and, together, return every raw row
+    /// once in `rowid` order. A cursor on a middle row resumes after it.
+    #[test]
+    fn raw_pages_cover_every_row_and_resume_after_a_rowid() {
+        let archive = super::Archive::in_memory().unwrap();
+        let chat = "backfill-fixture@s.whatsapp.net";
+        archive.ensure_chat(chat, "Fixture").unwrap();
+        let total = super::BACKFILL_BATCH * 3 + 1;
+        for n in 0..total {
+            if n == super::BACKFILL_BATCH {
+                let skipped = message(chat, "no-raw", n as i64, true);
+                archive.insert_message(&skipped, None).unwrap();
+            }
+            let row = message(chat, &format!("m{n:04}"), n as i64, true);
+            let raw = format!("fixture-{n}");
+            archive.insert_message(&row, Some(raw.as_bytes())).unwrap();
+        }
+
+        let mut after = 0;
+        let mut seen = Vec::new();
+        let mut short = false;
+        loop {
+            let page = archive.rows_with_raw(after).unwrap();
+            if page.is_empty() {
+                break;
+            }
+            assert!(!short, "a short page ended the scan");
+            assert!(page.windows(2).all(|pair| pair[0].0 < pair[1].0));
+            assert!(page.iter().all(|row| row.0 > after));
+            if page.len() < super::BACKFILL_BATCH {
+                assert_eq!(page.len(), 1);
+                short = true;
+            } else {
+                assert_eq!(page.len(), super::BACKFILL_BATCH);
+            }
+            after = page.last().unwrap().0;
+            seen.extend(page.into_iter().map(|(rowid, _, id, _)| (rowid, id)));
+        }
+        assert!(short);
+        assert_eq!(seen.len(), total);
+        assert!(seen.iter().all(|row| row.1 != "no-raw"));
+        let expected: Vec<String> = (0..total).map(|n| format!("m{n:04}")).collect();
+        assert_eq!(
+            seen.iter().map(|row| row.1.as_str()).collect::<Vec<_>>(),
+            expected.iter().map(String::as_str).collect::<Vec<_>>()
+        );
+        // Plain text must not leak into the filtered pages.
+        assert!(archive.videos_with_raw(0).unwrap().is_empty());
+        assert!(archive.media_with_raw(0).unwrap().is_empty());
+        assert!(archive.unsupported_with_raw(0).unwrap().is_empty());
+        assert!(archive.interactive_placeholders(0).unwrap().is_empty());
+
+        let cursor = seen[super::BACKFILL_BATCH * 2 - 1].0;
+        let mut rest = Vec::new();
+        after = cursor;
+        loop {
+            let page = archive.rows_with_raw(after).unwrap();
+            if page.is_empty() {
+                break;
+            }
+            after = page.last().unwrap().0;
+            rest.extend(page);
+        }
+        assert_eq!(rest.len(), super::BACKFILL_BATCH + 1);
+        assert_eq!(rest[0].2, format!("m{:04}", super::BACKFILL_BATCH * 2));
+        assert_eq!(rest.last().unwrap().2, format!("m{:04}", total - 1));
+        assert!(rest.iter().all(|row| row.0 > cursor));
     }
 
     /// Failed unlink cannot apply the previous account's terminal barriers.
@@ -4554,6 +4727,62 @@ pub(crate) mod tests {
         let stats = archive.storage_stats(true).expect("stats");
         assert_eq!(stats.messages, 1);
         assert_eq!(stats.images, 0);
+    }
+
+    #[test]
+    fn search_with_raw_prefilter_matches_quotes_backslashes_and_accents() {
+        let archive = Archive::in_memory().expect("opens");
+        archive
+            .ensure_chat("1@s.whatsapp.net", "Ada")
+            .expect("chat");
+        let texts = [
+            ("m1", 10, "He said \"hi\" to Zoë"),
+            ("m2", 20, "path C:\\temp\\new"),
+            ("m3", 30, "café crème"),
+            ("m4", 40, "line one\nline two"),
+        ];
+        for (id, at, text) in texts {
+            let mut row = message("1@s.whatsapp.net", id, at, false);
+            row.content = Content::text(text);
+            archive.insert_message(&row, None).expect("insert");
+        }
+        let ids =
+            |hits: Vec<Message>| -> Vec<String> { hits.into_iter().map(|hit| hit.id).collect() };
+        // Needles JSON escapes skip the raw prefilter but still match.
+        assert_eq!(
+            ids(archive.search_messages("\"hi\"", 10).expect("search")),
+            ["m1"]
+        );
+        assert_eq!(
+            ids(archive.search_messages("c:\\temp", 10).expect("search")),
+            ["m2"]
+        );
+        assert_eq!(
+            ids(archive.search_messages("one\nline", 10).expect("search")),
+            ["m4"]
+        );
+        // Accented needles take the raw prefilter and still match.
+        assert_eq!(
+            ids(archive.search_messages("café", 10).expect("search")),
+            ["m3"]
+        );
+        assert_eq!(
+            ids(archive.search_messages("ZOË", 10).expect("search")),
+            ["m1"],
+            "the needle is lowercased before it is compared"
+        );
+        assert_eq!(
+            ids(archive
+                .search_chat_messages("1@s.whatsapp.net", "café", None, None, 10)
+                .expect("search")),
+            ["m3"]
+        );
+        assert_eq!(
+            ids(archive
+                .search_chat_messages("1@s.whatsapp.net", "\"hi\"", None, None, 10)
+                .expect("search")),
+            ["m1"]
+        );
     }
 
     #[test]
@@ -6900,6 +7129,48 @@ mod sticker_tests {
             forwarded: false,
             thumbnail: None,
         }
+    }
+
+    #[test]
+    fn recent_stickers_keep_the_newest_row_of_each_path_with_its_raw() {
+        let dir = tempfile::tempdir().expect("temp");
+        let file = |name: &str| {
+            let path = dir.path().join(name);
+            std::fs::write(&path, b"webp").expect("writes");
+            path.display().to_string()
+        };
+        let (one, two, three) = (file("one.webp"), file("two.webp"), file("three.webp"));
+        let archive = Archive::in_memory().expect("opens");
+        archive.ensure_chat("a@s.whatsapp.net", "A").expect("chat");
+        for (id, timestamp, path, raw) in [
+            ("s1", 10, &one, &b"one-old"[..]),
+            ("s2", 30, &one, &b"one-new"[..]),
+            ("s3", 20, &two, &b"two-only"[..]),
+            ("s4", 5, &three, &b"three-old"[..]),
+        ] {
+            archive
+                .insert_message(
+                    &sticker("a@s.whatsapp.net", id, timestamp, Some(path)),
+                    Some(raw),
+                )
+                .expect("inserted");
+        }
+        let listed = archive.recent_stickers(10, true).expect("lists");
+        let summary: Vec<_> = listed
+            .iter()
+            .map(|sticker| (sticker.last_used, sticker.raw.clone()))
+            .collect();
+        assert_eq!(
+            summary,
+            vec![
+                (30, Some(b"one-new".to_vec())),
+                (20, Some(b"two-only".to_vec())),
+                (5, Some(b"three-old".to_vec())),
+            ]
+        );
+        let limited = archive.recent_stickers(2, true).expect("lists");
+        assert_eq!(limited.len(), 2);
+        assert_eq!(limited[1].last_used, 20);
     }
 
     #[test]

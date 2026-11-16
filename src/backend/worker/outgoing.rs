@@ -1252,9 +1252,10 @@ mod tests {
                     status: Delivery::Pending,
                     ..own_message("removed-reply", 100)
                 }),
-                raw: wa::Message {
-                    conversation: Some("Synthetic stale reply".into()),
-                    ..Default::default()
+                raw: {
+                    let mut proto = wa::Message::default();
+                    proto.conversation = Some("Synthetic stale reply".into());
+                    proto
                 }
                 .encode_to_vec(),
             })
@@ -1932,25 +1933,30 @@ mod tests {
         let (mut worker, events, _, _) = worker();
         worker.apply_history(
             ParsedHistory {
-                chats: vec![parse_conversation(wa::Conversation {
-                    id: PEER.into(),
-                    messages: vec![wa::HistorySyncMsg {
-                        message: MessageField::some(wa::WebMessageInfo {
-                            key: MessageField::some(wa::MessageKey {
-                                id: Some("historical-pending".into()),
-                                from_me: Some(true),
-                                ..Default::default()
-                            }),
-                            message: MessageField::some(wa::Message {
-                                conversation: Some("Synthetic interrupted history".into()),
-                                ..Default::default()
-                            }),
-                            status: Some(wa::web_message_info::Status::PENDING),
-                            ..Default::default()
-                        }),
-                        ..Default::default()
-                    }],
-                    ..Default::default()
+                chats: vec![parse_conversation({
+                    let mut proto = wa::Conversation::default();
+                    proto.id = PEER.into();
+                    proto.messages = vec![{
+                        let mut proto = wa::HistorySyncMsg::default();
+                        proto.message = MessageField::some({
+                            let mut proto = wa::WebMessageInfo::default();
+                            proto.key = MessageField::some({
+                                let mut proto = wa::MessageKey::default();
+                                proto.id = Some("historical-pending".into());
+                                proto.from_me = Some(true);
+                                proto
+                            });
+                            proto.message = MessageField::some({
+                                let mut proto = wa::Message::default();
+                                proto.conversation = Some("Synthetic interrupted history".into());
+                                proto
+                            });
+                            proto.status = Some(wa::web_message_info::Status::PENDING);
+                            proto
+                        });
+                        proto
+                    }];
+                    proto
                 })],
                 push_names: Vec::new(),
                 lids: Vec::new(),

@@ -82,12 +82,23 @@ impl Worker {
     }
 }
 
+/// The encrypted upload shared by its readers without copying the buffer
+/// into an `Arc<[u8]>`, which would briefly hold it twice.
+#[derive(Clone)]
+struct SharedBytes(Arc<Vec<u8>>);
+
+impl AsRef<[u8]> for SharedBytes {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
 struct UploadBytes {
-    bytes: Arc<[u8]>,
+    bytes: SharedBytes,
     control: Control,
 }
 struct UploadReader {
-    reader: io::Cursor<Arc<[u8]>>,
+    reader: io::Cursor<SharedBytes>,
     control: Control,
     notified: Instant,
 }
@@ -107,7 +118,7 @@ impl Read for UploadReader {
 }
 impl UploadSource for UploadBytes {
     fn len(&self) -> u64 {
-        self.bytes.as_ref().len() as u64
+        self.bytes.0.len() as u64
     }
     fn reader_from(&self, offset: u64) -> io::Result<Box<dyn Read + Send>> {
         self.control.check()?;
@@ -123,34 +134,40 @@ impl UploadSource for UploadBytes {
 
 pub(super) async fn upload(
     client: &Client,
-    bytes: Vec<u8>,
+    bytes: &mut Vec<u8>,
     kind: MediaType,
 ) -> Result<whatsapp_rust::upload::UploadResponse, String> {
     let Ok(control) = UPLOAD.try_with(Clone::clone) else {
         return client
-            .upload(bytes, kind, UploadOptions::default())
+            .upload(bytes.clone(), kind, UploadOptions::default())
             .await
             .map_err(|error| error.to_string());
     };
     control.check().map_err(|error| error.to_string())?;
-    let (encrypted, info) = tokio::task::spawn_blocking(move || {
+    // Lend the buffer to the blocking task and take it back, so the caller's
+    // copy (kept for the local cache) is the only plaintext one.
+    let owned = std::mem::take(bytes);
+    let (owned, result) = tokio::task::spawn_blocking(move || {
         let mut encrypted =
-            Vec::with_capacity(whatsapp_rust::wacore::upload::encrypted_len(bytes.len()));
-        let info = whatsapp_rust::wacore::upload::encrypt_media_streaming(
-            &bytes[..],
+            Vec::with_capacity(whatsapp_rust::wacore::upload::encrypted_len(owned.len()));
+        let result = whatsapp_rust::wacore::upload::encrypt_media_streaming(
+            &owned[..],
             &mut encrypted,
             kind,
         )
-        .map_err(|error| error.to_string())?;
-        Ok::<_, String>((encrypted, info))
+        .map(|info| (encrypted, info))
+        .map_err(|error| error.to_string());
+        (owned, result)
     })
     .await
-    .map_err(|error| error.to_string())??;
+    .map_err(|error| error.to_string())?;
+    *bytes = owned;
+    let (encrypted, info) = result?;
     control.upload_progress(0, encrypted.len() as u64);
     client
         .upload_stream(
             UploadBytes {
-                bytes: encrypted.into(),
+                bytes: SharedBytes(Arc::new(encrypted)),
                 control,
             },
             info,
@@ -340,7 +357,7 @@ pub(super) async fn download(
     // This returns only after the library checks ciphertext hash, MAC and
     // plaintext hash. No partial file is published or exposed to the UI.
     let mut writer = client
-        .download_to_writer(media, writer)
+        .download_to_writer(media, writer, Default::default())
         .await
         .map_err(|error| {
             if control.cancelled() {

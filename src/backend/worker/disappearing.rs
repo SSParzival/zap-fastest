@@ -286,15 +286,17 @@ mod tests {
     use super::*;
     #[test]
     fn history_uses_message_start_and_seconds_with_conservative_keep_baseline() {
-        let info = wa::WebMessageInfo {
-            ephemeral_start_timestamp: Some(100),
-            ephemeral_duration: Some(86400),
-            keep_in_chat: Some(wa::KeepInChat {
-                keep_type: Some(wa::KeepType::KEEP_FOR_ALL),
-                ..Default::default()
+        let info = {
+            let mut proto = wa::WebMessageInfo::default();
+            proto.ephemeral_start_timestamp = Some(100);
+            proto.ephemeral_duration = Some(86400);
+            proto.keep_in_chat = Some({
+                let mut proto = wa::KeepInChat::default();
+                proto.keep_type = Some(wa::KeepType::KEEP_FOR_ALL);
+                proto
             })
-            .into(),
-            ..Default::default()
+            .into();
+            proto
         };
         let metadata =
             history_metadata("fixture", 999, &info, &wa::Message::text("fixture")).unwrap();
