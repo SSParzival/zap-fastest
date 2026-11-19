@@ -462,7 +462,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                         // The header's Fit/% toggle. The original size opens with the
                         // double-clicked point in the middle: the offset is stored for
                         // the next frame, which lays out the new size.
-                        let (drawn, double_click) = output.inner;
+                        let (_, double_click) = output.inner;
                         if let Some(pos) = double_click {
                             if app
                                 .image_preview
