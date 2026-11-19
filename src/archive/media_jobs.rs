@@ -66,7 +66,7 @@ impl Archive {
         source: &Path,
         export: Option<(&Path, &Path)>,
     ) -> Result<bool> {
-        let transaction = self.connection.unchecked_transaction()?;
+        let transaction = super::Batch::begin(&self.connection)?;
         let saved = if job.card == -2 {
             if self.message(&job.chat, &job.id)?.is_some_and(|message| {
                 matches!(
@@ -257,7 +257,7 @@ impl Archive {
             })?
             .collect::<Result<_>>()?;
         if rows.is_empty() {
-            let transaction = self.connection.unchecked_transaction()?;
+            let transaction = super::Batch::begin(&self.connection)?;
             self.set_meta("media_jobs_audit_rowid", "0")?;
             self.set_meta("media_jobs_audit_due", &now.saturating_add(300).to_string())?;
             transaction.commit()?;
@@ -272,7 +272,7 @@ impl Archive {
     /// Revalidate the snapshot and privacy barriers atomically before clearing
     /// a missing path. The worker confirms NotFound only inside managed storage.
     pub fn requeue_missing_media(&self, job: &MediaJob, expected: Option<&Path>) -> Result<bool> {
-        let transaction = self.connection.unchecked_transaction()?;
+        let transaction = super::Batch::begin(&self.connection)?;
         let eligible: bool = transaction.query_row(
             &format!(
                 "SELECT EXISTS(SELECT 1 FROM media_jobs q
@@ -365,7 +365,7 @@ impl Archive {
         let Some(next) = next else {
             return Ok(());
         };
-        let transaction = self.connection.unchecked_transaction()?;
+        let transaction = super::Batch::begin(&self.connection)?;
         transaction.execute_batch(&enqueue_sql(
             "messages",
             &format!("m.rowid>{cursor} AND m.rowid<={next}"),

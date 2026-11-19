@@ -366,13 +366,16 @@ impl Palette {
     }
 
     /// The shadow under a surface that floats over the window for a moment:
-    /// menus, toasts, the emoji picker, and egui's own popups.
+    /// menus, toasts, the emoji picker, and egui's own popups. Close and
+    /// short: two points down, ten wide, at half the palette's shadow, so
+    /// the surface reads as just above the window rather than ringed by a
+    /// grey haze. The outline draws the edge; the shadow only lifts it.
     pub fn float_shadow(&self) -> egui::epaint::Shadow {
         egui::epaint::Shadow {
-            offset: [0, 6],
-            blur: 20,
+            offset: [0, 2],
+            blur: 10,
             spread: 0,
-            color: self.shadow,
+            color: self.shadow.gamma_multiply(FLOAT_SHADOW_STRENGTH),
         }
     }
 
@@ -380,10 +383,10 @@ impl Palette {
     /// it closes: dialogs, the update dialog, and the image preview.
     pub fn modal_shadow(&self) -> egui::epaint::Shadow {
         egui::epaint::Shadow {
-            offset: [0, 12],
-            blur: 40,
+            offset: [0, 8],
+            blur: 24,
             spread: 0,
-            color: self.shadow,
+            color: self.shadow.gamma_multiply(MODAL_SHADOW_STRENGTH),
         }
     }
 
@@ -512,6 +515,10 @@ const CHAT_TINT: f32 = 0.82;
 const SIDEBAR_TINT: f32 = 0.35;
 /// How much denser than the palette's shadow colour a bubble's shadow is.
 const SHADOW_DENSITY: f32 = 1.04;
+/// How much of the palette's shadow colour a floating surface casts.
+const FLOAT_SHADOW_STRENGTH: f32 = 0.5;
+/// How much of the palette's shadow colour a modal surface casts.
+const MODAL_SHADOW_STRENGTH: f32 = 0.7;
 /// How far a dark theme's raised edge moves from the surface toward the text.
 const DARK_EDGE_TINT: f32 = 0.128;
 /// The light palette's shadow opacity, the most a raised surface casts.

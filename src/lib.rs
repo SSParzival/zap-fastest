@@ -20,6 +20,8 @@ mod call_transport;
 pub mod calls;
 pub mod camera;
 pub mod chat_link;
+#[cfg(target_os = "linux")]
+pub mod clipboard;
 pub mod config;
 pub mod custom_emoji;
 pub mod custom_font;

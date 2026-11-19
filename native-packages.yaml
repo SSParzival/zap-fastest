@@ -4,11 +4,22 @@ schema: 1
 tool:
   version: 0.9.0
   nfpm: 2.47.0
-# The ALSA t64 package also provides this runtime library.
+# Ubuntu 24.04 and Debian 13 use the t64 package names; older releases the
+# plain ones. The RPM requires the library itself, as rpmbuild's automatic
+# requires do, not a package: Fedora and openSUSE name their packages
+# differently (alsa-lib and libasound2), and only the library's name is the
+# same in both. Both release targets are 64-bit, so every one carries the
+# (64bit) mark.
 libraries:
   libasound.so.2:
-    deb: libasound2
-    rpm: alsa-lib
+    deb: libasound2t64 | libasound2
+    rpm: libasound.so.2()(64bit)
+  libgcc_s.so.1:
+    deb: libgcc-s1
+    rpm: libgcc_s.so.1()(64bit)
+  libstdc++.so.6:
+    deb: libstdc++6
+    rpm: libstdc++.so.6()(64bit)
 nfpm:
   name: zap-fastest
   maintainer: eternalwaitt
@@ -64,28 +75,27 @@ nfpm:
       - libxcursor1
       - libxi6
       - libxrandr2
-      - libasound2
+      - libasound2t64 | libasound2
       - libasound2-plugins
       - libgcc-s1
       - libstdc++6
+    # The libraries ZapFastest opens while running (OpenGL, the window system
+    # and the keyboard), by library name as above. native-packages adds the
+    # ones the binary links (sound, the C++ runtime) from libraries.
     rpm:
       depends:
-      - libglvnd-glx
-      - libglvnd-egl
-      - libxkbcommon
-      - libxkbcommon-x11
-      - libwayland-client
-      - libwayland-cursor
-      - libwayland-egl
-      - libX11
-      - libX11-xcb
-      - libXcursor
-      - libXi
-      - libXrandr
-      - alsa-lib
-      - alsa-plugins-pulseaudio
-      - libgcc
-      - libstdc++
+      - libGL.so.1()(64bit)
+      - libEGL.so.1()(64bit)
+      - libxkbcommon.so.0()(64bit)
+      - libxkbcommon-x11.so.0()(64bit)
+      - libwayland-client.so.0()(64bit)
+      - libwayland-cursor.so.0()(64bit)
+      - libwayland-egl.so.1()(64bit)
+      - libX11.so.6()(64bit)
+      - libX11-xcb.so.1()(64bit)
+      - libXcursor.so.1()(64bit)
+      - libXi.so.6()(64bit)
+      - libXrandr.so.2()(64bit)
   rpm:
     buildhost: github-actions
 targets:

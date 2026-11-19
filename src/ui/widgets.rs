@@ -416,9 +416,13 @@ pub fn paint_avatar(
     let size = rect.width();
     let mut painted = false;
     if let Some(picture) = picture {
-        let image = fitted_image(ui, picture, Vec2::splat(size))
-            .fit_to_exact_size(Vec2::splat(size))
-            .corner_radius(size / 2.0);
+        let image = egui::Image::new(crate::image_cache::fit_avatar_uri(
+            ui.ctx(),
+            picture,
+            Vec2::splat(size),
+        ))
+        .fit_to_exact_size(Vec2::splat(size))
+        .corner_radius(size / 2.0);
         if let Ok(egui::load::TexturePoll::Ready { .. }) =
             image.load_for_size(ui.ctx(), Vec2::splat(size))
         {
@@ -1078,6 +1082,20 @@ pub fn row_highlight(ui: &Ui, palette: &Palette, rect: Rect, color: Color32) {
         palette.raised_edge(color),
     );
     ui.painter().rect_filled(card, radius, color);
+}
+
+/// The faint hairline under a list row, from its text to its right edge,
+/// in the gap between highlight cards. `fade` is 1 at rest and 0 under a
+/// highlight, so a lit row stands without a line.
+pub fn row_divider(ui: &Ui, palette: &Palette, rect: Rect, left: f32, fade: f32) {
+    if fade <= 0.0 {
+        return;
+    }
+    let y = rect.bottom();
+    ui.painter().line_segment(
+        [pos2(left, y), pos2(rect.right() - 14.0, y)],
+        Stroke::new(1.0, palette.text.gamma_multiply(0.07 * fade)),
+    );
 }
 
 /// A round check box for a picking list, as WhatsApp draws one: an outlined

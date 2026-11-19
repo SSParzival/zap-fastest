@@ -3506,6 +3506,30 @@ pub fn apply_flags(app: &mut App, page: Option<&str>) {
                 app.pending_view_once = part == "view-once";
                 app.composer = "One moment, just for you.".into();
             }
+            // A wide screenshot staged in a narrow window: it keeps its shape
+            // rather than being squeezed into a square tile.
+            "staged-wide" => {
+                let (width, height) = (1200usize, 180usize);
+                let rgba: Vec<u8> = (0..width * height)
+                    .flat_map(|index| {
+                        let (x, y) = ((index % width) as f32, (index / width) as f32);
+                        let cell = 90.0;
+                        let (cx, cy) = (x % cell - cell / 2.0, y % cell - cell / 2.0);
+                        if cx * cx + cy * cy < 30.0 * 30.0 {
+                            [250, 250, 250, 255]
+                        } else {
+                            [(x / 6.0) as u8, 90, 200 - (y / 2.0) as u8, 255]
+                        }
+                    })
+                    .collect();
+                app.pending.push(crate::app::Pending::Picture {
+                    width,
+                    height,
+                    rgba: std::sync::Arc::new(rgba),
+                    texture: None,
+                });
+                app.composer = "Look at this".into();
+            }
             "staged" => {
                 let (photo, _) = sample_files(app);
                 let side = 48usize;
@@ -8813,6 +8837,47 @@ mod tests {
                 MediaState::Downloading
             ));
             assert_eq!(rows[3].content.media().unwrap().path.as_ref(), Some(&saved));
+        }
+    }
+
+    /// With automatic downloads on, album members download as they come into
+    /// view, as single photos do: never one over the size limit or one that
+    /// failed, and none at all with the setting off.
+    #[test]
+    fn album_members_download_by_themselves_under_the_automatic_download_rules() {
+        use crate::model::MediaState;
+        for auto_download in [true, false] {
+            let mut app = app();
+            media_album_sample(&mut app, true);
+            app.account_mut().settings.auto_download = auto_download;
+            let chat = app.open_chat.clone().unwrap();
+            let messages = &mut app.conversations.get_mut(&chat).unwrap().messages;
+            messages[1].content.media_at_mut(None).unwrap().size =
+                crate::model::ATTACHMENT_DOWNLOAD_LIMIT + 1;
+            messages[2].content.media_at_mut(None).unwrap().state =
+                MediaState::Failed("Synthetic download error".into());
+            let ctx = egui::Context::default();
+            app.attach(&ctx);
+            app.backend.record_demo_commands();
+            render(&mut app, &ctx);
+            render(&mut app, &ctx);
+            let downloads: Vec<_> = app
+                .backend
+                .take_demo_commands()
+                .into_iter()
+                .filter_map(|command| match command {
+                    crate::backend::Command::Download {
+                        message, explicit, ..
+                    } => Some((message, explicit)),
+                    _ => None,
+                })
+                .collect();
+            let expected: Vec<(String, bool)> = if auto_download {
+                vec![("album-0".into(), false), ("album-3".into(), false)]
+            } else {
+                vec![]
+            };
+            assert_eq!(downloads, expected, "auto_download {auto_download}");
         }
     }
 

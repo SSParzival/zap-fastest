@@ -931,6 +931,12 @@ fn run() -> eframe::Result<()> {
                 Box::new(move |cc| {
                     let mut app = lease.take(&cc.egui_ctx);
                     app.attach(&cc.egui_ctx);
+                    #[cfg(target_os = "linux")]
+                    app.attach_clipboard(
+                        raw_window_handle::HasDisplayHandle::display_handle(cc)
+                            .ok()
+                            .map(|display| display.as_raw()),
+                    );
                     #[cfg(feature = "demo")]
                     if demo_minimized && let Some(call) = &app.call {
                         cc.egui_ctx.data_mut(|data| {

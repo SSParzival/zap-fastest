@@ -116,7 +116,7 @@ impl Archive {
         list: &str,
         moves: &[(String, String, String)],
     ) -> Result<Adopted> {
-        let transaction = self.connection.unchecked_transaction()?;
+        let transaction = super::Batch::begin(&self.connection)?;
         let (any, ours): (bool, bool) = transaction.query_row(
             "SELECT EXISTS(SELECT 1 FROM messages WHERE chat = ?1),
                 EXISTS(SELECT 1 FROM messages WHERE chat = ?1 AND from_me)",
@@ -234,6 +234,12 @@ impl Archive {
                 "INSERT OR IGNORE INTO motion_clips (chat, parent, sender, raw)
                  SELECT ?2, parent, CASE WHEN sender = ?4 THEN ?2 ELSE sender END, raw
                  FROM motion_clips WHERE chat = ?1 AND parent IN (SELECT value FROM json_each(?3))",
+                params![list, chat, ids, sender],
+            )?;
+            transaction.execute(
+                "INSERT OR IGNORE INTO hd_copies (chat, parent, sender, raw)
+                 SELECT ?2, parent, CASE WHEN sender = ?4 THEN ?2 ELSE sender END, raw
+                 FROM hd_copies WHERE chat = ?1 AND parent IN (SELECT value FROM json_each(?3))",
                 params![list, chat, ids, sender],
             )?;
             let mut copies = self.duplicate_copies(list, chat)?;

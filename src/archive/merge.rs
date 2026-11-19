@@ -400,7 +400,7 @@ impl PreparedMerge {
             .unwrap()
             .to_string_lossy()
             .into_owned();
-        let transaction = target.connection.unchecked_transaction()?;
+        let transaction = super::Batch::begin(&target.connection)?;
         target.connection.execute_batch("CREATE TABLE IF NOT EXISTS merge_quarantine(merge_id TEXT NOT NULL,kind TEXT NOT NULL,item TEXT NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(merge_id,kind,item));")?;
         // The input database was authenticated and has exactly the checked schema. Parameterized
         // attachment paths and keys stay inside this process and never enter logs or the preview.
@@ -522,6 +522,7 @@ impl PreparedMerge {
                 "contacts",
                 "lids",
                 "motion_clips",
+                "hd_copies",
                 "group_receipts",
                 "transcriptions",
                 "polls",

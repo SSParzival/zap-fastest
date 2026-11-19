@@ -8,6 +8,7 @@ use crate::theme::{self, Icon};
 
 pub fn show(app: &mut App, ctx: &egui::Context) {
     let Some(preview) = app.image_preview.clone() else {
+        release_textures(ctx);
         return;
     };
     let palette = app.palette;
@@ -313,18 +314,23 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             // Registered with the image cache like every other draw site, so a
             // sweep never releases the picture while it is on screen.
             if !preview.path().is_file() {
+                release_textures(ctx);
                 missing(app, ui, &selected, canvas);
             } else if is_video {
+                release_textures(ctx);
                 clip(app, ui, &selected, preview.path(), area);
             } else if app.settings.screen_privacy.hides(
                 crate::settings::ScreenPrivacyWhat::Media,
                 ui.rect_contains_pointer(area),
             ) {
+                release_textures(ctx);
                 ui.allocate_rect(area, egui::Sense::hover());
                 super::widgets::privacy_cover(ui, area, app.palette.surface_hover, 6.0);
             } else {
-                let image = crate::ui::widgets::file_image(ui, preview.path());
-                match image.load_for_size(ctx, canvas) {
+                // Decoded at the size it is drawn (the window's, or the zoom's
+                // once past it), never at the file's full size.
+                let (image, poll) = viewer_texture(ctx, preview.path(), canvas, &preview);
+                match poll {
                     Ok(egui::load::TexturePoll::Ready { texture }) => {
                         let size =
                             display_size(texture.size, canvas, preview.is_fit(), preview.zoom());
@@ -925,6 +931,124 @@ fn zoom_input(ui: &mut egui::Ui, area: Rect, trackpad: bool) -> Option<(f32, Vec
         factor
     });
     (factor != 1.0).then_some((factor, anchor - area.min))
+}
+
+/// The textures the viewer holds for the photo on screen: the one fitted to
+/// the window (kept while zoomed, so it stays painted until a bigger one
+/// arrives) and the last zoomed one, when there is one.
+#[derive(Clone, Default)]
+struct Textures {
+    path: std::path::PathBuf,
+    fitted: Option<String>,
+    big: Option<String>,
+}
+
+fn textures_id() -> egui::Id {
+    egui::Id::new("image-preview-textures")
+}
+
+/// Lets go of every texture the viewer holds (closing it, or stepping to
+/// another picture) so the GPU memory goes back to the pool at once.
+fn release_textures(ctx: &egui::Context) {
+    let held = ctx.data_mut(|data| data.remove_temp::<Textures>(textures_id()));
+    if let Some(held) = held {
+        for uri in held.fitted.into_iter().chain(held.big) {
+            crate::image_cache::forget_exact(ctx, &uri);
+        }
+    }
+}
+
+type Poll = Result<egui::load::TexturePoll, egui::load::LoadError>;
+
+/// The image to draw for `path` and its load state. Normally the texture
+/// fitted to the window; once zoomed past it, one sized to the zoomed draw
+/// (see `image_preview::zoom_pixels`), with the fitted one (or the last bigger
+/// one) painted until it arrives. A bigger texture is forgotten when the zoom
+/// returns to fit.
+fn viewer_texture(
+    ctx: &egui::Context,
+    path: &std::path::Path,
+    canvas: Vec2,
+    preview: &crate::image_preview::PreviewState,
+) -> (egui::Image<'static>, Poll) {
+    let ppp = ctx.pixels_per_point();
+    let mut held = match ctx.data(|data| data.get_temp::<Textures>(textures_id())) {
+        Some(held) if held.path == path => held,
+        _ => {
+            release_textures(ctx);
+            Textures {
+                path: path.to_owned(),
+                fitted: None,
+                big: None,
+            }
+        }
+    };
+    let ready = |poll: &Poll| matches!(poll, Ok(egui::load::TexturePoll::Ready { .. }));
+    let load = |ctx: &egui::Context, uri: &str| {
+        crate::image_cache::touch(ctx, uri);
+        let image = egui::Image::new(uri.to_owned());
+        let poll = image.load_for_size(ctx, canvas);
+        (image, poll)
+    };
+    let store = |held: Textures| ctx.data_mut(|data| data.insert_temp(textures_id(), held));
+
+    let fit = crate::image_preview::fitted_pixels(canvas, ppp);
+    let fit_uri = crate::image_cache::fit_uri_pixels(ctx, path, fit.0, fit.1);
+    let (fit_image, fit_poll) = load(ctx, &fit_uri);
+    let original = match &fit_poll {
+        Ok(egui::load::TexturePoll::Ready { texture }) => texture.size,
+        _ => {
+            // The window changed size and the new texture is on its way: the
+            // old one stays painted meanwhile.
+            if let Some(old) = held.fitted.clone().filter(|old| *old != fit_uri) {
+                let (image, poll) = load(ctx, &old);
+                if ready(&poll) {
+                    store(held);
+                    return (image, poll);
+                }
+            }
+            store(held);
+            return (fit_image, fit_poll);
+        }
+    };
+    if let Some(old) = held.fitted.replace(fit_uri.clone())
+        && old != fit_uri
+    {
+        crate::image_cache::forget_exact(ctx, &old);
+    }
+
+    let drawn = display_size(original, canvas, preview.is_fit(), preview.zoom());
+    let wanted = (!preview.is_fit())
+        .then(|| crate::image_preview::zoom_pixels(original, drawn, ppp, fit))
+        .flatten();
+    let Some((width, height)) = wanted else {
+        if let Some(big) = held.big.take() {
+            crate::image_cache::forget_exact(ctx, &big);
+        }
+        store(held);
+        return (fit_image, fit_poll);
+    };
+    let big_uri = crate::image_cache::fit_uri_pixels(ctx, path, width, height);
+    let (big_image, big_poll) = load(ctx, &big_uri);
+    if ready(&big_poll) {
+        if let Some(old) = held.big.replace(big_uri.clone())
+            && old != big_uri
+        {
+            crate::image_cache::forget_exact(ctx, &old);
+        }
+        store(held);
+        return (big_image, big_poll);
+    }
+    // The bigger one is still decoding: keep painting the last one.
+    if let Some(old) = held.big.clone().filter(|old| *old != big_uri) {
+        let (image, poll) = load(ctx, &old);
+        if ready(&poll) {
+            store(held);
+            return (image, poll);
+        }
+    }
+    store(held);
+    (fit_image, fit_poll)
 }
 
 /// Size the image is drawn at from the texture's intrinsic pixel dimensions:

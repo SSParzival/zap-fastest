@@ -648,6 +648,19 @@ fn header(app: &mut App, ui: &mut egui::Ui, chat: &Chat) -> Rect {
                         ui.painter()
                             .set(more_glass, glass_button(&palette, more.rect));
                     }
+                    // A picture of its own, over the account's wallpaper.
+                    let own_wallpaper = app
+                        .account()
+                        .settings
+                        .chat_wallpapers
+                        .contains_key(&chat.id);
+                    let wallpaper_label = if own_wallpaper {
+                        crate::i18n::gettext(app.locale, "Change chat wallpaper…")
+                    } else {
+                        crate::i18n::gettext(app.locale, "Set chat wallpaper…")
+                    };
+                    let remove_wallpaper_label =
+                        crate::i18n::gettext(app.locale, "Remove chat wallpaper");
                     let width = widgets::menu_width(
                         ui,
                         &[
@@ -656,6 +669,8 @@ fn header(app: &mut App, ui: &mut egui::Ui, chat: &Chat) -> Rect {
                             "Pin to top",
                             "Unarchive",
                             "Clear chat",
+                            wallpaper_label.as_ref(),
+                            remove_wallpaper_label.as_ref(),
                             leave_label.as_ref(),
                             "Copy number",
                             "Close chat",
@@ -752,6 +767,25 @@ fn header(app: &mut App, ui: &mut egui::Ui, chat: &Chat) -> Rect {
                                     .push(Action::ShowDialog(Dialog::ConfirmClearChat(
                                         chat.id.clone(),
                                     )));
+                            }
+                            if widgets::menu_item(
+                                ui,
+                                &palette,
+                                Some(Icon::Image),
+                                wallpaper_label.as_ref(),
+                            ) {
+                                app.actions.push(Action::PickChatWallpaper(chat.id.clone()));
+                            }
+                            if own_wallpaper
+                                && widgets::menu_item(
+                                    ui,
+                                    &palette,
+                                    Some(Icon::Trash),
+                                    remove_wallpaper_label.as_ref(),
+                                )
+                            {
+                                app.actions
+                                    .push(Action::RemoveChatWallpaper(chat.id.clone()));
                             }
                             super::blocking::menu(app, ui, &chat.id);
                             widgets::menu_separator(ui, &palette);
@@ -1036,8 +1070,8 @@ fn emoji_candidates(app: &App, query: &str) -> Vec<EmojiSuggestion> {
             .settings
             .recent_emoji
             .iter()
-            .filter_map(|emoji| emojis::get(emoji))
-            .chain(emojis::iter())
+            .filter_map(|emoji| crate::emoji::lookup(emoji))
+            .chain(crate::emoji::catalogue())
             .filter(|emoji| seen.insert(emoji.as_str()))
             .take(LIMIT)
             .map(emoji_suggestion)
@@ -1045,7 +1079,7 @@ fn emoji_candidates(app: &App, query: &str) -> Vec<EmojiSuggestion> {
         return recent;
     }
 
-    let mut found: Vec<_> = emojis::iter()
+    let mut found: Vec<_> = crate::emoji::catalogue()
         .enumerate()
         .filter_map(|(order, emoji)| {
             emoji_match_score(emoji, &query).map(|score| (score, order, emoji))
@@ -2393,6 +2427,13 @@ fn reply_strip(app: &mut App, ui: &mut egui::Ui, quoted: &Message) {
         app.display_name_or(&quoted.sender, quoted.sender_name.as_deref())
     };
     let summary = markup::plain(&quoted.summary(), &app.mention_list(quoted));
+    let picture = matches!(
+        quoted.content,
+        Content::Image { .. } | Content::Video { .. }
+    )
+    .then(|| quoted.thumbnail.as_deref())
+    .flatten()
+    .filter(|bytes| !bytes.is_empty());
     let strip = widgets::raised(ui, &palette, strip_frame(&palette), |ui| {
         ui.set_width(ui.available_width().max(0.0));
         ui.horizontal(|ui| {
@@ -2400,7 +2441,9 @@ fn reply_strip(app: &mut App, ui: &mut egui::Ui, quoted: &Message) {
             ui.painter().rect_filled(bar, 2.0, palette.accent);
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing.y = 1.0;
-                ui.set_max_width((ui.available_width() - 40.0).max(0.0));
+                ui.set_max_width(
+                    (ui.available_width() - if picture.is_some() { 82.0 } else { 40.0 }).max(0.0),
+                );
                 let replying_to =
                     crate::i18n::gettext(app.locale, "Replying to {name}").replace("{name}", &who);
                 widgets::rich_text(ui, &replying_to, theme::semibold(12.5), palette.accent);
@@ -2419,6 +2462,18 @@ fn reply_strip(app: &mut App, ui: &mut egui::Ui, quoted: &Message) {
                 .clicked()
                 {
                     app.actions.push(Action::CancelReply);
+                }
+                if let Some(bytes) = picture {
+                    let (slot, _) = ui.allocate_exact_size(vec2(34.0, 34.0), Sense::hover());
+                    let uri = thumbnail_uri(ui.ctx(), &quoted.chat, &quoted.id, bytes);
+                    if let Ok(egui::load::TexturePoll::Ready { texture }) =
+                        egui::Image::new(uri).load_for_size(ui.ctx(), slot.size())
+                    {
+                        egui::Image::from_texture(texture)
+                            .uv(crate::video::square_uv(texture.size.x, texture.size.y))
+                            .corner_radius(6.0)
+                            .paint_at(ui, slot);
+                    }
                 }
             });
         });
@@ -2543,6 +2598,8 @@ struct View<'a> {
     locale: crate::i18n::Locale,
     search_query: Option<&'a str>,
     chat: &'a Chat,
+    /// The loaded messages, where a quote finds the picture it quotes.
+    messages: &'a [Message],
     me: Option<&'a str>,
     auto_download: bool,
     connected: bool,
@@ -2992,6 +3049,7 @@ fn messages(app: &mut App, ui: &mut egui::Ui, chat: &Chat, under: f32) {
             &app.search
         }),
         chat,
+        messages: &conversation.messages,
         me: app.me.as_deref(),
         auto_download: app.account().settings.auto_download,
         connected: app.link.is_connected(),
@@ -4375,10 +4433,17 @@ fn reaction_affordance(
     });
     theme::reveal_focus(&response);
     // Reply sits one step further out, where the chat accepts messages.
+    // View-once media can be replied to, as on the phone; the quote names its
+    // kind and carries none of it.
     let can_reply = view.chat.can_send()
         && !matches!(
             message.content,
-            Content::Revoked | Content::PhoneOnly { .. } | Content::Call { .. }
+            Content::Revoked
+                | Content::PhoneOnly {
+                    view_once: false,
+                    ..
+                }
+                | Content::Call { .. }
         );
     let step = REACTION_AFFORDANCE_SIZE + 4.0;
     let outward = if rect.center().x < bubble.rect.center().x {
@@ -5019,6 +5084,7 @@ fn speed_pill(
     speed: f32,
     active: bool,
     preparing: bool,
+    solid: bool,
 ) -> egui::Response {
     let palette = view.palette;
     let label = crate::audio::speed_label(speed);
@@ -5041,6 +5107,8 @@ fn speed_pill(
             palette
                 .accent
                 .gamma_multiply(if hovered { 0.42 } else { 0.30 })
+        } else if solid {
+            voice_chip_fill(&palette, hovered)
         } else if hovered {
             palette.surface_active
         } else {
@@ -5049,6 +5117,8 @@ fn speed_pill(
         ui.painter().rect_filled(rect, rect.height() / 2.0, fill);
         let colour = if active {
             palette.accent
+        } else if solid {
+            Color32::WHITE
         } else {
             palette.secondary
         };
@@ -5057,13 +5127,33 @@ fn speed_pill(
         } else {
             colour
         };
-        let galley = ui
-            .painter()
-            .layout_no_wrap(label, theme::medium(11.0), colour);
+        let galley = ui.painter().layout_no_wrap(
+            label,
+            if solid {
+                theme::semibold(11.0)
+            } else {
+                theme::medium(11.0)
+            },
+            colour,
+        );
         ui.painter()
             .galley(rect.center() - galley.size() / 2.0, galley, colour);
     }
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// The grey fill of the voice player's speed chip: a mid grey behind its white
+/// label, read from the text colour where the text is dark, and a dark wash
+/// where it is light (a dark look, or white on your own saturated bubble in
+/// light Messages), so the label reads in every look.
+fn voice_chip_fill(palette: &Palette, hovered: bool) -> Color32 {
+    if palette.text.intensity() > 0.5 {
+        Color32::from_black_alpha(if hovered { 110 } else { 80 })
+    } else {
+        palette
+            .text
+            .gamma_multiply(if hovered { 0.7 } else { 0.55 })
+    }
 }
 
 /// The message menu's row of every playback speed for a playable voice or video
@@ -5110,6 +5200,7 @@ fn speed_menu_row(
                     option,
                     selected,
                     preparing && selected,
+                    false,
                 );
                 ui.ctx().data_mut(|data| {
                     data.insert_temp(
@@ -5773,6 +5864,27 @@ fn natural_text_width(ui: &egui::Ui, view: &View<'_>, message: &Message, cap: f3
 const QUOTE_BAR: f32 = 4.0;
 /// Corner radius of a quote.
 const QUOTE_RADIUS: u8 = 6;
+/// Room between a quote's text and the picture it quotes.
+const QUOTE_PICTURE_GAP: f32 = 8.0;
+
+/// The thumbnail of the photo or video a quote points at, when that message
+/// is loaded in this chat, as WhatsApp shows it beside the quoted words.
+fn quoted_picture<'a>(view: &View<'a>, quoted: &crate::model::Quoted) -> Option<&'a [u8]> {
+    if quoted.chat.is_some() {
+        return None;
+    }
+    let original = view.messages.iter().rev().find(|row| row.id == quoted.id)?;
+    if !matches!(
+        original.content,
+        Content::Image { .. } | Content::Video { .. }
+    ) {
+        return None;
+    }
+    original
+        .thumbnail
+        .as_deref()
+        .filter(|bytes| !bytes.is_empty())
+}
 
 /// Draws a stored quote and routes navigation to its source conversation.
 fn quote_block(
@@ -5808,19 +5920,28 @@ fn quote_block(
         palette.text,
         3.0,
     );
+    let picture = quoted_picture(view, quoted);
+    // The picture takes a square at the card's right edge, as tall as the
+    // two lines of text with their padding.
+    let picture_side = 5.0 + 6.0 + 2.0 * theme::regular(12.5).size * 1.25;
+    let padding = Margin {
+        left: QUOTE_BAR as i8 + 7,
+        right: if picture.is_some() {
+            (picture_side + QUOTE_PICTURE_GAP).round() as i8
+        } else {
+            10
+        },
+        top: 5,
+        bottom: 6,
+    };
     let response = Frame::new()
         .fill(palette.window.gamma_multiply(0.35))
         .corner_radius(CornerRadius::same(QUOTE_RADIUS))
-        .inner_margin(Margin {
-            left: QUOTE_BAR as i8 + 7,
-            right: 10,
-            top: 5,
-            bottom: 6,
-        })
+        .inner_margin(padding)
         .show(ui, |ui| {
             // Include frame margins in the settled width. Use a bounded,
             // left-aligned layout because own bubbles inherit right-to-left flow.
-            let inner_width = (width - QUOTE_BAR - 17.0).max(0.0);
+            let inner_width = (width - f32::from(padding.left) - f32::from(padding.right)).max(0.0);
             ui.allocate_ui_with_layout(
                 vec2(inner_width, 0.0),
                 Layout::top_down(Align::Min),
@@ -5845,6 +5966,29 @@ fn quote_block(
             );
         })
         .response;
+    if let Some(bytes) = picture {
+        let side = response.rect.height();
+        let slot = Rect::from_min_size(
+            pos2(response.rect.max.x - side, response.rect.min.y),
+            vec2(side, side),
+        );
+        // The same key the photo's own bubble draws with, so both share a texture.
+        let uri = thumbnail_uri(ui.ctx(), &view.chat.id, &quoted.id, bytes);
+        if let Ok(egui::load::TexturePoll::Ready { texture }) =
+            egui::Image::new(uri).load_for_size(ui.ctx(), slot.size())
+        {
+            // Cropped to the middle square rather than squeezed into it.
+            egui::Image::from_texture(texture)
+                .uv(crate::video::square_uv(texture.size.x, texture.size.y))
+                .corner_radius(CornerRadius {
+                    nw: 0,
+                    sw: 0,
+                    ne: QUOTE_RADIUS,
+                    se: QUOTE_RADIUS,
+                })
+                .paint_at(ui, slot);
+        }
+    }
     // The bar runs the quote's full height along its rounded left edge.
     let bar = Rect::from_min_size(response.rect.min, vec2(QUOTE_BAR, response.rect.height()));
     ui.painter().rect_filled(
@@ -6722,6 +6866,7 @@ pub(crate) fn list_menu(
         locale: app.locale,
         search_query: None,
         chat,
+        messages: &[],
         me: app.me.as_deref(),
         auto_download: app.account().settings.auto_download,
         connected: app.link.is_connected(),
@@ -6767,7 +6912,7 @@ fn quick_reactions<'a>(message: &'a Message, preferred: &'a [(String, u32)]) -> 
         .map(|(emoji, _)| emoji.as_str())
         .chain(QUICK_REACTIONS.iter().copied())
     {
-        if emojis::get(emoji).is_some() && !list.contains(&emoji) {
+        if crate::emoji::lookup(emoji).is_some() && !list.contains(&emoji) {
             list.push(emoji);
         }
         if list.len() == QUICK_REACTIONS.len() {
@@ -8531,6 +8676,19 @@ fn album_tile(
                 message: message.id.clone(),
             });
         }
+    } else if media.path.is_none()
+        && matches!(media.state, MediaState::Idle)
+        && ui.is_rect_visible(rect)
+        && view.auto_download
+        && media.is_within_download_limit()
+    {
+        // A member comes into view as a single photo or video would, and
+        // downloads by itself under the same setting and size limit.
+        actions.push(Action::DownloadAutomatic {
+            card: None,
+            chat: message.chat.clone(),
+            message: message.id.clone(),
+        });
     }
 }
 
@@ -9776,12 +9934,32 @@ fn picture(
             }
             Ok(egui::load::TexturePoll::Pending { .. }) => {
                 // A picture released while away loads again at its old size.
+                // Still decoding, it opens in the viewer all the same: the
+                // file is here, and the viewer reads it at its own size.
                 let size = match drawn {
                     Some(pixels) => fit(pixels),
                     None if sticker.is_some() => Vec2::splat(STICKER_SIDE),
                     None => frame_size(media, None, max_width, max_height),
                 };
-                let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+                let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+                if response
+                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                    .clicked()
+                {
+                    let action = if sticker.is_some() {
+                        Action::PreviewSticker(path.clone())
+                    } else {
+                        match crate::image_preview::open_target(path, true) {
+                            crate::image_preview::OpenTarget::Preview => {
+                                Action::PreviewImage(path.clone())
+                            }
+                            crate::image_preview::OpenTarget::External => {
+                                Action::OpenFile(path.clone())
+                            }
+                        }
+                    };
+                    actions.push(action);
+                }
                 if ui.is_rect_visible(rect) {
                     ui.painter().rect_filled(rect, radius, palette.surface);
                     theme::paint_spinner(ui, rect, 22.0, palette.accent);
@@ -10833,6 +11011,73 @@ fn attachment(
     }
 }
 
+/// Pitch of a voice message's waveform bars and the least height of one, in
+/// points: a silent clip still shows a row of short bars.
+const VOICE_BAR_PITCH: f32 = 4.0;
+const VOICE_BAR_MIN: f32 = 4.0;
+/// Radius of the voice message's seek knob.
+const VOICE_KNOB: f32 = 6.0;
+
+/// Where along a bar `width` wide from `left` a pointer at `x` seeks to, from
+/// 0 at the start to 1 at the end.
+fn seek_fraction(x: f32, left: f32, width: f32) -> f32 {
+    if width > 0.0 {
+        ((x - left) / width).clamp(0.0, 1.0)
+    } else {
+        0.0
+    }
+}
+
+/// The voice player's play or pause: a bare filled glyph in a soft grey that
+/// darkens under the pointer, in a `size` square click target.
+fn voice_play_button(
+    ui: &mut egui::Ui,
+    palette: &Palette,
+    size: f32,
+    playing: bool,
+    tooltip: &str,
+) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(Vec2::splat(size), Sense::click());
+    theme::reveal_focus(&response);
+    theme::focus_outline(ui, response.id, rect, size / 2.0);
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), tooltip)
+    });
+    if ui.is_rect_visible(rect) {
+        let colour = if response.hovered() {
+            palette.text
+        } else {
+            palette.text.gamma_multiply(0.65)
+        };
+        let middle = rect.center();
+        if playing {
+            for side in [-1.0, 1.0] {
+                ui.painter().rect_filled(
+                    Rect::from_center_size(pos2(middle.x + side * 4.5, middle.y), vec2(5.0, 17.0)),
+                    1.5,
+                    colour,
+                );
+            }
+        } else {
+            // Nudged right: a triangle's weight sits left of its box.
+            let tip = pos2(middle.x + 9.0, middle.y);
+            let top = pos2(middle.x - 7.0, middle.y - 9.0);
+            let bottom = pos2(middle.x - 7.0, middle.y + 9.0);
+            ui.painter().add(egui::Shape::convex_polygon(
+                vec![top, tip, bottom],
+                colour,
+                Stroke::NONE,
+            ));
+        }
+    }
+    let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
+    if tooltip.is_empty() {
+        response
+    } else {
+        response.on_hover_text(tooltip)
+    }
+}
+
 /// Draws the in-chat player with a waveform for voice notes or a track and music badge
 /// for audio files. Playback, seeking and speed controls remain shared between both types.
 #[allow(clippy::too_many_arguments)]
@@ -10924,17 +11169,26 @@ fn voice_player(
                         } else {
                             (Icon::Play, "Play")
                         };
-                        if theme::circle_button(
-                            ui,
-                            icon,
-                            button,
-                            fill,
-                            hover,
-                            palette.accent,
-                            tooltip,
-                        )
-                        .clicked()
-                        {
+                        let played = if voice_note {
+                            voice_play_button(
+                                ui,
+                                &palette,
+                                button,
+                                status.state == State::Playing,
+                                tooltip,
+                            )
+                        } else {
+                            theme::circle_button(
+                                ui,
+                                icon,
+                                button,
+                                fill,
+                                hover,
+                                palette.accent,
+                                tooltip,
+                            )
+                        };
+                        if played.clicked() {
                             actions.push(Action::PlayVoice {
                                 message: message.id.clone(),
                                 path: path.clone(),
@@ -10946,30 +11200,58 @@ fn voice_player(
             let mut wave_middle = None;
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing.y = 2.0;
-                let (rect, response) =
-                    ui.allocate_exact_size(vec2(wave_width, bar_height), Sense::click());
+                let sense = if media.path.is_some() {
+                    Sense::click_and_drag()
+                } else {
+                    Sense::click()
+                };
+                let (rect, response) = ui.allocate_exact_size(vec2(wave_width, bar_height), sense);
                 wave_middle = Some(rect.center().y);
-                let pitch = 3.0;
+                let pitch = if voice_note { VOICE_BAR_PITCH } else { 3.0 };
                 let count = (rect.width() / pitch).floor() as usize;
                 let fraction = if status.total > Duration::ZERO {
                     status.position.as_secs_f32() / status.total.as_secs_f32()
                 } else {
                     0.0
                 };
-                let played_until = rect.left() + fraction * rect.width();
-                let quiet = palette.secondary.gamma_multiply(0.7);
+                let id = bubble_id(&view.chat.id, &message.id);
+                // A drag on the bar seeks once, where it ends; until then the
+                // knob, the played bars and the time follow the pointer.
+                let drag_id = id.with("voice-drag");
+                let pointed = response
+                    .interact_pointer_pos()
+                    .map(|pointer| seek_fraction(pointer.x, rect.left(), rect.width()));
+                if let Some(pointed) = pointed.filter(|_| response.dragged()) {
+                    ui.ctx().data_mut(|data| data.insert_temp(drag_id, pointed));
+                }
+                let dragged = media
+                    .path
+                    .is_some()
+                    .then(|| {
+                        (response.dragged() || response.drag_stopped())
+                            .then(|| ui.ctx().data(|data| data.get_temp::<f32>(drag_id)))
+                            .flatten()
+                    })
+                    .flatten();
+                let progress = dragged.unwrap_or(if status.state == State::Idle && voice_note {
+                    0.0
+                } else {
+                    fraction
+                });
+                let played_until = rect.left() + progress * rect.width();
                 let kind = if voice_note {
                     "voice-waveform"
                 } else {
                     "audio-track"
                 };
                 ui.ctx().data_mut(|data| {
-                    data.insert_temp(bubble_id(&view.chat.id, &message.id).with(kind), rect);
+                    data.insert_temp(id.with(kind), rect);
                 });
                 if !voice_note {
+                    let quiet = palette.secondary.gamma_multiply(0.7);
                     let track = Rect::from_center_size(rect.center(), vec2(rect.width(), 4.0));
                     ui.painter().rect_filled(track, 2.0, quiet);
-                    if fraction > 0.0 {
+                    if progress > 0.0 {
                         ui.painter().rect_filled(
                             Rect::from_min_max(track.min, pos2(played_until, track.bottom())),
                             2.0,
@@ -10977,15 +11259,14 @@ fn voice_player(
                         );
                     }
                 } else if count > 0 {
+                    let quiet = palette.secondary.gamma_multiply(0.45);
+                    let played = palette.text.gamma_multiply(0.85);
                     for index in 0..count {
                         let level = f32::from(bars[index * bars.len() / count]) / 100.0;
-                        let height = (2.0 + level * (bar_height - 4.0)).max(2.0);
+                        let height = (VOICE_BAR_MIN + level * (bar_height - VOICE_BAR_MIN))
+                            .clamp(VOICE_BAR_MIN, bar_height);
                         let x = rect.left() + index as f32 * pitch + 1.0;
-                        let colour = if status.state != State::Idle && x <= played_until {
-                            palette.accent
-                        } else {
-                            quiet
-                        };
+                        let colour = if x <= played_until { played } else { quiet };
                         ui.painter().rect_filled(
                             Rect::from_center_size(
                                 egui::pos2(x, rect.center().y),
@@ -10996,7 +11277,17 @@ fn voice_player(
                         );
                     }
                 }
-                if (!voice_note || matches!(status.state, State::Playing | State::Paused))
+                if voice_note && rect.width() >= 2.0 * VOICE_KNOB {
+                    // Always drawn, at the start while idle, over the bars.
+                    let knob =
+                        played_until.clamp(rect.left() + VOICE_KNOB, rect.right() - VOICE_KNOB);
+                    ui.painter().circle_filled(
+                        egui::pos2(knob, rect.center().y),
+                        VOICE_KNOB,
+                        palette.accent,
+                    );
+                } else if !voice_note
+                    && matches!(status.state, State::Playing | State::Paused)
                     && rect.width() >= 10.0
                 {
                     let knob = played_until.clamp(rect.left() + 5.0, rect.right() - 5.0);
@@ -11008,14 +11299,13 @@ fn voice_player(
                 }
                 if let Some(path) = &media.path {
                     let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
-                    if response.clicked()
-                        && let Some(pointer) = response.interact_pointer_pos()
+                    if response.dragged() {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+                    }
+                    if (response.clicked() || response.drag_stopped())
+                        && let Some(fraction) = dragged.or(pointed)
                     {
-                        let fraction = if rect.width() > 0.0 {
-                            ((pointer.x - rect.left()) / rect.width()).clamp(0.0, 1.0)
-                        } else {
-                            0.0
-                        };
+                        ui.ctx().data_mut(|data| data.remove::<f32>(drag_id));
                         actions.push(Action::SeekVoice {
                             message: message.id.clone(),
                             path: path.clone(),
@@ -11025,6 +11315,14 @@ fn voice_player(
                 }
                 // Show playback position while active, otherwise total duration.
                 let shown = match status.state {
+                    _ if dragged.is_some() => {
+                        let total = if status.total > Duration::ZERO {
+                            status.total.as_secs_f32()
+                        } else {
+                            seconds.unwrap_or(0) as f32
+                        };
+                        crate::util::duration((progress * total) as u32)
+                    }
                     State::Playing | State::Paused => {
                         crate::util::duration(status.position.as_secs() as u32)
                     }
@@ -11102,7 +11400,7 @@ fn voice_player(
                 );
                 let response = ui
                     .scope_builder(egui::UiBuilder::new().max_rect(at), |ui| {
-                        speed_pill(ui, view, size, speed, speed > 1.0, preparing)
+                        speed_pill(ui, view, size, speed, speed > 1.0, preparing, true)
                     })
                     .inner;
                 ui.ctx().data_mut(|data| {
@@ -11395,6 +11693,16 @@ fn chat_of(chat: &ChatId) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A pointer along the voice bar seeks to its place, held inside the bar.
+    #[test]
+    fn a_voice_bar_seeks_where_the_pointer_is() {
+        assert_eq!(seek_fraction(50.0, 50.0, 200.0), 0.0);
+        assert_eq!(seek_fraction(150.0, 50.0, 200.0), 0.5);
+        assert_eq!(seek_fraction(10.0, 50.0, 200.0), 0.0);
+        assert_eq!(seek_fraction(900.0, 50.0, 200.0), 1.0);
+        assert_eq!(seek_fraction(60.0, 50.0, 0.0), 0.0);
+    }
 
     /// Glass buttons leave the name no room in a narrow header (#626).
     #[test]
@@ -13162,6 +13470,25 @@ mod reaction_tests {
         assert!(labels.iter().any(|label| label == "Markierung entfernen"));
         assert!(labels.iter().any(|label| label == "Markieren"));
     }
+
+    #[test]
+    fn a_wide_staged_picture_is_shown_whole_not_squeezed() {
+        let media = Rect::from_min_size(egui::pos2(10.0, 10.0), Vec2::splat(64.0));
+        for native in [vec2(1200.0, 180.0), vec2(180.0, 1200.0)] {
+            let shown = super::contained(native, media);
+            assert!((shown.width() / shown.height() - native.x / native.y).abs() < 0.01);
+            assert!(media.contains_rect(shown));
+            assert!((shown.center() - media.center()).length() < 0.01);
+        }
+    }
+}
+
+/// Where a staged picture of `native` pixels is drawn inside its tile's
+/// `media` area: as large as fits, centred, in its own aspect ratio.
+fn contained(native: Vec2, media: Rect) -> Rect {
+    let native = vec2(native.x.max(1.0), native.y.max(1.0));
+    let scale = (media.width() / native.x).min(media.height() / native.y);
+    Rect::from_center_size(media.center(), native * scale.max(0.0))
 }
 
 /// Pending attachment tiles above the composer.
@@ -13250,22 +13577,25 @@ fn pending_strip(app: &mut App, ui: &mut egui::Ui) {
                                 egui::TextureOptions::LINEAR,
                             )
                         });
-                        // Preserve aspect ratio while filling the tile.
-                        let side = tile - 8.0;
-                        let scale =
-                            (side / (*width).max(1) as f32).min(side / (*height).max(1) as f32);
-                        let fitted = vec2(*width as f32 * scale, *height as f32 * scale);
-                        let inner = Rect::from_center_size(rect.center(), fitted);
-                        egui::Image::from_texture((handle.id(), fitted))
+                        // Preserve aspect ratio while holding the picture inside its tile.
+                        let media = rect.shrink(4.0);
+                        let shown = contained(vec2(*width as f32, *height as f32), media);
+                        egui::Image::from_texture((handle.id(), shown.size()))
                             .corner_radius(6.0)
-                            .paint_at(ui, inner);
+                            .paint_at(ui, shown);
                     }
                     crate::app::Pending::File(path) => {
                         if crate::app::Pending::is_picture_file(path) {
-                            widgets::fitted_image(ui, path, Vec2::splat(tile - 8.0))
-                                .fit_to_exact_size(Vec2::splat(tile - 8.0))
-                                .corner_radius(6.0)
-                                .paint_at(ui, rect.shrink(4.0));
+                            let media = rect.shrink(4.0);
+                            if let Ok(egui::load::TexturePoll::Ready { texture }) =
+                                widgets::fitted_image_within(ui, path, media.size())
+                                    .load_for_size(ui.ctx(), media.size())
+                            {
+                                let shown = contained(texture.size, media);
+                                egui::Image::from_texture((texture.id, shown.size()))
+                                    .corner_radius(6.0)
+                                    .paint_at(ui, shown);
+                            }
                         } else {
                             let icon = Rect::from_center_size(
                                 rect.center() - vec2(0.0, 10.0),

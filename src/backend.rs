@@ -4,7 +4,7 @@
 //! work. Commands and events cross channels, and events wake the UI.
 
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tokio::sync::mpsc;
 
@@ -76,6 +76,24 @@ impl LinkStatus {
 #[cfg(test)]
 mod tests {
     use super::LinkStatus;
+
+    #[test]
+    fn quitting_waits_for_the_runtime_only_until_the_deadline() {
+        use std::time::{Duration, Instant};
+        let (release, held) = std::sync::mpsc::channel::<()>();
+        let (mut busy, _) = super::Backend::detached();
+        busy.thread = Some(std::thread::spawn(move || {
+            let _ = held.recv();
+        }));
+        assert!(!busy.wait_for_shutdown(Instant::now() + Duration::from_millis(50)));
+        release.send(()).unwrap();
+
+        let (mut done, _) = super::Backend::detached();
+        done.thread = Some(std::thread::spawn(|| {}));
+        assert!(done.wait_for_shutdown(Instant::now() + Duration::from_secs(60)));
+        let (mut never_started, _) = super::Backend::detached();
+        assert!(never_started.wait_for_shutdown(Instant::now()));
+    }
 
     #[test]
     fn backend_waits_for_window_acknowledgement_before_touching_storage() {
@@ -660,6 +678,11 @@ pub enum Command {
     PickWallpaperImage,
     /// Deletes the copied wallpaper image.
     RemoveWallpaperImage,
+    /// Asks for an image to use as one chat's own wallpaper and copies it
+    /// into the state directory.
+    PickChatWallpaper(ChatId),
+    /// Deletes a chat's own wallpaper image.
+    RemoveChatWallpaper(ChatId),
     /// Changes our display name and About text; `None` keeps the current one.
     SetProfile {
         name: Option<String>,
@@ -869,7 +892,9 @@ pub enum Command {
         full_name: Option<String>,
         first_name: Option<String>,
         to_phone: bool,
-        registered: Result<bool, String>,
+        /// The number WhatsApp has the account under, which can differ from
+        /// `phone`; `None` when the number is not on WhatsApp.
+        registered: Result<Option<String>, String>,
     },
     /// Downloads and sends a GIF as a short looping video.
     SendGif {
@@ -1503,6 +1528,12 @@ pub enum Event {
     DownloadFolderPicked(std::path::PathBuf),
     /// The copy of a chosen wallpaper image, or why it could not be used.
     WallpaperImagePicked(Result<std::path::PathBuf, String>),
+    /// The copy of an image chosen as a chat's own wallpaper, or why it
+    /// could not be used.
+    ChatWallpaperPicked {
+        chat: ChatId,
+        result: Result<std::path::PathBuf, String>,
+    },
     LocalAvatarChanged {
         id: ChatId,
         result: Result<Option<PathBuf>, String>,
@@ -1824,11 +1855,36 @@ impl Backend {
         self.startup.take()
     }
 
-    pub fn shutdown(&mut self) {
+    /// Asks the runtime to stop, without waiting for it.
+    pub fn request_shutdown(&mut self) {
         self.startup.take();
         self.send(Command::Shutdown);
+    }
+
+    /// Stops the runtime and waits for it, however long that takes, as
+    /// removing an account must before deleting its files.
+    pub fn shutdown(&mut self) {
+        self.request_shutdown();
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
+    }
+
+    /// Waits for a runtime asked to stop until `deadline`, and leaves it to
+    /// end with the process after that. Quitting must not hang on archive
+    /// work: the archive is SQLite, so writes cut short roll back.
+    pub fn wait_for_shutdown(&mut self, deadline: Instant) -> bool {
+        let Some(thread) = self.thread.take() else {
+            return true;
+        };
+        while !thread.is_finished() {
+            if Instant::now() >= deadline {
+                log::warn!("the backend was still busy when ZapFastest quit");
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let _ = thread.join();
+        true
     }
 }

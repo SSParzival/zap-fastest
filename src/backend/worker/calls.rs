@@ -547,8 +547,24 @@ impl Worker {
         }
     }
 
-    /// Whether a call is already up, which every entry point refuses to double.
+    /// Ends the call ringing here if its ring lapsed with no word of its end (see
+    /// [`calls::Call::ring_lapsed`]), filing it as missed, so it no longer holds the call slot.
+    pub(super) fn let_lapsed_ring_go(&mut self) {
+        let now = std::time::Instant::now();
+        let update = self
+            .call
+            .as_mut()
+            .filter(|runtime| runtime.call.ring_lapsed(now))
+            .and_then(|runtime| runtime.call.lapse_ring());
+        if let Some(update) = update {
+            self.emit_call(update);
+        }
+    }
+
+    /// Whether a call is already up, which every entry point refuses to double. A ring that lapsed
+    /// is let go first: it is not a call, and it must not refuse every one that follows.
     pub(super) fn call_busy(&mut self) -> bool {
+        self.let_lapsed_ring_go();
         if self.call.is_some() || self.call_preparing.is_some() {
             log::warn!("[CALL] refusing a new call: one is already up");
             return true;
@@ -737,6 +753,16 @@ impl Worker {
     }
 
     async fn answer_call_mode(&mut self, with_video: bool) {
+        // A second Accept that arrived while the first was being answered finds the offer already
+        // spent. The call it names is the one just picked up, so it is not ours to fail.
+        if self
+            .call
+            .as_ref()
+            .is_some_and(|runtime| !runtime.call.answerable())
+        {
+            log::info!("[CALL] ignoring an answer for a call that is no longer ringing");
+            return;
+        }
         if !self.privacy_ready || self.call_privacy_paused || self.call_preparing.is_some() {
             return;
         }
@@ -1132,6 +1158,8 @@ impl Worker {
     /// The fresh list is also published when it changed, so a device that came or went shows up in
     /// the pickers without anyone pressing anything.
     pub(super) async fn reconcile_call(&mut self) {
+        // A ring whose end never arrived goes on the heartbeat too, so its surface does not stay up.
+        self.let_lapsed_ring_go();
         if self
             .call
             .as_ref()
@@ -1849,5 +1877,59 @@ mod tests {
             }
         }
         assert_eq!(message_events, 1);
+    }
+
+    /// A call that rang here and whose end never arrived must not keep the account busy: the next
+    /// offer would be refused at once, and the caller would hear one ring and the call drop.
+    #[test]
+    fn a_ring_whose_end_never_came_does_not_refuse_the_next_call() {
+        let (mut worker, events, _, _) = super::super::offline_worker("15550000000@s.whatsapp.net");
+        worker.privacy_ready = true;
+        let mut call = Call::test_snapshot("15550000001@s.whatsapp.net");
+        call.rang_ago(calls::RING_LIMIT - Duration::from_secs(5));
+        worker.call = Some(CallRuntime::new(call));
+
+        // Still ringing: a second offer meets a busy account.
+        assert!(
+            worker.call_busy(),
+            "a call that is still ringing holds the slot"
+        );
+
+        // Rung past any offer with no word of its end: the slot is free again.
+        if let Some(runtime) = worker.call.as_mut() {
+            runtime
+                .call
+                .rang_ago(calls::RING_LIMIT + Duration::from_secs(1));
+        }
+        assert!(!worker.call_busy(), "a lapsed ring frees the slot");
+        assert!(worker.call.is_none());
+        let ended = events
+            .try_iter()
+            .find_map(|event| match event {
+                Event::Call(update) => Some(update),
+                _ => None,
+            })
+            .expect("the window hears the ring ended");
+        assert_eq!(ended.phase, calls::CallPhase::Failed);
+        assert_eq!(ended.outcome, Some(calls::CallOutcome::Missed));
+    }
+
+    /// A second Accept clicked while the first answer was on its way reaches the worker after the
+    /// call is up. It leaves that call alone: no error, no teardown, no update (#1024).
+    #[tokio::test]
+    async fn a_second_answer_leaves_the_answered_call_up() {
+        let (mut worker, events, _, _) = super::super::offline_worker("15550000000@s.whatsapp.net");
+        let call = Call::test_answered("15550000001@s.whatsapp.net");
+        worker.call = Some(CallRuntime::new(call));
+        worker.answer_call().await;
+        let call = &worker.call.as_ref().expect("the call is still here").call;
+        assert_eq!(call.phase(), calls::CallPhase::Accepted);
+        let events: Vec<Event> = events.try_iter().collect();
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, Event::Error(_) | Event::Call(_))),
+            "nothing is reported for an answer that came twice"
+        );
     }
 }

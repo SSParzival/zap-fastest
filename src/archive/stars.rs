@@ -181,7 +181,7 @@ pub struct Starred {
 
 impl Archive {
     pub fn queue_star(&self, chat: &str, id: &str, starred: bool, at: i64) -> Result<()> {
-        let tx = self.connection.unchecked_transaction()?;
+        let tx = super::Batch::begin(&self.connection)?;
         tx.execute(
             "DELETE FROM star_changes WHERE chat = ?1 AND id = ?2",
             params![chat, id],
@@ -212,7 +212,7 @@ impl Archive {
     }
 
     pub fn finish_star_change(&self, change: &StarChange, at: i64) -> Result<()> {
-        let tx = self.connection.unchecked_transaction()?;
+        let tx = super::Batch::begin(&self.connection)?;
         // Deletion wins over a callback and must not resurrect the mark.
         let exists: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM messages WHERE chat=?1 AND id=?2 AND json_extract(content,'$.kind') != 'revoked')", params![change.chat,change.id], |row| row.get(0))?;
         if exists {

@@ -14,6 +14,16 @@ use whatsapp_rust::wacore::net::WHATSAPP_WEB_WS_URL;
 
 /// Time allowed to reach the proxy and open the tunnel.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
+/// Time an HTTP request is allowed to reach its server: the name lookup,
+/// and then the socket, the proxy and TLS.
+const HTTP_CONNECT: Duration = Duration::from_secs(15);
+/// Time a server is allowed before it starts to answer a request it has
+/// received in full.
+const HTTP_ANSWER: Duration = Duration::from_secs(30);
+/// Time a small request is allowed from start to finish: a search, a
+/// thumbnail, a profile picture. Media goes through whatsapp-rust and has no
+/// such limit, since a large file on a slow line takes as long as it takes.
+pub const SMALL_REQUEST: Duration = Duration::from_secs(30);
 /// Longest proxy reply header accepted for an HTTP tunnel.
 const MAX_REPLY: usize = 8 * 1024;
 const ENV_VARS: [&str; 4] = ["ALL_PROXY", "all_proxy", "HTTPS_PROXY", "https_proxy"];
@@ -387,14 +397,25 @@ pub fn ureq_proxy() -> Option<ureq::Proxy> {
     }
 }
 
+/// Sets how long an agent waits on a server that does not answer. ureq waits
+/// forever by default, so a stalled connection held its thread until quit.
+/// The body of an answer is not limited here: see [`SMALL_REQUEST`].
+pub fn patient(
+    builder: ureq::config::ConfigBuilder<ureq::typestate::AgentScope>,
+) -> ureq::config::ConfigBuilder<ureq::typestate::AgentScope> {
+    builder
+        .timeout_resolve(Some(HTTP_CONNECT))
+        // ureq divides this budget between resolved addresses. Without one,
+        // a blackholed first address can block version fetching before IPv4.
+        .timeout_connect(Some(HTTP_CONNECT))
+        .timeout_recv_response(Some(HTTP_ANSWER))
+}
+
 fn http_config(proxy: Option<ureq::Proxy>) -> ureq::config::Config {
     // Keep proxy/avatar/GIF download buffers and idle connection pools compact
     // between bursts instead of retaining defaults across ten idle sockets.
-    ureq::Agent::config_builder()
+    patient(ureq::Agent::config_builder())
         .proxy(proxy)
-        // ureq divides this budget between resolved addresses. Without one,
-        // a blackholed first address can block version fetching before IPv4.
-        .timeout_connect(Some(Duration::from_secs(15)))
         .input_buffer_size(32 * 1024)
         .output_buffer_size(16 * 1024)
         .max_idle_connections(3)
@@ -454,6 +475,41 @@ impl TransportFactory for ProxyTransportFactory {
 mod tests {
     use super::*;
     use tokio::net::TcpListener;
+
+    #[test]
+    fn agents_wait_only_so_long_for_a_server() {
+        let agent: ureq::Agent = patient(ureq::Agent::config_builder()).build().into();
+        let timeouts = agent.config().timeouts();
+        assert_eq!(timeouts.resolve, Some(HTTP_CONNECT));
+        assert_eq!(timeouts.connect, Some(HTTP_CONNECT));
+        assert_eq!(timeouts.recv_response, Some(HTTP_ANSWER));
+        assert_eq!(timeouts.global, None, "media may take as long as it takes");
+        assert_eq!(timeouts.recv_body, None);
+    }
+
+    #[test]
+    fn a_limited_request_gives_up_on_a_silent_server() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || listener.accept().map(|(stream, _)| stream));
+        let agent: ureq::Agent = patient(ureq::Agent::config_builder())
+            .proxy(None)
+            .build()
+            .into();
+        let started = std::time::Instant::now();
+        let outcome = agent
+            .get(&format!("http://{address}/"))
+            .config()
+            .timeout_global(Some(Duration::from_millis(300)))
+            .build()
+            .call();
+        assert!(
+            matches!(outcome, Err(ureq::Error::Timeout(_))),
+            "{outcome:?}"
+        );
+        assert!(started.elapsed() < Duration::from_secs(5));
+        drop(server.join());
+    }
 
     #[test]
     fn http_connect_budget_preserves_both_ip_families_and_certificate_validation() {

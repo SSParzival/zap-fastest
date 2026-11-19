@@ -641,6 +641,46 @@ fn push_plain(out: &mut Vec<Span>, template: &Span, text: &str) {
     }
 }
 
+fn boundary_before(text: &str, at: usize) -> bool {
+    text[..at]
+        .chars()
+        .next_back()
+        .is_none_or(|c| !c.is_alphanumeric() && c != '_')
+}
+
+/// Writes each `@<user>` token that names one of `names` (`user`, name) as
+/// `@<name>`, for a forward, which carries no mentions: WhatsApp sends it
+/// without them so nobody is tagged again, and the bare token would read as a
+/// number or privacy id.
+pub fn spell_out(text: &str, names: &[(String, String)]) -> String {
+    if names.is_empty() {
+        return text.to_owned();
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut copied = 0;
+    for (at, _) in text.match_indices('@') {
+        if at < copied || !boundary_before(text, at) {
+            continue;
+        }
+        let digits = text[at + 1..]
+            .find(|c: char| !c.is_ascii_digit())
+            .unwrap_or(text.len() - at - 1);
+        let user = &text[at + 1..at + 1 + digits];
+        let Some((_, name)) = names
+            .iter()
+            .find(|(known, name)| !user.is_empty() && known == user && !name.is_empty())
+        else {
+            continue;
+        };
+        out.push_str(&text[copied..at]);
+        out.push('@');
+        out.push_str(name);
+        copied = at + 1 + digits;
+    }
+    out.push_str(&text[copied..]);
+    out
+}
+
 fn mention_at<'m>(text: &str, at: usize, mentions: &'m [Mention]) -> Option<(usize, &'m Mention)> {
     let rest = &text[at + 1..];
     let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
@@ -1075,6 +1115,27 @@ mod tests {
         );
         assert!(links("id 000000; long id 0000000000000000").is_empty());
         assert!(links("abc00000000000").is_empty());
+    }
+
+    #[test]
+    fn a_forward_spells_out_the_people_it_names() {
+        let names = [
+            ("100000000001".to_owned(), "Ada Lovelace".to_owned()),
+            ("4915700000002".to_owned(), "+49 157 00000002".to_owned()),
+        ];
+        assert_eq!(
+            spell_out("@100000000001 and (@4915700000002), see @all", &names),
+            "@Ada Lovelace and (@+49 157 00000002), see @all"
+        );
+        assert_eq!(
+            spell_out(
+                "@1000000000012 a@100000000001 @999999999 @100000000001.",
+                &names
+            ),
+            "@1000000000012 a@100000000001 @999999999 @Ada Lovelace."
+        );
+        assert_eq!(spell_out("@", &names), "@");
+        assert_eq!(spell_out("@100000000001", &[]), "@100000000001");
     }
 
     #[test]

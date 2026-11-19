@@ -262,11 +262,19 @@ pub struct LastMessage {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PreviewMedia {
     Image,
+    Gif,
     Video,
     Audio,
     Voice,
     Document,
     Sticker,
+    Location,
+    Contact,
+    Poll,
+    CallVoice,
+    CallVideo,
+    CallVoiceMissed,
+    CallVideoMissed,
 }
 
 impl Chat {
@@ -975,13 +983,40 @@ impl Content {
     pub fn preview_media(&self) -> Option<PreviewMedia> {
         match self {
             Self::Image { .. } => Some(PreviewMedia::Image),
+            Self::Video { gif: true, .. } => Some(PreviewMedia::Gif),
             Self::Video { .. } => Some(PreviewMedia::Video),
             Self::Audio {
                 voice_note: true, ..
             } => Some(PreviewMedia::Voice),
             Self::Audio { .. } => Some(PreviewMedia::Audio),
             Self::Document { .. } => Some(PreviewMedia::Document),
-            Self::Sticker { .. } => Some(PreviewMedia::Sticker),
+            Self::Sticker { .. } | Self::StickerPack { .. } => Some(PreviewMedia::Sticker),
+            Self::Location { .. } | Self::LiveLocation { .. } => Some(PreviewMedia::Location),
+            Self::Contact { .. } => Some(PreviewMedia::Contact),
+            Self::Poll { .. } => Some(PreviewMedia::Poll),
+            Self::Call { video, outcome, .. } => {
+                let missed = outcome == "Missed";
+                Some(match (*video, missed) {
+                    (false, true) => PreviewMedia::CallVoiceMissed,
+                    (true, true) => PreviewMedia::CallVideoMissed,
+                    (false, false) => PreviewMedia::CallVoice,
+                    (true, false) => PreviewMedia::CallVideo,
+                })
+            }
+            Self::PhoneOnly {
+                live_location: true,
+                ..
+            } => Some(PreviewMedia::Location),
+            Self::PhoneOnly {
+                view_once: true,
+                once: Some(kind),
+                ..
+            } => Some(match kind {
+                OnceMedia::Photo => PreviewMedia::Image,
+                OnceMedia::Video => PreviewMedia::Video,
+                OnceMedia::Voice => PreviewMedia::Voice,
+                OnceMedia::Audio => PreviewMedia::Audio,
+            }),
             _ => None,
         }
     }
@@ -2763,6 +2798,10 @@ pub enum Action {
     PickWallpaperImage,
     /// Goes back to the wallpaper colour and deletes the copied image.
     RemoveWallpaperImage,
+    /// Asks for an image to use as this chat's own wallpaper.
+    PickChatWallpaper(String),
+    /// Goes back to the account's wallpaper in this chat.
+    RemoveChatWallpaper(String),
     ReloadThemes,
     OpenThemesFolder,
     SettingsChanged,

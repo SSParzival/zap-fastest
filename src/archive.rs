@@ -99,6 +99,52 @@ pub struct Transcription {
 
 pub type Result<T> = std::result::Result<T, rusqlite::Error>;
 
+/// Writes that commit together, or not at all.
+///
+/// Batches nest. The outermost one is the transaction; inside another it is
+/// a savepoint, so a step that fails rolls back alone and the writes around
+/// it still commit, as when each step committed on its own. Dropped without
+/// `commit`, it rolls back its own writes.
+pub(crate) struct Batch<'a> {
+    connection: &'a Connection,
+    open: bool,
+}
+
+impl<'a> Batch<'a> {
+    pub(crate) fn begin(connection: &'a Connection) -> Result<Self> {
+        connection.execute_batch("SAVEPOINT batch")?;
+        Ok(Self {
+            connection,
+            open: true,
+        })
+    }
+
+    /// A failed commit rolls back, as rusqlite's own transaction does.
+    pub(crate) fn commit(mut self) -> Result<()> {
+        self.connection.execute_batch("RELEASE batch")?;
+        self.open = false;
+        Ok(())
+    }
+}
+
+impl Drop for Batch<'_> {
+    fn drop(&mut self) {
+        if self.open {
+            let _ = self
+                .connection
+                .execute_batch("ROLLBACK TO batch; RELEASE batch");
+        }
+    }
+}
+
+impl std::ops::Deref for Batch<'_> {
+    type Target = Connection;
+
+    fn deref(&self) -> &Connection {
+        self.connection
+    }
+}
+
 /// Marks an archived photo whose clip is known as a motion photo. Only the
 /// photo's own sender can give it a clip.
 const MARK_MOTION: &str = "UPDATE messages SET content = json_set(content, '$.motion', json('{}'))
@@ -148,6 +194,16 @@ CREATE TABLE IF NOT EXISTS motion_clips (
 );
 CREATE TRIGGER IF NOT EXISTS delete_motion_clips AFTER DELETE ON messages BEGIN
     DELETE FROM motion_clips WHERE chat = OLD.chat AND parent = OLD.id;
+END;
+CREATE TABLE IF NOT EXISTS hd_copies (
+    chat TEXT NOT NULL,
+    parent TEXT NOT NULL,
+    sender TEXT NOT NULL,
+    raw BLOB NOT NULL,
+    PRIMARY KEY (chat, parent, sender)
+);
+CREATE TRIGGER IF NOT EXISTS delete_hd_copies AFTER DELETE ON messages BEGIN
+    DELETE FROM hd_copies WHERE chat = OLD.chat AND parent = OLD.id;
 END;
 CREATE TABLE IF NOT EXISTS reaction_activity (
  chat TEXT NOT NULL,id TEXT NOT NULL,sender TEXT NOT NULL,sent_at INTEGER NOT NULL,
@@ -601,6 +657,43 @@ impl Archive {
 
     fn open_with_key(path: &Path, key: &[u8; 32]) -> anyhow::Result<Self> {
         Ok(Self::prepare(encryption::open(path, key)?)?)
+    }
+
+    /// An encrypted archive with a fixture key, for tests and benchmarks that
+    /// must write what a real one writes.
+    #[cfg(test)]
+    pub(crate) fn open_encrypted_for_test(path: &Path, key: &[u8; 32]) -> anyhow::Result<Self> {
+        Self::open_with_key(path, key)
+    }
+
+    /// Starts writes that commit together at `end_batch`, for a caller that
+    /// cannot hold a `Batch` across its work. Each call must be paired with
+    /// one `end_batch`. Batches opened meanwhile nest inside it.
+    pub fn begin_batch(&self) -> Result<()> {
+        self.connection.execute_batch("SAVEPOINT outer_batch")
+    }
+
+    /// Commits the writes since `begin_batch`. When the commit fails, they
+    /// roll back, so no transaction is left open.
+    pub fn end_batch(&self) -> Result<()> {
+        if let Err(error) = self.connection.execute_batch("RELEASE outer_batch") {
+            let _ = self
+                .connection
+                .execute_batch("ROLLBACK TO outer_batch; RELEASE outer_batch");
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn in_batch_for_test(&self) -> bool {
+        !self.connection.is_autocommit()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn count_messages_for_test(&self) -> Result<i64> {
+        self.connection
+            .query_row("SELECT COUNT(*) FROM messages", [], |row| row.get(0))
     }
 
     pub fn in_memory() -> Result<Self> {
@@ -1405,6 +1498,44 @@ impl Archive {
             .optional()
     }
 
+    /// Keeps the download keys of the HD copy of a photo or video, which may
+    /// not be here yet. Returns whether the copy is new or has changed.
+    pub fn put_hd_copy(&self, chat: &str, parent: &str, sender: &str, raw: &[u8]) -> Result<bool> {
+        if self.message_removed(chat, parent)? {
+            return Ok(false);
+        }
+        let known: Option<Vec<u8>> = self
+            .connection
+            .query_row(
+                "SELECT raw FROM hd_copies WHERE chat = ?1 AND parent = ?2 AND sender = ?3",
+                params![chat, parent, sender],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if known.as_deref() == Some(raw) {
+            return Ok(false);
+        }
+        self.connection.execute(
+            "INSERT OR REPLACE INTO hd_copies (chat, parent, sender, raw) VALUES (?1, ?2, ?3, ?4)",
+            params![chat, parent, sender, raw],
+        )?;
+        Ok(true)
+    }
+
+    /// The raw photo or video message of the HD copy of `parent`. Only the
+    /// sender of a photo or video can give it an HD copy.
+    pub fn hd_copy(&self, chat: &str, parent: &str) -> Result<Option<Vec<u8>>> {
+        self.connection
+            .query_row(
+                "SELECT c.raw FROM hd_copies c
+                 JOIN messages m ON m.chat = c.chat AND m.id = c.parent AND m.sender = c.sender
+                 WHERE c.chat = ?1 AND c.parent = ?2",
+                params![chat, parent],
+                |row| row.get(0),
+            )
+            .optional()
+    }
+
     /// Returns whether the photo's updated path was actually written.
     pub fn put_motion_path(&self, chat: &str, id: &str, path: Option<&Path>) -> Result<bool> {
         let Some(mut message) = self.message(chat, id)? else {
@@ -1473,19 +1604,14 @@ impl Archive {
     /// Stores a privacy id mapping and reconciles history already filed under
     /// the privacy id with the canonical phone-number chat.
     pub fn put_lid(&self, lid: &str, pn: &str) -> Result<bool> {
-        let transaction = self.connection.unchecked_transaction()?;
+        let transaction = Batch::begin(&self.connection)?;
         let changed = self.reconcile_lid(&transaction, lid, pn)?;
         transaction.commit()?;
         Ok(changed)
     }
 
     /// Reuses the same reconciliation inside an already-owned atomic merge.
-    fn reconcile_lid(
-        &self,
-        transaction: &rusqlite::Transaction<'_>,
-        lid: &str,
-        pn: &str,
-    ) -> Result<bool> {
+    fn reconcile_lid(&self, transaction: &Connection, lid: &str, pn: &str) -> Result<bool> {
         let lid_chat = format!("{lid}@lid");
         let phone_chat = format!("{pn}@s.whatsapp.net");
         Self::merge_group_recipient(transaction, &lid_chat, &phone_chat)?;
@@ -1921,13 +2047,10 @@ impl Archive {
     /// write instead of a read followed by a write.
     pub fn insert_message(&self, message: &Message, raw: Option<&[u8]>) -> Result<()> {
         // Keep the message and its derived rows one durable change. Callers
-        // already inside a history transaction keep ownership of that boundary.
-        let transaction = self
-            .connection
-            .is_autocommit()
-            .then(|| self.connection.unchecked_transaction())
-            .transpose()?;
+        // already inside a batch nest via a savepoint.
+        let transaction = Batch::begin(&self.connection)?;
         if self.message_removed(&message.chat, &message.id)? {
+            transaction.commit()?;
             return Ok(());
         }
         self.connection.prepare_cached(
@@ -1999,9 +2122,7 @@ impl Archive {
                 params![message.chat, message.id],
             )?;
         }
-        if let Some(transaction) = transaction {
-            transaction.commit()?;
-        }
+        transaction.commit()?;
         Ok(())
     }
 
@@ -2465,7 +2586,7 @@ impl Archive {
 
     /// Commits removal, barriers, and pending cleanup for every known identity.
     pub fn delete_message_aliases(&self, chats: &[String], id: &str) -> Result<bool> {
-        let transaction = self.connection.unchecked_transaction()?;
+        let transaction = Batch::begin(&self.connection)?;
         let mut deleted = 0;
         for chat in chats {
             transaction.execute(
@@ -2501,7 +2622,7 @@ impl Archive {
 
     /// Saves authoritative acceptance separately from fallible physical cleanup.
     pub fn confirm_message_removal(&self, account: &str, chats: &[String], id: &str) -> Result<()> {
-        let transaction = self.connection.unchecked_transaction()?;
+        let transaction = Batch::begin(&self.connection)?;
         // The caller supplies the current protocol account, including before its
         // Connected event. Bind replay checks to that same persisted identity.
         transaction.execute(
@@ -2582,7 +2703,7 @@ impl Archive {
     /// Atomically removes only the range the linked device knew about, keeping
     /// newer messages and a durable barrier against replay after restart.
     pub fn remove_chat_through(&self, chat: &str, through: i64, delete: bool) -> Result<Removed> {
-        let transaction = self.connection.unchecked_transaction()?;
+        let transaction = Batch::begin(&self.connection)?;
         let through = self
             .removal_point(chat)?
             .map_or(through, |old| old.max(through));
@@ -2657,6 +2778,7 @@ impl Archive {
         for table in [
             "messages",
             "motion_clips",
+            "hd_copies",
             "media_jobs",
             "managed_exports",
             "reaction_activity",
@@ -2938,7 +3060,7 @@ impl Archive {
         id: &str,
         at: i64,
     ) -> Result<Option<OutgoingPosition>> {
-        let transaction = self.connection.unchecked_transaction()?;
+        let transaction = Batch::begin(&self.connection)?;
         let position = transaction
             .query_row(
                 "SELECT timestamp, rowid FROM messages
@@ -3003,7 +3125,7 @@ impl Archive {
     /// The chat's activity follows: an activity time this message set moves
     /// to the chat's newest message, and later activity stays.
     pub fn restamp_sent(&self, chat: &str, id: &str, timestamp: i64) -> Result<bool> {
-        let transaction = self.connection.unchecked_transaction()?;
+        let transaction = Batch::begin(&self.connection)?;
         let Some(old) = transaction
             .query_row(
                 "SELECT timestamp FROM messages
@@ -3160,11 +3282,7 @@ impl Archive {
         emoji: &str,
         live_sent_at: Option<i64>,
     ) -> Result<(Option<Message>, bool)> {
-        let transaction = self
-            .connection
-            .is_autocommit()
-            .then(|| self.connection.unchecked_transaction())
-            .transpose()?;
+        let transaction = Batch::begin(&self.connection)?;
         let mut bumped = false;
         if let Some(sent_at) = live_sent_at.filter(|sent_at| {
             *sent_at > 0 && *sent_at / 1000 <= crate::util::now().saturating_add(300)
@@ -3179,9 +3297,7 @@ impl Archive {
                 .optional()?;
             if previous.is_some_and(|previous| previous >= sent_at) {
                 let message = self.message(chat, id)?;
-                if let Some(transaction) = transaction {
-                    transaction.commit()?;
-                }
+                transaction.commit()?;
                 return Ok((message, false));
             }
             if self.message(chat, id)?.is_some() {
@@ -3197,9 +3313,7 @@ impl Archive {
             }
         }
         let message = self.set_reaction(chat, id, sender, from_me, emoji)?;
-        if let Some(transaction) = transaction {
-            transaction.commit()?;
-        }
+        transaction.commit()?;
         Ok((message, bumped))
     }
 
@@ -3345,7 +3459,7 @@ impl Archive {
     /// Atomically reserves a readable folder for this chat for the archive's lifetime.
     /// Reservations are account-local and case-insensitive on every platform.
     pub fn reserve_download_folder(&self, chat: &str, source: &str) -> Result<String> {
-        let transaction = self.connection.unchecked_transaction()?;
+        let transaction = Batch::begin(&self.connection)?;
         let key = format!("download_folder:{chat}");
         if let Some(folder) = transaction
             .query_row("SELECT value FROM meta WHERE key=?1", [&key], |row| {
@@ -3393,14 +3507,14 @@ impl Archive {
 
     /// Clears all archived data during unlinking.
     pub fn clear(&self) -> Result<()> {
-        let transaction = self.connection.unchecked_transaction()?;
+        let transaction = Batch::begin(&self.connection)?;
         transaction.execute(
             "UPDATE history_capture_identity SET generation=generation+1 WHERE singleton=1",
             [],
         )?;
         transaction.execute("DELETE FROM captured_history", [])?;
         transaction.execute_batch(
-            "DELETE FROM call_log; DELETE FROM synced_call_log; DELETE FROM stickers; DELETE FROM media_jobs; DELETE FROM stars; DELETE FROM star_changes; DELETE FROM message_pins; DELETE FROM pin_notices; DELETE FROM outgoing_queue; DELETE FROM poll_history; DELETE FROM poll_votes; DELETE FROM polls; DELETE FROM group_receipts; DELETE FROM transcriptions; DELETE FROM messages; DELETE FROM motion_clips; DELETE FROM chats; DELETE FROM chat_removals; DELETE FROM message_removals; DELETE FROM pending_message_removals; DELETE FROM contacts; DELETE FROM meta; DELETE FROM lids; DELETE FROM drafts; DELETE FROM local_chat_labels; DELETE FROM local_labels; DELETE FROM removed_recent_stickers; DELETE FROM favorite_stickers; DELETE FROM favorites; DELETE FROM favorite_changes;",
+            "DELETE FROM call_log; DELETE FROM synced_call_log; DELETE FROM stickers; DELETE FROM media_jobs; DELETE FROM stars; DELETE FROM star_changes; DELETE FROM message_pins; DELETE FROM pin_notices; DELETE FROM outgoing_queue; DELETE FROM poll_history; DELETE FROM poll_votes; DELETE FROM polls; DELETE FROM group_receipts; DELETE FROM transcriptions; DELETE FROM messages; DELETE FROM motion_clips; DELETE FROM hd_copies; DELETE FROM chats; DELETE FROM chat_removals; DELETE FROM message_removals; DELETE FROM pending_message_removals; DELETE FROM contacts; DELETE FROM meta; DELETE FROM lids; DELETE FROM drafts; DELETE FROM local_chat_labels; DELETE FROM local_labels; DELETE FROM removed_recent_stickers; DELETE FROM favorite_stickers; DELETE FROM favorites; DELETE FROM favorite_changes;",
         )?;
         transaction.commit()
     }
@@ -3560,6 +3674,137 @@ pub(crate) mod tests {
             archive.chat(chat).unwrap().unwrap().last.unwrap().media,
             None
         );
+    }
+
+    pub(crate) fn set_message_insert_failure(archive: &super::Archive, fail: bool) {
+        archive
+            .connection
+            .execute_batch(if fail {
+                "CREATE TRIGGER reject_message_insert BEFORE INSERT ON messages BEGIN SELECT RAISE(ABORT, 'fixture failure'); END;"
+            } else {
+                "DROP TRIGGER IF EXISTS reject_message_insert"
+            })
+            .unwrap();
+    }
+
+    /// Makes filing the message `id` fail, as a full disk would.
+    pub(crate) fn reject_message(archive: &super::Archive, id: &str) {
+        archive
+            .connection
+            .execute_batch(&format!(
+                "CREATE TRIGGER reject_message BEFORE INSERT ON messages WHEN NEW.id = '{id}'
+                 BEGIN SELECT RAISE(ABORT, 'fixture failure'); END;"
+            ))
+            .unwrap();
+    }
+
+    /// Every row of the tables history fills, in insertion order, to tell
+    /// two archives apart.
+    pub(crate) fn dump(archive: &super::Archive) -> Vec<String> {
+        let mut rows = Vec::new();
+        for table in [
+            "chats",
+            "messages",
+            "contacts",
+            "group_receipts",
+            "lids",
+            "message_removals",
+            "pending_message_removals",
+            "chat_removals",
+            "meta",
+        ] {
+            let mut statement = archive
+                .connection
+                .prepare(&format!("SELECT * FROM {table} ORDER BY rowid"))
+                .unwrap();
+            let columns = statement.column_count();
+            let table_rows = statement
+                .query_map([], |row| {
+                    let values: Vec<rusqlite::types::Value> = (0..columns)
+                        .map(|column| row.get(column))
+                        .collect::<rusqlite::Result<_>>()?;
+                    Ok(format!("{table}: {values:?}"))
+                })
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap();
+            rows.extend(table_rows);
+        }
+        rows
+    }
+
+    #[test]
+    fn a_batch_commits_its_writes_together() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("batch.db");
+        let key = [7u8; 32];
+        let writer = Archive::open_encrypted_for_test(&path, &key).unwrap();
+        let reader = Archive::open_encrypted_for_test(&path, &key).unwrap();
+        let chat = "a@s.whatsapp.net";
+        writer.ensure_chat(chat, "A").unwrap();
+        assert_eq!(reader.count_messages_for_test().unwrap(), 0);
+
+        writer.begin_batch().unwrap();
+        assert!(writer.in_batch_for_test());
+        writer
+            .insert_message(&message(chat, "m1", 100, false), None)
+            .unwrap();
+        writer
+            .insert_message(&message(chat, "m2", 200, false), None)
+            .unwrap();
+        assert_eq!(writer.count_messages_for_test().unwrap(), 2);
+        assert_eq!(reader.count_messages_for_test().unwrap(), 0);
+
+        writer.end_batch().unwrap();
+        assert!(!writer.in_batch_for_test());
+        assert_eq!(reader.count_messages_for_test().unwrap(), 2);
+    }
+
+    #[test]
+    fn a_failed_step_inside_a_batch_rolls_back_alone() {
+        let archive = Archive::in_memory().unwrap();
+        let chat = "a@s.whatsapp.net";
+        archive.ensure_chat(chat, "A").unwrap();
+        archive.begin_batch().unwrap();
+        archive
+            .insert_message(&message(chat, "m1", 100, false), None)
+            .unwrap();
+        set_message_insert_failure(&archive, true);
+        assert!(
+            archive
+                .insert_message(&message(chat, "m2", 200, false), None)
+                .is_err()
+        );
+        set_message_insert_failure(&archive, false);
+        archive
+            .insert_message(&message(chat, "m3", 300, false), None)
+            .unwrap();
+        archive.end_batch().unwrap();
+        assert!(!archive.in_batch_for_test());
+        assert!(archive.message(chat, "m1").unwrap().is_some());
+        assert!(archive.message(chat, "m2").unwrap().is_none());
+        assert!(archive.message(chat, "m3").unwrap().is_some());
+    }
+
+    #[test]
+    fn a_batch_that_cannot_commit_leaves_no_transaction_open() {
+        let archive = Archive::in_memory().unwrap();
+        archive
+            .connection
+            .execute_batch(
+                "PRAGMA foreign_keys = ON;
+                 CREATE TABLE batch_parent (id INTEGER PRIMARY KEY);
+                 CREATE TABLE batch_child (parent_id INTEGER REFERENCES batch_parent(id) DEFERRABLE INITIALLY DEFERRED);",
+            )
+            .unwrap();
+        archive.begin_batch().unwrap();
+        assert!(archive.in_batch_for_test());
+        archive
+            .connection
+            .execute("INSERT INTO batch_child VALUES (999)", [])
+            .unwrap();
+        assert!(archive.end_batch().is_err());
+        assert!(!archive.in_batch_for_test());
     }
 
     pub(crate) fn set_archive_update_failure(archive: &super::Archive, fail: bool) {
@@ -5266,6 +5511,53 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn only_the_sender_of_a_video_gives_it_an_hd_copy() {
+        let archive = Archive::in_memory().expect("archive");
+        let chat = "group@g.us";
+        archive.ensure_chat(chat, "Group").expect("chat");
+        let mut video = message(chat, "video", 100, false);
+        video.sender = "alice@s.whatsapp.net".into();
+        video.content = Content::Video {
+            caption: None,
+            seconds: None,
+            gif: false,
+            note: false,
+            media: crate::model::Media {
+                album: None,
+                mime: "video/mp4".into(),
+                size: 1,
+                width: None,
+                height: None,
+                path: None,
+                state: crate::model::MediaState::Idle,
+            },
+        };
+        archive.insert_message(&video, None).expect("insert");
+        assert!(
+            archive
+                .put_hd_copy(chat, "video", "mallory@s.whatsapp.net", b"theirs")
+                .unwrap()
+        );
+        assert_eq!(archive.hd_copy(chat, "video").unwrap(), None);
+        assert!(
+            archive
+                .put_hd_copy(chat, "video", "alice@s.whatsapp.net", b"hers")
+                .unwrap()
+        );
+        assert_eq!(
+            archive.hd_copy(chat, "video").unwrap().as_deref(),
+            Some(&b"hers"[..])
+        );
+        archive.delete_message(chat, "video").expect("delete");
+        assert!(
+            !archive
+                .put_hd_copy(chat, "video", "alice@s.whatsapp.net", b"late")
+                .unwrap()
+        );
+        assert_eq!(archive.hd_copy(chat, "video").unwrap(), None);
+    }
+
+    #[test]
     fn only_the_sender_of_a_photo_gives_it_a_motion_clip() {
         let archive = Archive::in_memory().expect("archive");
         let chat = "group@g.us";
@@ -5405,6 +5697,9 @@ pub(crate) mod tests {
         archive
             .put_motion_clip(chat, "absent", chat, b"clip")
             .expect("motion clip");
+        archive
+            .put_hd_copy(chat, "absent", chat, b"hd")
+            .expect("hd copy");
         archive.set_unread(chat, 3).expect("unread");
         archive
             .connection
@@ -5428,9 +5723,10 @@ pub(crate) mod tests {
     }
 
     /// Every table keyed by chat besides `chats` itself.
-    const CHAT_TABLES: [&str; 8] = [
+    const CHAT_TABLES: [&str; 9] = [
         "messages",
         "motion_clips",
+        "hd_copies",
         "group_receipts",
         "polls",
         "poll_history",

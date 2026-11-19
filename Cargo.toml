@@ -61,11 +61,11 @@ skrifa = "0.44"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif"] }
 # WhatsApp Web protocol: pairing, encryption, history sync, and media. Includes
 # interleaved video FEC (#1789), video timed from capture (#1790), native relay
-# RTC alignment (#1847), caller-supplied dialer routing (#1849), and two pulled
+# RTC alignment (#1847), caller-supplied dialer routing (#1849), two pulled
 # offline batches per chat receive queue (#1814, #1823) so long catch-ups do
-# not overflow and stall. Device-store compatibility retains the legacy
-# created_at column.
-whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "e634d245f71d66e2ae55f79ef714c4ca01615ed8", default-features = false, features = ["sqlite-storage", "tokio-transport", "tokio-runtime", "ureq-client", "tokio-native", "voip"] }
+# not overflow and stall, and companion identity recovery (#1864-#1883; ZapFast #1052).
+# Device-store compatibility retains the legacy created_at column.
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "719f29498124acaede51c555c8f1c7a1c423fb3d", default-features = false, features = ["sqlite-storage", "tokio-transport", "tokio-runtime", "ureq-client", "tokio-native", "voip"] }
 tokio = { version = "=1.53.3", features = ["rt-multi-thread", "sync", "time", "macros", "fs", "net", "io-util"] }
 # Opens the WhatsApp WebSocket through a proxy. Both crates are already
 # included through the Tokio transport at these versions.
@@ -190,20 +190,22 @@ fastframe-update = { git = "https://github.com/crmne/fastframe", tag = "v0.5.1",
 # Focus on a widget without an accessibility node goes to the root
 # (emilk/egui#8621, the group rename crash in #313), glow falls back to a
 # compatibility-profile context on old Windows drivers (#349,
-# emilk/egui#8655), and a saved window size keeps its zoom factor so a window
-# no longer shrinks each time it reopens (#293, emilk/egui#8656).
+# emilk/egui#8655), a saved window size keeps its zoom factor so a window
+# no longer shrinks each time it reopens (#293, emilk/egui#8656), right-to-left
+# runs wrap in reading order (crmne/egui#2), and winit's `Ime::DeleteSurrounding`
+# reaches egui (crmne/egui#4) along with the Windows NVIDIA flicker fix (#945).
 # Every egui crate comes from the same revision so they share one emath and
 # epaint. Drop this once egui releases all three.
-ecolor = { git = "https://github.com/crmne/egui", rev = "ba6790fe7cf46e58e8d27ce1524cbfdee745e938" }
-eframe = { git = "https://github.com/crmne/egui", rev = "ba6790fe7cf46e58e8d27ce1524cbfdee745e938" }
-egui = { git = "https://github.com/crmne/egui", rev = "ba6790fe7cf46e58e8d27ce1524cbfdee745e938" }
-egui-wgpu = { git = "https://github.com/crmne/egui", rev = "ba6790fe7cf46e58e8d27ce1524cbfdee745e938" }
-egui-winit = { git = "https://github.com/crmne/egui", rev = "ba6790fe7cf46e58e8d27ce1524cbfdee745e938" }
-egui_extras = { git = "https://github.com/crmne/egui", rev = "ba6790fe7cf46e58e8d27ce1524cbfdee745e938" }
-egui_glow = { git = "https://github.com/crmne/egui", rev = "ba6790fe7cf46e58e8d27ce1524cbfdee745e938" }
-emath = { git = "https://github.com/crmne/egui", rev = "ba6790fe7cf46e58e8d27ce1524cbfdee745e938" }
-epaint = { git = "https://github.com/crmne/egui", rev = "ba6790fe7cf46e58e8d27ce1524cbfdee745e938" }
-epaint_default_fonts = { git = "https://github.com/crmne/egui", rev = "ba6790fe7cf46e58e8d27ce1524cbfdee745e938" }
+ecolor = { git = "https://github.com/crmne/egui", rev = "06da5ee2b57c16d5b2fb5240c7b22aaf305e1cfa" }
+eframe = { git = "https://github.com/crmne/egui", rev = "06da5ee2b57c16d5b2fb5240c7b22aaf305e1cfa" }
+egui = { git = "https://github.com/crmne/egui", rev = "06da5ee2b57c16d5b2fb5240c7b22aaf305e1cfa" }
+egui-wgpu = { git = "https://github.com/crmne/egui", rev = "06da5ee2b57c16d5b2fb5240c7b22aaf305e1cfa" }
+egui-winit = { git = "https://github.com/crmne/egui", rev = "06da5ee2b57c16d5b2fb5240c7b22aaf305e1cfa" }
+egui_extras = { git = "https://github.com/crmne/egui", rev = "06da5ee2b57c16d5b2fb5240c7b22aaf305e1cfa" }
+egui_glow = { git = "https://github.com/crmne/egui", rev = "06da5ee2b57c16d5b2fb5240c7b22aaf305e1cfa" }
+emath = { git = "https://github.com/crmne/egui", rev = "06da5ee2b57c16d5b2fb5240c7b22aaf305e1cfa" }
+epaint = { git = "https://github.com/crmne/egui", rev = "06da5ee2b57c16d5b2fb5240c7b22aaf305e1cfa" }
+epaint_default_fonts = { git = "https://github.com/crmne/egui", rev = "06da5ee2b57c16d5b2fb5240c7b22aaf305e1cfa" }
 # crmne/winit apps-0.30, shared with the same apps: winit 0.30.13 plus Wayland
 # `Occluded` for the xdg-shell suspended state with commits on the app's behalf
 # while it isn't presenting (rust-windowing/winit#4709, #4710), macOS Quit
@@ -213,8 +215,10 @@ epaint_default_fonts = { git = "https://github.com/crmne/egui", rev = "ba6790fe7
 # data device: Hyprland sends the clipboard only to a client's first data
 # device, so a second one stopped pasting (crmne/spotifast#614). A dropped
 # macOS window is ordered out before it closes, so a Touch Bar exception
-# cannot leave it on screen (#260, rust-windowing/winit#4728).
-winit = { git = "https://github.com/crmne/winit", rev = "ed7caa9023f10b397f5b6ec8284a840cbd8a6f65" }
+# cannot leave it on screen (#260, rust-windowing/winit#4728). Wayland
+# clipboard MIME bytes are read on that one data device (crmne/winit#7),
+# and macOS's accent picker replaces the typed character (crmne/winit#5).
+winit = { git = "https://github.com/crmne/winit", rev = "dc09323e032a405a8a165aeda9ceb48b3251cebd" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 zbus-secret-service-keyring-store = { version = "1.0.1", features = ["rt-tokio-crypto-rust"] }
@@ -225,6 +229,13 @@ zbus = { version = "5.19", default-features = false, features = ["blocking-api",
 # Reads the time locale's clock format.
 libc = "0.2"
 raw-window-handle = "0.6"
+# Keeps the clipboard pasteable once the window closes to the tray: the
+# selection belongs to winit's event loop, which eframe keeps for the next
+# window without dispatching it (see src/clipboard.rs). Pure Rust, no native
+# library.
+wl-clipboard-rs = "0.9"
+# Applies wayland-csd-adwaita to eframe's winit fork in [patch.crates-io].
+winit = { version = "0.30", default-features = false, features = ["wayland-csd-adwaita"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 apple-native-keyring-store = { version = "1.0.2", features = ["keychain"] }

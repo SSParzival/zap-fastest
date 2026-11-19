@@ -173,7 +173,7 @@ pub(super) fn rewrite(
     connection: &rusqlite::Connection,
     mut map: impl FnMut(&str) -> Result<String>,
 ) -> Result<()> {
-    let transaction = connection.unchecked_transaction()?;
+    let transaction = super::Batch::begin(connection)?;
     let mut statement = transaction.prepare("SELECT chat, id, content FROM messages WHERE EXISTS (SELECT 1 FROM json_tree(content) WHERE key = 'path' AND type = 'text')")?;
     let mut rows = statement.query([])?;
     while let Some(row) = rows.next()? {
@@ -236,7 +236,7 @@ impl Archive {
             ],
         )?;
         let exported = (|| -> Result<()> {
-            let transaction = self.connection.unchecked_transaction()?;
+            let transaction = super::Batch::begin(&self.connection)?;
             transaction.query_row("SELECT sqlcipher_export('portable_backup')", [], |_| Ok(()))?;
             for pragma in ["user_version", "application_id"] {
                 let value: i64 = transaction.pragma_query_value(None, pragma, |row| row.get(0))?;

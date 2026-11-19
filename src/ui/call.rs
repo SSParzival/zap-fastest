@@ -337,15 +337,21 @@ fn control_row(app: &mut App, ui: &mut egui::Ui, width: f32, controls: Vec<CallC
             .map(|(_, label, _, _)| control_height(ui, width, label))
             .fold(44.0_f32, f32::max);
         for (icon, label, tone, action) in controls {
-            if control_sized(
-                ui,
-                &app.palette,
-                egui::vec2(width, height),
-                icon,
-                &label,
-                tone,
-            )
-            .clicked()
+            let enabled = !matches!(action, Action::AnswerCall | Action::AnswerVideoCall)
+                || !app.call_being_answered();
+            if ui
+                .add_enabled_ui(enabled, |ui| {
+                    control_sized(
+                        ui,
+                        &app.palette,
+                        egui::vec2(width, height),
+                        icon,
+                        &label,
+                        tone,
+                    )
+                })
+                .inner
+                .clicked()
             {
                 app.actions.push(action);
             }
@@ -470,7 +476,14 @@ fn control_sized(
         palette.text,
         (width - if compact { 32.0 } else { 0.0 }).max(1.0),
     );
-    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+    let (rect, response) = ui.allocate_exact_size(
+        size,
+        if ui.is_enabled() {
+            egui::Sense::click()
+        } else {
+            egui::Sense::hover()
+        },
+    );
     theme::reveal_focus(&response);
     #[cfg(test)]
     ui.ctx().data_mut(|data| {
@@ -495,7 +508,14 @@ fn control_sized(
         ),
         ControlTone::Neutral => (palette.surface, palette.surface_hover),
     };
-    let fill = if response.hovered() { hover } else { fill };
+    let enabled = ui.is_enabled();
+    let fill = if enabled && response.hovered() {
+        hover
+    } else if enabled {
+        fill
+    } else {
+        fill.gamma_multiply(0.5)
+    };
     let foreground = if matches!(tone, ControlTone::Neutral) {
         palette.text
     } else if theme::contrast(fill, egui::Color32::BLACK)
@@ -504,6 +524,11 @@ fn control_sized(
         egui::Color32::BLACK
     } else {
         egui::Color32::WHITE
+    };
+    let foreground = if enabled {
+        foreground
+    } else {
+        foreground.gamma_multiply(0.5)
     };
     let circle = egui::Rect::from_center_size(
         egui::pos2(rect.center().x, rect.top() + 24.0),
@@ -554,7 +579,11 @@ fn control_sized(
             );
         }
     }
-    response.on_hover_cursor(egui::CursorIcon::PointingHand)
+    if enabled {
+        response.on_hover_cursor(egui::CursorIcon::PointingHand)
+    } else {
+        response
+    }
 }
 
 fn display_name(app: &App, ui: &egui::Ui, chat: &str, style: egui::TextStyle) -> String {
@@ -911,6 +940,8 @@ fn minimized_call(
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 8.0;
                 for (icon, label, tone, action) in call_controls(app.locale, call) {
+                    let enabled = !matches!(action, Action::AnswerCall | Action::AnswerVideoCall)
+                        || !app.call_being_answered();
                     let color = if matches!(tone, ControlTone::Danger) {
                         app.palette.danger
                     } else if matches!(tone, ControlTone::Selected) {
@@ -918,8 +949,18 @@ fn minimized_call(
                     } else {
                         app.palette.text
                     };
-                    let response =
-                        theme::icon_button(ui, icon, 32.0, color, app.palette.accent_hover, &label);
+                    let response = ui
+                        .add_enabled_ui(enabled, |ui| {
+                            theme::icon_button(
+                                ui,
+                                icon,
+                                32.0,
+                                color,
+                                app.palette.accent_hover,
+                                &label,
+                            )
+                        })
+                        .inner;
                     #[cfg(test)]
                     ctx.data_mut(|data| {
                         data.insert_temp(

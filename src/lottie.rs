@@ -141,7 +141,19 @@ fn bounded_document(json: &str) -> Option<()> {
 
 /// Rasterize at most `requested` frames. One requested frame is the poster;
 /// the shared animation cache only requests the rest during actual playback.
+#[cfg(test)]
 pub(crate) fn decode(path: &Path, requested: usize) -> Option<Vec<(ColorImage, Duration)>> {
+    decode_at(path, requested, MAX_OUTPUT_SIDE)
+}
+
+/// Like [`decode`], rasterized no larger than `side` pixels (at most
+/// [`MAX_OUTPUT_SIDE`]) on its longer edge.
+pub(crate) fn decode_at(
+    path: &Path,
+    requested: usize,
+    side: f32,
+) -> Option<Vec<(ColorImage, Duration)>> {
+    let side = side.clamp(1.0, MAX_OUTPUT_SIDE);
     if requested == 0 {
         return None;
     }
@@ -167,7 +179,7 @@ pub(crate) fn decode(path: &Path, requested: usize) -> Option<Vec<(ColorImage, D
     // The prepared renderer caches tessellation and reusable layer geometry.
     // Repreparing each frame would be expensive for complicated stickers.
     let prepared = Renderer::default().prepare(&animation).ok()?;
-    let scale = (MAX_OUTPUT_SIDE / animation.width.max(animation.height) as f32).min(1.0);
+    let scale = (side / animation.width.max(animation.height) as f32).min(1.0);
     let config = RenderConfig::new(Rgba8::TRANSPARENT, scale);
     let fps = animation.frame_rate.min(MAX_FPS);
     let count = ((seconds * fps).ceil() as usize)

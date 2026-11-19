@@ -20,13 +20,13 @@ use std::time::Duration;
 
 /// Image URIs kept resident. Anything the current frame drew is always kept,
 /// so this only bounds what has scrolled away.
-const RESIDENT: usize = 256;
+const RESIDENT: usize = 96;
 
 /// The most texture memory the resident images may take, in bytes. On a Mac
 /// the GPU shares the system's memory, so this is memory the app is seen to
 /// use. A window full of pictures fits many times over. Anything the current
 /// frame drew is always kept.
-const BUDGET: usize = 128 * 1024 * 1024;
+const BUDGET: usize = 48 * 1024 * 1024;
 
 /// How long the window may go without input before the images it is not
 /// showing are let go, whatever `RESIDENT` and `BUDGET` would keep: scrolling
@@ -253,6 +253,11 @@ pub fn sweep(ctx: &egui::Context) {
         }
         stale
     };
+    if !stale.is_empty() {
+        // One more frame a moment later, whose device poll hands the freed
+        // textures back to the system instead of holding them while idle.
+        ctx.request_repaint_after(Duration::from_millis(300));
+    }
     for uri in stale {
         ctx.forget_image(&uri);
     }
@@ -311,7 +316,10 @@ enum Fit {
 const SIDES: [u32; 8] = [128, 192, 256, 384, 512, 768, 1024, 1536];
 
 /// The longest a fitted picture's longer edge is, so a panorama stays small.
-const LONGEST: u32 = 4096;
+const LONGEST: u32 = 2048;
+
+/// The longest a [`fit_uri_pixels`] picture's longer edge may be.
+pub const VIEWER_LONGEST: u32 = 4096;
 
 /// A URI for the picture at `path`, decoded no larger than it is drawn at
 /// `size` points on this display, and registered as drawn this frame: large
@@ -330,7 +338,7 @@ pub fn fit_uri(ctx: &egui::Context, path: &Path, size: egui::Vec2) -> String {
 /// first draws the picture, so a shelf of stickers would otherwise stall the
 /// window when the picker opens.
 pub fn fit_still_uri(ctx: &egui::Context, path: &Path, size: egui::Vec2) -> String {
-    let side = step(size.x.max(size.y) * ctx.pixels_per_point());
+    let side = sticker_step(size.x.max(size.y) * ctx.pixels_per_point());
     fitted(ctx, path, true, |file| format!("{FIT}{side}/{file}{STILL}"))
 }
 
@@ -344,6 +352,59 @@ pub fn fit_uri_within(ctx: &egui::Context, path: &Path, bounds: egui::Vec2) -> S
     fitted(ctx, path, false, |file| {
         format!("{FIT}{width}x{height}/{file}")
     })
+}
+
+/// Like [`fit_uri_within`], for a picture a viewer draws at an exact pixel
+/// size (already stepped by the caller): wholly within `width` by `height`
+/// pixels, decoded up to [`VIEWER_LONGEST`] on its longer edge instead of
+/// `LONGEST`. The photo viewer asks for the window's size and, once zoomed,
+/// for more, so it never holds a texture bigger than what it paints.
+pub fn fit_uri_pixels(ctx: &egui::Context, path: &Path, width: u32, height: u32) -> String {
+    let (width, height) = (
+        width.clamp(1, VIEWER_LONGEST),
+        height.clamp(1, VIEWER_LONGEST),
+    );
+    fitted(ctx, path, false, |file| {
+        format!("{FIT}{width}x{height}/{file}")
+    })
+}
+
+/// Forgets exactly the picture `uri` names, leaving the other pictures made
+/// of the same file (a bubble's) alone.
+pub fn forget_exact(ctx: &egui::Context, uri: &str) {
+    {
+        let registry = registry(ctx);
+        let mut entries = registry.0.lock().unwrap_or_else(|p| p.into_inner());
+        entries.remove(uri);
+    }
+    ctx.forget_image(uri);
+}
+
+/// Like [`fit_uri`], for a profile picture: small steps from 64 px, so a
+/// 20 to 48 point avatar takes 16 to 64 KB of texture rather than the 128 px
+/// floor photos keep. The info panel's large portrait steps up to 256.
+pub fn fit_avatar_uri(ctx: &egui::Context, path: &Path, size: egui::Vec2) -> String {
+    let side = avatar_step(size.x.max(size.y) * ctx.pixels_per_point());
+    fitted(ctx, path, false, |file| format!("{FIT}{side}/{file}"))
+}
+
+/// The side an avatar of `pixels` is decoded at: 64, 96, then [`step`]'s.
+fn avatar_step(pixels: f32) -> u32 {
+    let wanted = pixels.ceil() as u32;
+    [64, 96]
+        .into_iter()
+        .find(|side| *side >= wanted)
+        .unwrap_or_else(|| step(pixels))
+}
+
+/// The side a still sticker of `pixels` is decoded at: 96, then [`step`]'s, so
+/// a 40 point tile holds 36 KB of texture instead of a 128 px floor's 64 KB.
+fn sticker_step(pixels: f32) -> u32 {
+    if pixels.ceil() as u32 <= 96 {
+        96
+    } else {
+        step(pixels)
+    }
 }
 
 /// The side in [`SIDES`] at or above `pixels`, or the largest.
@@ -436,7 +497,13 @@ fn decode_fitted(path: &Path, fit: Fit) -> Result<egui::ColorImage, String> {
             (f64::from(across) / f64::from(width)).min(f64::from(down) / f64::from(height))
         }
     };
-    let scale = scale.min(f64::from(LONGEST) / f64::from(long)).min(1.0);
+    // A viewer's exact pixel size (above what bubbles use) lifts the cap to
+    // its own longer edge, never past `VIEWER_LONGEST`.
+    let cap = match fit {
+        Fit::Within(across, down) => LONGEST.max(across.max(down)).min(VIEWER_LONGEST),
+        Fit::Cover(_) => LONGEST,
+    };
+    let scale = scale.min(f64::from(cap) / f64::from(long)).min(1.0);
     let picture = if scale < 1.0 {
         let fitted = |edge: u32| ((f64::from(edge) * scale).round() as u32).max(1);
         picture.thumbnail_exact(fitted(width), fitted(height))
@@ -858,6 +925,26 @@ mod tests {
         assert!(used(&ctx) > BUDGET - 8 * 1024 * 1024, "kept too little");
     }
 
+    #[test]
+    fn avatars_step_from_64_pixels_and_photos_keep_their_floor() {
+        assert_eq!(avatar_step(40.0), 64);
+        assert_eq!(avatar_step(64.0), 64);
+        assert_eq!(avatar_step(96.0), 96);
+        assert_eq!(avatar_step(97.0), 128);
+        assert_eq!(avatar_step(240.0), 256);
+        assert_eq!(step(40.0), 128, "photo tiles keep the 128 floor");
+    }
+
+    #[test]
+    fn still_stickers_step_from_96_never_past_what_is_drawn() {
+        assert_eq!(sticker_step(40.0), 96);
+        assert_eq!(sticker_step(96.0), 96);
+        assert_eq!(sticker_step(97.0), 128);
+        assert_eq!(sticker_step(120.0), 128);
+        assert_eq!(sticker_step(300.0), 384);
+        assert_eq!(sticker_step(512.0), 512);
+    }
+
     /// Draws `shown` and then sweeps, the way a frame of the app does.
     fn draw(ctx: &egui::Context, shown: &[String]) -> egui::FullOutput {
         ctx.run_ui(egui::RawInput::default(), |ui| {
@@ -989,12 +1076,12 @@ mod tests {
             "a WebP that may move keeps egui's loader"
         );
         let still = fit_still_uri(&ctx, sticker, egui::vec2(60.0, 60.0));
-        assert_eq!(still, format!("fit://128/{file}?still"));
+        assert_eq!(still, format!("fit://96/{file}?still"));
         assert!(
             !still.ends_with(".webp"),
             "egui must not ask for it frame by frame"
         );
-        assert_eq!(parse_fit(&still), Some((Fit::Cover(128), file.as_str())));
+        assert_eq!(parse_fit(&still), Some((Fit::Cover(96), file.as_str())));
         // Lossy with an alpha channel, as WhatsApp's stickers are.
         let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/demo/stickers/cat.webp");
         let image = decode_fitted(&path, Fit::Cover(128)).expect("decoded");

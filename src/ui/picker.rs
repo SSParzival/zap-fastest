@@ -10,6 +10,7 @@ use egui::{
 };
 
 use crate::app::App;
+use crate::emoji;
 use crate::i18n::gettext;
 use crate::model::{Action, Dialog, PickerTab, StickerPack, StickerShelf};
 use crate::theme::{self, Icon, Palette};
@@ -33,7 +34,36 @@ enum Row {
     },
 }
 
+/// The sticker tiles the picker drew, as file and drawn size, so closing it
+/// can let their textures and frames go.
+#[derive(Clone, Default)]
+struct PickerLoaded(std::collections::HashSet<(PathBuf, [u32; 2])>);
+
+fn loaded_id() -> egui::Id {
+    egui::Id::new("picker-loaded-stickers")
+}
+
+/// Forgets every texture and animation frame the sticker tab loaded. The
+/// driver keeps the high-water mark of GPU memory, so a shelf of 512 px
+/// stickers must not outlive the panel.
+fn release_stickers(ctx: &egui::Context) {
+    let Some(loaded) = ctx.data_mut(|data| data.remove_temp::<PickerLoaded>(loaded_id())) else {
+        return;
+    };
+    let mut paths = Vec::with_capacity(loaded.0.len());
+    for (path, [width, height]) in loaded.0 {
+        let size = vec2(width as f32, height as f32);
+        let uri = crate::image_cache::fit_still_uri(ctx, &path, size);
+        crate::image_cache::forget_exact(ctx, &uri);
+        paths.push(path);
+    }
+    crate::animation::forget_many(ctx, &paths);
+}
+
 pub fn show(app: &mut App, ctx: &egui::Context) {
+    if app.picker != Some(PickerTab::Stickers) || app.reaction_target.is_some() {
+        release_stickers(ctx);
+    }
     if app.picker == Some(PickerTab::Emoji) && app.reaction_target.is_none() {
         if app.picker_recent.is_none() {
             app.picker_recent = Some(app.settings.recent_emoji.clone());
@@ -163,7 +193,7 @@ fn group_name(group: emojis::Group) -> &'static str {
 fn usable_recent(recent: &[String]) -> Vec<&'static str> {
     recent
         .iter()
-        .filter_map(|emoji| emojis::get(emoji).map(|emoji| emoji.as_str()))
+        .filter_map(|emoji| emoji::lookup(emoji).map(|emoji| emoji.as_str()))
         .collect()
 }
 
@@ -181,7 +211,7 @@ pub fn first_page(recent: &[String]) -> Vec<&'static str> {
         .chain(
             usable_recent(recent)
                 .into_iter()
-                .chain(emojis::iter().map(|emoji| emoji.as_str()))
+                .chain(emoji::catalogue().map(|emoji| emoji.as_str()))
                 .take(FIRST_PAGE),
         )
         .collect()
@@ -207,7 +237,7 @@ fn rows_for(
         }
     };
     if !query.is_empty() {
-        let found: Vec<&'static str> = emojis::iter()
+        let found: Vec<&'static str> = emoji::catalogue()
             .filter(|emoji| {
                 emoji.name().to_lowercase().contains(&query)
                     || emoji
@@ -232,7 +262,11 @@ fn rows_for(
         rows.push(Row::Header(group_name(group)));
         chunk(
             &mut rows,
-            group.emojis().map(|emoji| emoji.as_str()).collect(),
+            group
+                .emojis()
+                .filter(|emoji| emoji::offered(emoji))
+                .map(|emoji| emoji.as_str())
+                .collect(),
         );
     }
     rows
@@ -378,7 +412,7 @@ fn emoji_tab(app: &mut App, ui: &mut egui::Ui, palette: &Palette) {
         .as_ref()
         .unwrap_or(&app.settings.recent_emoji)
         .iter()
-        .any(|emoji| emojis::get(emoji).is_some());
+        .any(|emoji| emoji::lookup(emoji).is_some());
     category_tabs(app, ui, palette, "emoji-grid", "Recent", has_recent);
 }
 
@@ -508,7 +542,7 @@ fn reaction_picker(app: &mut App, ctx: &egui::Context) {
                                     .settings
                                     .reaction_emoji
                                     .iter()
-                                    .any(|(emoji, _)| emojis::get(emoji).is_some());
+                                    .any(|(emoji, _)| emoji::lookup(emoji).is_some());
                                 category_tabs(
                                     app,
                                     ui,
@@ -1646,6 +1680,16 @@ fn sticker_grid(
     labels.extend(grid.local.iter().map(|pack| pack.name.as_str()));
     let menu_width = widgets::menu_width(ui, &labels, true);
     for row in stickers.chunks(columns) {
+        // A row more than one row away from the scroll's clip is only given
+        // its space: no tile, texture or decode until it is about to show.
+        let near = ui
+            .clip_rect()
+            .expand2(vec2(0.0, cell + gap))
+            .intersects(Rect::from_min_size(ui.cursor().min, vec2(1.0, cell)));
+        if !near && Some(&row[0]) != stickers.first() {
+            ui.allocate_space(vec2(ui.available_width(), cell));
+            continue;
+        }
         ui.horizontal(|ui| {
             for path in row {
                 let (rect, response) = ui.allocate_exact_size(Vec2::splat(cell), Sense::click());
@@ -1654,6 +1698,14 @@ fn sticker_grid(
                         .data_mut(|data| data.insert_temp(first_tile_id(), rect));
                 }
                 paint_tile(ui, palette, path, rect, response.hovered(), animate);
+                if ui.is_rect_visible(rect) {
+                    let shown = rect.shrink(4.0).size();
+                    ui.ctx().data_mut(|data| {
+                        data.get_temp_mut_or_default::<PickerLoaded>(loaded_id())
+                            .0
+                            .insert((path.clone(), [shown.x as u32, shown.y as u32]));
+                    });
+                }
                 egui::Popup::context_menu(&response)
                     .width(menu_width)
                     .frame(widgets::menu_frame(palette))

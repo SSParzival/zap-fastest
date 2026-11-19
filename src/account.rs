@@ -29,6 +29,8 @@ pub struct Account {
     pub sync_percent: Option<u32>,
     pub call: Option<crate::calls::CallUpdate>,
     pub call_preparing: bool,
+    /// The incoming call (by generation) whose Accept was clicked on this account.
+    pub call_answering: Option<u64>,
     pub(crate) pending_call_request: Option<crate::calls::CallRequest>,
     pub call_devices: crate::calls::DeviceList,
     pub call_records: Vec<crate::archive::CallRecord>,
@@ -204,6 +206,7 @@ impl Account {
             sync_percent: None,
             call: None,
             call_preparing: false,
+            call_answering: None,
             pending_call_request: None,
             call_devices: Default::default(),
             call_records: Vec::new(),
@@ -430,6 +433,8 @@ impl Account {
 }
 
 fn resolve_wallpaper_path(dirs: &AccountDirs, settings: &mut AccountSettings) {
+    // A chat's own picture whose file has gone falls back to the account's.
+    settings.chat_wallpapers.retain(|_, path| path.exists());
     if settings
         .wallpaper_image
         .as_ref()

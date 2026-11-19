@@ -14,7 +14,7 @@ END;
 
 impl Archive {
     pub fn request_archived(&self, chat: &str, archived: bool, now: i64) -> Result<()> {
-        let tx = self.connection.unchecked_transaction()?;
+        let tx = super::Batch::begin(&self.connection)?;
         let previous: Option<i64> = tx
             .query_row(
                 "SELECT archive_updated_at FROM chats WHERE id=?1",
@@ -48,7 +48,7 @@ impl Archive {
     }
 
     pub fn finish_archive_change(&self, chat: &str, at: i64) -> Result<()> {
-        let tx = self.connection.unchecked_transaction()?;
+        let tx = super::Batch::begin(&self.connection)?;
         let desired: Option<bool> = tx
             .query_row(
                 "SELECT archived FROM archive_changes WHERE chat=?1 AND requested_at=?2",

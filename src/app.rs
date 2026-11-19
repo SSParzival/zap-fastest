@@ -169,7 +169,7 @@ const VOICE_FETCH_HOLD: Duration = Duration::from_secs(10);
 /// rebuilds it once.
 const ATLAS_SETTLE: Duration = Duration::from_secs(2);
 /// How long the window stays unfocused before the font atlas is rebuilt.
-const ATLAS_IDLE: Duration = Duration::from_secs(5 * 60);
+const ATLAS_IDLE: Duration = Duration::from_secs(60);
 
 /// What `App::follow_font_atlas` has seen of the scale and of the window's
 /// focus, to know when the font atlas has gathered glyphs nobody draws now.
@@ -479,6 +479,8 @@ const SEARCH_DEBOUNCE: Duration = Duration::ZERO;
 pub struct App {
     pub dirs: AppDirs,
     pub settings: Settings,
+    /// Reads through the current window's native clipboard when available.
+    clipboard_reader: ClipboardReader,
     /// Resolved interface language, from the setting or the system locale.
     pub locale: Locale,
     settings_dirty: bool,
@@ -1101,6 +1103,10 @@ const TRAY_SHOW: &str = "show";
 const TRAY_LOCK: &str = "lock";
 const TRAY_QUIT: &str = "quit";
 
+/// How long quitting waits for the accounts' runtimes to finish their
+/// work and disconnect.
+const QUIT_WAIT: Duration = Duration::from_secs(10);
+
 /// Whether the tray's `Event::Show` is a click on the tray icon, which should
 /// toggle the window as Linux's left click does. Windows only: on macOS it is
 /// a Dock click, which only ever shows it.
@@ -1351,6 +1357,7 @@ impl App {
         let mut app = Self {
             dirs,
             settings,
+            clipboard_reader: ClipboardReader::default(),
             locale,
             settings_dirty: false,
             last_settings_save: Instant::now(),
@@ -2232,6 +2239,15 @@ impl App {
         self.window_focused = false;
         self.hide_intent = false;
         self.wants_show = false;
+        // Wayland's clipboard belongs to the client that made the selection,
+        // and this one stops answering for it with its window: eframe keeps
+        // the event loop for the next window without dispatching it, so other
+        // apps would wait for their own timeout on a paste. Hand the text to
+        // a source that keeps serving it (see `crate::clipboard`).
+        #[cfg(target_os = "linux")]
+        if let Some(clipboard) = self.clipboard_reader.wayland.take() {
+            crate::clipboard::keep_after_window(clipboard);
+        }
     }
 
     /// What the conversation shows behind its bubbles, for the chat and the
@@ -2247,13 +2263,31 @@ impl App {
             doodles: self.settings.show_wallpaper
                 && self.palette.bubbles != crate::theme::BubbleStyle::Messages,
             image: self
-                .account()
-                .settings
-                .wallpaper_image
+                .wallpaper_path()
                 .is_some()
                 .then(|| self.wallpaper_image.ready())
                 .flatten(),
         }
+    }
+
+    /// The wallpaper picture on screen: the open chat's own, else the
+    /// account's. One is decoded at a time, so a split's other pane shows
+    /// the open chat's too.
+    pub fn wallpaper_path(&self) -> Option<&std::path::Path> {
+        let settings = &self.account().settings;
+        self.open_chat
+            .as_deref()
+            .and_then(|chat| settings.chat_wallpapers.get(chat))
+            .or(settings.wallpaper_image.as_ref())
+            .map(std::path::PathBuf::as_path)
+    }
+
+    /// Whether the active account's incoming call on screen is being answered:
+    /// Accept was clicked and the call is not up yet.
+    pub fn call_being_answered(&self) -> bool {
+        self.call
+            .as_ref()
+            .is_some_and(|call| self.account().call_answering == Some(call.generation))
     }
 
     /// Whether window close keeps the app in the tray.
@@ -2786,6 +2820,17 @@ impl App {
                 .quoted
                 .as_ref()
                 .is_some_and(|quoted| is_us(&quoted.sender))
+    }
+
+    /// Binds attachment paste to the new window's existing Wayland data device.
+    #[cfg(target_os = "linux")]
+    pub fn attach_clipboard(&mut self, display: Option<raw_window_handle::RawDisplayHandle>) {
+        self.clipboard_reader.wayland = match display {
+            Some(raw_window_handle::RawDisplayHandle::Wayland(display)) => {
+                winit::platform::wayland::Clipboard::for_display(display.display)
+            }
+            _ => None,
+        };
     }
 
     /// Initializes a newly created window.
@@ -3969,6 +4014,9 @@ impl App {
                         .is_none_or(|old| old.generation != update.generation);
                 let chat = update.chat.clone();
                 let finished = !update.phase.is_live();
+                if update.phase != crate::calls::CallPhase::Incoming {
+                    self.call_answering = None;
+                }
                 self.call = Some(*update);
                 if finished {
                     self.backend.send(Command::LoadCallLog);
@@ -4006,7 +4054,10 @@ impl App {
                     );
                 }
             }
-            Event::CallDismissed => self.call = None,
+            Event::CallDismissed => {
+                self.call = None;
+                self.call_answering = None;
+            }
             Event::CallPreparing(preparing) => {
                 self.call_preparing = preparing
                     && !self
@@ -4015,6 +4066,7 @@ impl App {
                         .is_some_and(|request| request.is_cancelled());
                 if !preparing {
                     self.pending_call_request = None;
+                    self.call_answering = None;
                 }
             }
             Event::CallDevices(devices) => self.call_devices = *devices,
@@ -4845,6 +4897,28 @@ impl App {
             Event::WallpaperImagePicked(Err(error)) => {
                 let message = crate::i18n::gettext(self.locale, "Could not use this image");
                 self.toast_error(format!("{message}: {error}"));
+            }
+            Event::ChatWallpaperPicked {
+                chat,
+                result: Ok(path),
+            } => {
+                self.account_mut()
+                    .settings
+                    .chat_wallpapers
+                    .insert(chat, path);
+                self.account_mut().mark_settings_dirty();
+                if live {
+                    // The copy may keep the earlier one's name: decode it anew.
+                    self.wallpaper_image.reload();
+                }
+            }
+            Event::ChatWallpaperPicked {
+                result: Err(error), ..
+            } => {
+                if live {
+                    let message = crate::i18n::gettext(self.locale, "Could not use this image");
+                    self.toast_error(format!("{message}: {error}"));
+                }
             }
             Event::NotificationSoundPicked { mention, path } => {
                 if live {
@@ -7543,7 +7617,11 @@ impl App {
                                 .is_some_and(|call| call.phase.is_answered()))
                 }) {
                     self.toast_error("Finish the current call first");
-                } else {
+                } else if let Some(call) = &self.call
+                    && self.account().call_answering != Some(call.generation)
+                {
+                    let generation = call.generation;
+                    self.account_mut().call_answering = Some(generation);
                     self.backend.send(Command::AnswerCall);
                 }
             }
@@ -7558,7 +7636,11 @@ impl App {
                                 .is_some_and(|call| call.phase.is_answered()))
                 }) {
                     self.toast_error("Finish the current call first");
-                } else {
+                } else if let Some(call) = &self.call
+                    && self.account().call_answering != Some(call.generation)
+                {
+                    let generation = call.generation;
+                    self.account_mut().call_answering = Some(generation);
                     self.backend.send(Command::AnswerVideoCall);
                 }
             }
@@ -9893,6 +9975,20 @@ impl App {
                 crate::wallpaper::forget_image(ctx);
                 self.backend.send(Command::RemoveWallpaperImage);
             }
+            Action::PickChatWallpaper(chat) => self.backend.send(Command::PickChatWallpaper(chat)),
+            Action::RemoveChatWallpaper(chat) => {
+                if self
+                    .account_mut()
+                    .settings
+                    .chat_wallpapers
+                    .remove(&chat)
+                    .is_some()
+                {
+                    self.account_mut().mark_settings_dirty();
+                }
+                crate::wallpaper::forget_image(ctx);
+                self.backend.send(Command::RemoveChatWallpaper(chat));
+            }
             Action::ReloadThemes => self.load_custom_themes(),
             Action::OpenThemesFolder => {
                 let directory = self.dirs.config.join("themes");
@@ -10851,7 +10947,7 @@ impl App {
         }
         self.handle_control_commands();
         self.poll_custom_themes();
-        let wallpaper = self.account().settings.wallpaper_image.clone();
+        let wallpaper = self.wallpaper_path().map(std::path::Path::to_path_buf);
         self.wallpaper_image.sync(wallpaper.as_deref(), &self.waker);
         self.handle_notification_opens();
         self.handle_events();
@@ -11901,6 +11997,7 @@ impl App {
             self.stage_clipboard(ctx, ClipboardPaste::Files(dropped));
         }
         // Tests inject fixtures and must never read the system clipboard.
+        let clipboard = self.clipboard_reader.clone();
         self.take_clipboard_paste(ctx, || {
             if cfg!(test) {
                 clipboard_contents(
@@ -11920,7 +12017,7 @@ impl App {
                     },
                 )
             } else {
-                clipboard_contents(clipboard_files, clipboard_image)
+                clipboard_contents(|| clipboard.files(), || clipboard.image())
             }
         });
     }
@@ -12163,8 +12260,13 @@ impl App {
         if self.media_hold.take().is_some() {
             crate::media_pause::settle(Duration::from_secs(2));
         }
+        // Every account stops at once, and none holds quitting up for good.
         for account in &mut self.accounts {
-            account.backend.shutdown();
+            account.backend.request_shutdown();
+        }
+        let deadline = Instant::now() + QUIT_WAIT;
+        for account in &mut self.accounts {
+            account.backend.wait_for_shutdown(deadline);
         }
     }
 
@@ -12278,6 +12380,109 @@ enum ClipboardPaste {
         height: usize,
         rgba: Vec<u8>,
     },
+}
+
+#[derive(Clone, Default)]
+struct ClipboardReader {
+    #[cfg(target_os = "linux")]
+    wayland: Option<winit::platform::wayland::Clipboard>,
+}
+
+impl ClipboardReader {
+    fn files(&self) -> Option<Vec<PathBuf>> {
+        #[cfg(target_os = "linux")]
+        if let Some(clipboard) = &self.wayland {
+            return match clipboard.load_bytes("text/uri-list") {
+                Ok(bytes) => native_clipboard_files(&bytes).ok(),
+                Err(error) => {
+                    log::debug!("native clipboard file list failed: {error}");
+                    None
+                }
+            };
+        }
+        clipboard_files()
+    }
+
+    fn image(&self) -> Option<(usize, usize, Vec<u8>)> {
+        #[cfg(target_os = "linux")]
+        if let Some(clipboard) = &self.wayland {
+            return match clipboard.load_bytes("image/png") {
+                Ok(bytes) => native_clipboard_image(&bytes).ok(),
+                Err(error) => {
+                    log::debug!("native clipboard image failed: {error}");
+                    None
+                }
+            };
+        }
+        clipboard_image()
+    }
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn native_clipboard_files(bytes: &[u8]) -> Result<Vec<PathBuf>, String> {
+    let text = std::str::from_utf8(bytes)
+        .map_err(|_| "the clipboard's file list is not UTF-8".to_owned())?;
+    Ok(text
+        .lines()
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .filter_map(|line| {
+            let url = reqwest::Url::parse(line).ok()?;
+            if url.host_str().is_some_and(|host| host != "localhost") {
+                return None;
+            }
+            url.to_file_path().ok()
+        })
+        .collect())
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn native_clipboard_image(bytes: &[u8]) -> Result<(usize, usize, Vec<u8>), String> {
+    let image = image::load_from_memory_with_format(bytes, image::ImageFormat::Png)
+        .map_err(|error| error.to_string())?
+        .to_rgba8();
+    Ok((
+        image.width() as usize,
+        image.height() as usize,
+        image.into_raw(),
+    ))
+}
+
+#[cfg(test)]
+mod native_clipboard_tests {
+    use super::*;
+
+    #[test]
+    fn a_native_png_keeps_dimensions_alpha_and_pixels() {
+        let pixels = vec![17, 34, 51, 255, 90, 80, 70, 64];
+        let image = image::RgbaImage::from_raw(2, 1, pixels.clone()).unwrap();
+        let mut encoded = std::io::Cursor::new(Vec::new());
+        image
+            .write_to(&mut encoded, image::ImageFormat::Png)
+            .unwrap();
+        assert_eq!(
+            native_clipboard_image(encoded.get_ref()).unwrap(),
+            (2, 1, pixels)
+        );
+        assert!(native_clipboard_image(b"not a PNG").is_err());
+    }
+
+    #[test]
+    fn native_file_uris_decode_escaped_names_and_keep_file_precedence() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("clipboard photo ✓.png");
+        std::fs::write(&path, b"fixture").unwrap();
+        let uri = reqwest::Url::from_file_path(&path).unwrap();
+        let bytes = format!(
+            "# copied files\r\n{uri}\r\n\r\nhttps://example.com/image.png\r\nfile://remote/share/image.png\r\n"
+        );
+        let contents = clipboard_contents(
+            || native_clipboard_files(bytes.as_bytes()).ok(),
+            || panic!("a copied file must win over its offered icon"),
+        )
+        .unwrap();
+        assert!(matches!(contents, ClipboardPaste::Files(paths) if paths == [path]));
+        assert!(native_clipboard_files(b"\xff").is_err());
+    }
 }
 
 /// Prefers the clipboard's file list over its picture: Finder, Explorer and
@@ -13105,6 +13310,76 @@ mod tests {
             );
             app.apply_backend_event(Event::CallPreparing(false), true);
             assert!(app.pending_call_request.is_none());
+        }
+    }
+
+    /// Answering takes seconds while the call keeps ringing on screen: Accept is disabled and a
+    /// second click sends nothing, so it cannot reach the call it just answered (#1024).
+    #[test]
+    fn accept_is_sent_once_per_call() {
+        for action in [Action::AnswerCall, Action::AnswerVideoCall] {
+            let mut app = app();
+            let (backend, mut commands) = crate::backend::Backend::recording();
+            app.backend = backend;
+            let ctx = egui::Context::default();
+            let update = |generation, phase| crate::calls::CallUpdate {
+                video_starting: false,
+                video_requested: matches!(action, Action::AnswerVideoCall),
+                video_active: false,
+                video_view: None,
+                generation,
+                chat: "15550000001@s.whatsapp.net".to_owned(),
+                direction: crate::model::CallDirection::Incoming,
+                phase,
+                started: None,
+                muted: false,
+                outcome: None,
+                peer_audio: None,
+                audio_processing_failed: false,
+                lost_devices: Vec::new(),
+                microphone: None,
+                speaker: None,
+            };
+            let drain = |commands: &mut tokio::sync::mpsc::UnboundedReceiver<Command>| {
+                let mut sent = Vec::new();
+                while let Ok(command) = commands.try_recv() {
+                    sent.push(command);
+                }
+                sent
+            };
+            let answers = |commands: Vec<Command>| {
+                commands
+                    .into_iter()
+                    .filter(|command| {
+                        matches!(command, Command::AnswerCall | Command::AnswerVideoCall)
+                    })
+                    .count()
+            };
+            app.apply_backend_event(
+                Event::Call(Box::new(update(1, crate::calls::CallPhase::Incoming))),
+                true,
+            );
+            assert!(!app.call_being_answered());
+            app.apply(action.clone(), &ctx);
+            assert!(
+                app.call_being_answered(),
+                "Accept is disabled while answering"
+            );
+            app.apply(action.clone(), &ctx);
+            assert_eq!(answers(drain(&mut commands)), 1);
+            // The next call is answered afresh.
+            app.apply_backend_event(
+                Event::Call(Box::new(update(1, crate::calls::CallPhase::Ended))),
+                true,
+            );
+            app.apply_backend_event(Event::CallDismissed, true);
+            app.apply_backend_event(
+                Event::Call(Box::new(update(2, crate::calls::CallPhase::Incoming))),
+                true,
+            );
+            assert!(!app.call_being_answered());
+            app.apply(action, &ctx);
+            assert_eq!(answers(drain(&mut commands)), 1);
         }
     }
 
@@ -15863,6 +16138,26 @@ mod tests {
         assert_eq!(app.settings.dark_wallpaper_color, dark_color);
         assert_eq!(app.settings.wallpaper_color, light_color);
         assert!(app.settings_dirty);
+    }
+
+    #[test]
+    fn a_chats_own_wallpaper_overrides_the_accounts_while_it_is_open() {
+        let mut app = app();
+        let global = std::path::PathBuf::from("wallpaper.png");
+        let own = std::path::PathBuf::from("chat-wallpapers/own.png");
+        app.account_mut().settings.wallpaper_image = Some(global.clone());
+        app.account_mut()
+            .settings
+            .chat_wallpapers
+            .insert("a@s.whatsapp.net".into(), own.clone());
+        app.open_chat = Some("a@s.whatsapp.net".into());
+        assert_eq!(app.wallpaper_path(), Some(own.as_path()));
+        app.open_chat = Some("b@s.whatsapp.net".into());
+        assert_eq!(app.wallpaper_path(), Some(global.as_path()));
+        app.account_mut().settings.wallpaper_image = None;
+        assert_eq!(app.wallpaper_path(), None);
+        app.open_chat = Some("a@s.whatsapp.net".into());
+        assert_eq!(app.wallpaper_path(), Some(own.as_path()));
     }
 
     fn local_pack(name: &str, dir: &str) -> StickerPack {

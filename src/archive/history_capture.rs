@@ -59,7 +59,7 @@ impl HistoryCapture {
         // Check the identity and write under one transaction. An old owner can
         // either commit before logout (which clears it) or fail after logout,
         // but cannot publish into the next identity's archive.
-        let transaction = connection.unchecked_transaction()?;
+        let transaction = super::Batch::begin(connection)?;
         ensure!(
             Self::generation(&transaction)? == generation,
             "History capture belongs to a previous account session"
@@ -124,11 +124,11 @@ impl HistorySyncCaptureHook for HistoryCapture {
 
 impl Archive {
     pub fn has_account_data(&self) -> super::Result<bool> {
-        self.connection.query_row("SELECT EXISTS(SELECT 1 FROM chats UNION ALL SELECT 1 FROM messages UNION ALL SELECT 1 FROM contacts UNION ALL SELECT 1 FROM captured_history UNION ALL SELECT 1 FROM stickers UNION ALL SELECT 1 FROM lids UNION ALL SELECT 1 FROM motion_clips UNION ALL SELECT 1 FROM call_log UNION ALL SELECT 1 FROM synced_call_log UNION ALL SELECT 1 FROM polls UNION ALL SELECT 1 FROM poll_votes UNION ALL SELECT 1 FROM favorites UNION ALL SELECT 1 FROM favorite_stickers UNION ALL SELECT 1 FROM meta WHERE key='me_pn')", [], |row| row.get(0))
+        self.connection.query_row("SELECT EXISTS(SELECT 1 FROM chats UNION ALL SELECT 1 FROM messages UNION ALL SELECT 1 FROM contacts UNION ALL SELECT 1 FROM captured_history UNION ALL SELECT 1 FROM stickers UNION ALL SELECT 1 FROM lids UNION ALL SELECT 1 FROM motion_clips UNION ALL SELECT 1 FROM hd_copies UNION ALL SELECT 1 FROM call_log UNION ALL SELECT 1 FROM synced_call_log UNION ALL SELECT 1 FROM polls UNION ALL SELECT 1 FROM poll_votes UNION ALL SELECT 1 FROM favorites UNION ALL SELECT 1 FROM favorite_stickers UNION ALL SELECT 1 FROM meta WHERE key='me_pn')", [], |row| row.get(0))
     }
     /// Keep this intent until both the archive and account-private files are gone.
     pub fn require_account_cleanup(&self) -> super::Result<()> {
-        let transaction = self.connection.unchecked_transaction()?;
+        let transaction = super::Batch::begin(&self.connection)?;
         transaction.execute(
             "UPDATE account_cleanup SET required=1 WHERE singleton=1",
             [],

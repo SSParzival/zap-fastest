@@ -998,6 +998,9 @@ pub struct AccountSettings {
     pub focus_mentions: bool,
     /// First label in the label manager with an override wins overlaps.
     pub label_sounds: std::collections::BTreeMap<String, NotificationSound>,
+    /// Chats with a picture of their own as wallpaper, by chat id, each
+    /// this account's copy of the image.
+    pub chat_wallpapers: std::collections::BTreeMap<String, std::path::PathBuf>,
 }
 
 impl Default for AccountSettings {
@@ -1035,6 +1038,7 @@ impl Default for AccountSettings {
             focus_labels: Vec::new(),
             focus_mentions: true,
             label_sounds: Default::default(),
+            chat_wallpapers: Default::default(),
         }
     }
 }
@@ -1083,6 +1087,7 @@ impl AccountSettings {
             focus_labels: Vec::new(),
             focus_mentions: true,
             label_sounds: Default::default(),
+            chat_wallpapers: Default::default(),
         }
     }
 

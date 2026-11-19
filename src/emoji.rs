@@ -18,6 +18,30 @@ pub use fastframe_emoji::{PLACEHOLDER, only_emoji};
 /// Noto Color Emoji, behind the platform's font.
 const BUNDLED: &[u8] = include_bytes!("../assets/fonts/NotoColorEmoji.ttf");
 
+/// The newest emoji version the bundled font draws in full (Noto Color
+/// Emoji 2.057 has Emoji 18.0). Raise it with the font: a test checks that
+/// the font draws every emoji up to it.
+const BUNDLED_VERSION: emojis::EmojiVersion = emojis::EmojiVersion::new(18, 0);
+
+/// Whether ZapFastest offers this emoji in its pickers and completions. The
+/// bundled font is asked last on every platform, so an emoji it draws has a
+/// picture everywhere; one the `emojis` list knows before the font does
+/// would show as an empty box, so it is left out.
+pub fn offered(emoji: &emojis::Emoji) -> bool {
+    emoji.emoji_version() <= BUNDLED_VERSION
+}
+
+/// Every emoji ZapFastest offers, in the `emojis` list's order.
+pub fn catalogue() -> impl Iterator<Item = &'static emojis::Emoji> + Clone {
+    emojis::iter().filter(|emoji| offered(emoji))
+}
+
+/// The emoji `text` names, when ZapFastest offers it: what a saved recent or
+/// frequent emoji is checked against before a picker shows it.
+pub fn lookup(text: &str) -> Option<&'static emojis::Emoji> {
+    emojis::get(text).filter(|emoji| offered(emoji))
+}
+
 fn setup_for(renderer: crate::settings::EmojiRenderer) -> fastframe_emoji::EmojiSetup {
     fastframe_emoji::EmojiSetup::default()
         .system(renderer == crate::settings::EmojiRenderer::System)
@@ -151,6 +175,32 @@ mod tests {
     fn system_choice_keeps_bundled_noto_as_a_fallback() {
         let emoji = setup_for(crate::settings::EmojiRenderer::System).load();
         assert!(format!("{emoji:?}").contains("bundled"));
+    }
+
+    /// Every emoji a picker offers has the bundled font's own picture: not
+    /// nothing, and not the first part of a sequence the font can't join.
+    #[test]
+    fn the_bundled_font_draws_every_offered_emoji() {
+        let emoji = bundled();
+        let mut missing = Vec::new();
+        for offered in catalogue() {
+            let text = offered.as_str();
+            let picture = emoji.render(text, 16);
+            let parts = text.chars().filter(|c| *c != '\u{FE0F}').count();
+            let first: String = text.chars().take(1).collect();
+            if picture.is_none() || (parts > 1 && picture == emoji.render(&first, 16)) {
+                missing.push(format!("{text} {}", offered.name()));
+            }
+        }
+        assert!(missing.is_empty(), "the bundled font lacks {missing:?}");
+    }
+
+    #[test]
+    fn the_newest_emoji_are_offered() {
+        let newest = lookup("\u{1FAEA}").expect("an Emoji 17.0 face is offered");
+        assert!(newest.emoji_version() <= BUNDLED_VERSION);
+        assert_eq!(newest.emoji_version(), emojis::EmojiVersion::new(17, 0));
+        assert!(lookup("not an emoji").is_none());
     }
 
     #[test]

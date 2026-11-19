@@ -151,7 +151,7 @@ impl Archive {
         expires_at: i64,
         by: &Pinner,
     ) -> Result<bool> {
-        let tx = self.connection.unchecked_transaction()?;
+        let tx = super::Batch::begin(&self.connection)?;
         let changed = self.connection.execute(
             "INSERT INTO message_pins (chat, id, pinned, pinned_at, changed_at, expires_at, by_me, sender)
              VALUES (?1, ?2, ?3, ?4/1000, ?4, ?5, ?6, ?7)

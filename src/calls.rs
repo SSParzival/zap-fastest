@@ -10,9 +10,13 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use anyhow::{Result, anyhow};
+
+/// How long a call may ring here with no word of how it ended. WhatsApp stops ringing an
+/// unanswered call well within this, so a call still ringing past it lost its ending.
+pub const RING_LIMIT: Duration = Duration::from_secs(120);
 
 use crate::model::CallDirection;
 use whatsapp_rust::prelude::{Client, Jid};
@@ -436,6 +440,8 @@ pub struct Call {
     chat: String,
     direction: CallDirection,
     phase: CallPhase,
+    /// When the call was made or began ringing here, on the monotonic clock.
+    rang: Instant,
     started: Option<Instant>,
     outcome: Option<CallOutcome>,
     peer_audio: Option<PeerAudio>,
@@ -567,6 +573,7 @@ impl Call {
             chat,
             direction: CallDirection::Outgoing,
             phase: CallPhase::Dialing,
+            rang: Instant::now(),
             started: None,
             outcome: None,
             peer_audio: None,
@@ -602,6 +609,7 @@ impl Call {
             chat,
             direction: CallDirection::Incoming,
             phase: CallPhase::Incoming,
+            rang: Instant::now(),
             started: None,
             outcome: None,
             peer_audio: None,
@@ -634,6 +642,7 @@ impl Call {
             chat: chat.to_owned(),
             direction: CallDirection::Incoming,
             phase: CallPhase::Incoming,
+            rang: Instant::now(),
             started: None,
             outcome: None,
             peer_audio: None,
@@ -650,6 +659,22 @@ impl Call {
             speaker_device: None,
             lost_devices: Vec::new(),
         }
+    }
+
+    /// An incoming call this side has already picked up, for a test: the offer is spent, the way
+    /// [`Call::answer_mode`] leaves it.
+    #[cfg(test)]
+    pub(crate) fn test_answered(chat: &str) -> Self {
+        Self {
+            phase: CallPhase::Accepted,
+            ..Self::test_snapshot(chat)
+        }
+    }
+
+    /// Whether there is an offer to answer: an incoming call nobody has picked up yet. Answering
+    /// spends the offer, so a call already answered has none.
+    pub fn answerable(&self) -> bool {
+        self.incoming.is_some()
     }
 
     /// The WhatsApp call id, which is how signaling for this call is told from any other's.
@@ -682,6 +707,7 @@ impl Call {
             chat: self.chat.clone(),
             direction: self.direction,
             phase: self.phase,
+            rang: self.rang,
             started: None,
             outcome: None,
             peer_audio: None,
@@ -1000,6 +1026,36 @@ impl Call {
         self.handle = None;
         self.incoming = None;
         log::info!("call state updated");
+    }
+
+    /// Whether a call ringing here has rung longer than [`RING_LIMIT`]: the stanza that ended it
+    /// never arrived, lost to a dropped connection or a missed event, and it is over all the same.
+    pub fn ring_lapsed(&self, now: Instant) -> bool {
+        self.phase == CallPhase::Incoming && now.saturating_duration_since(self.rang) > RING_LIMIT
+    }
+
+    /// Puts a call's ring `ago` in the past, for tests of what a long ring does.
+    #[cfg(test)]
+    pub fn rang_ago(&mut self, ago: Duration) {
+        self.rang = Instant::now() - ago;
+    }
+
+    /// Ends a call whose ring lapsed (see [`Call::ring_lapsed`]) as a missed call.
+    ///
+    /// Left alone, it would hold the account's one call slot for good, and every later offer would
+    /// be refused as busy: the caller hears one ring and the call drops, until ZapFastest restarts.
+    pub fn lapse_ring(&mut self) -> Option<CallUpdate> {
+        if self.phase != CallPhase::Incoming {
+            return None;
+        }
+        log::warn!(
+            "[CALL] the ring lapsed with no word of its end call_id={}",
+            self.call_id
+        );
+        self.phase = CallPhase::Failed;
+        self.outcome = Some(CallOutcome::Missed);
+        self.cleanup();
+        Some(self.update())
     }
 
     /// Applies one signaling stanza, when it belongs to this call.
@@ -2004,6 +2060,7 @@ mod tests {
             chat: PEER.to_owned(),
             direction: CallDirection::Outgoing,
             phase: CallPhase::Dialing,
+            rang: Instant::now(),
             started: None,
             outcome: None,
             peer_audio: None,
@@ -2104,6 +2161,58 @@ mod tests {
         let update = call.signaling(&accept()).expect("the peer answered");
         assert_eq!(update.phase, CallPhase::Active);
         assert!(update.started.is_some());
+    }
+
+    #[test]
+    fn only_a_call_still_ringing_can_be_answered() {
+        let incoming = IncomingCall::builder()
+            .from(creator())
+            .stanza_id("stanza-1".to_owned())
+            .offline(false)
+            .action(CallAction::Offer {
+                call_id: CALL_ID.to_owned(),
+                call_creator: creator(),
+                caller_pn: None,
+                caller_country_code: None,
+                device_class: None,
+                joinable: false,
+                is_video: false,
+                audio: Vec::new(),
+                group_jid: None,
+            })
+            .build();
+        let call = Call::ringing(PEER.to_owned(), Box::new(incoming), CallDevices::default());
+        assert!(call.answerable(), "an offer nobody picked up yet");
+        // Answering spends the offer, so a second Accept finds nothing to answer.
+        assert!(!Call::test_answered(PEER).answerable());
+    }
+
+    #[test]
+    fn a_ring_that_outlives_any_offer_ends_as_a_missed_call() {
+        let mut call = dialing();
+        call.direction = CallDirection::Incoming;
+        call.phase = CallPhase::Incoming;
+        let rang = call.rang;
+        assert!(
+            !call.ring_lapsed(rang + RING_LIMIT),
+            "still within the ring"
+        );
+        assert!(
+            call.ring_lapsed(rang + RING_LIMIT + Duration::from_secs(1)),
+            "rang past any offer"
+        );
+
+        let update = call.lapse_ring().expect("the lapsed ring ends");
+        assert_eq!(update.phase, CallPhase::Failed);
+        assert_eq!(update.outcome, Some(CallOutcome::Missed));
+        assert!(
+            call.lapse_ring().is_none(),
+            "an ended call does not end twice"
+        );
+
+        // Only a call ringing here lapses: one we placed or one that is up runs as long as it runs.
+        let placed = dialing();
+        assert!(!placed.ring_lapsed(placed.rang + RING_LIMIT * 10));
     }
 
     #[test]

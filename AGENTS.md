@@ -120,6 +120,12 @@ metadata stays in place until replacement assets have been published.
   migration checkpoints the old WAL and verifies an encrypted staging file before
   atomic replacement. A locked or missing key stops linking; never fall back to
   a disposable archive. Tests use fixtures and mock credentials only.
+  Each history chunk, and each run of runtime events already queued (up to
+  `EVENT_BATCH` or `EVENT_BATCH_TIME`), commits once (`Archive::begin_batch`):
+  committed write by write, a first sync wrote fifteen times the archive's
+  size (#839). Archive transactions are `archive::Batch`es, savepoints that
+  nest inside such a batch, never `unchecked_transaction` on the worker's
+  connection. `write_batching::history_write_bench` (ignored) measures it.
 - `src/model.rs` holds the app's own types. Views never touch a protobuf;
   the worker translates in `classify()` and `parse_conversation()`.
 - A motion photo is a photo plus a short clip sent as a second message in an
@@ -211,7 +217,13 @@ metadata stays in place until replacement assets have been published.
   platform's picture over it afterwards (Apple Color Emoji, Segoe UI Emoji
   through DirectWrite, or the desktop's bitmap emoji font, with the bundled
   Noto behind them). New pictures are drawn on its worker thread; tests and
-  demo builds draw them inside the frame. The interface font is the
+  demo builds draw them inside the frame. Pickers and `:` completions list
+  emoji through `emoji::catalogue` / `emoji::lookup`, which stop at the
+  bundled font's emoji version (`BUNDLED_VERSION`), so an `emojis` update
+  never offers an emoji no font draws; when updating
+  `assets/fonts/NotoColorEmoji.ttf` (the CBDT build from googlefonts/noto-emoji,
+  not COLRv1), raise it, and a test checks the font draws every offered emoji.
+  The interface font is the
   platform's own (`fastframe_fonts::Primary::System`), and Inter in tests.
   fastframe-emoji's `EmojiPlugin` (added in `App::attach`) colours the
   emoji in every other egui text: labels, menus, tooltips, text fields. It
@@ -367,7 +379,9 @@ metadata stays in place until replacement assets have been published.
   `StickerMetadata`, fetched when the picker opens. Favourite stickers sync
   both ways through `FavoriteStickerUpdate` and `schemas::FAVORITE_STICKER`;
   `backend/worker/stickers.rs` and `archive/stickers.rs` retain pending local
-  changes and recover favourites synced before support was added.
+  changes and recover favourites synced before support was added. When the
+  picker closes or switches tabs, `picker::release_stickers` drops cached
+  sticker textures and animators so off-screen sheets do not hold GPU memory.
 - `src/paths.rs` moves a setup left by the app's earlier name
   (`fastsapp`, then `fastwhatsapp`) over once, so the linked device survives
   the rename. Migration runs after the single-instance guard and outside demos;
@@ -536,11 +550,14 @@ A release is not finished when the tag is pushed. Do these in order:
    Run the full checks, commit, and push `main`. Before tagging, verify the
    release commit is reachable from the fork's public main so the binaries report the
    right version and the release contains the canonical history.
-2. Tag `vX.Y.Z` and push the tag. Wait for every platform build, artifact,
-   and `checksums.txt`.
-3. Upload the screenshots to the release as assets with the names the notes
-   link, then open the published release and check the text, every image,
-   and every download link. Never leave generated placeholder notes.
+2. Before committing or tagging, verify locally that `cargo test` and
+   `cargo build --locked --release` exit 0. Then commit, tag `vX.Y.Z`, and
+   push `main` and the tag. Do not wait for or poll GitHub Actions workflows
+   for this or any future release; leave the release workflows running on
+   GitHub.
+3. Once a release workflow finishes asynchronously on GitHub (never polled in
+   the release turn), upload any screenshot assets referenced by the release
+   notes or verify links if needed. Never leave generated placeholder notes.
 4. After the release files exist, update both `zapfast_version` in
    `docs/_config.yml` and the version menu in `docs/_data/versions.yml`.
    The menu lists only the current version, which points to `/download/`,

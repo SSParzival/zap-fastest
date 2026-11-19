@@ -1824,6 +1824,12 @@ fn row(app: &mut App, ui: &mut egui::Ui, chat: &Chat) -> egui::Response {
 
         let left = rect.left() + 76.0;
         let right = rect.right() - 14.0;
+        let divider = if selected || response.hovered() {
+            0.0
+        } else {
+            1.0
+        };
+        widgets::row_divider(ui, &palette, rect, left, divider);
         let stamp = if chat.last_activity > 0 {
             crate::util::chat_stamp(app.locale, chat.last_activity)
         } else {
@@ -1972,8 +1978,14 @@ fn row(app: &mut App, ui: &mut egui::Ui, chat: &Chat) -> egui::Response {
             if let Some(media) = last.media
                 && badge_right - x >= 22.0
             {
+                let (icon, missed) = preview_media_icon(media);
+                let color = if missed {
+                    palette.danger
+                } else {
+                    preview_color
+                };
                 let rect = Rect::from_min_size(pos2(x, line_y), Vec2::splat(16.0));
-                theme::paint_icon(ui, preview_media_icon(media), rect, 14.0, preview_color);
+                theme::paint_icon(ui, icon, rect, 14.0, color);
                 x += 20.0;
             }
             let words = widgets::line(
@@ -2562,15 +2574,23 @@ fn unread_announcement(title: &str, chat: &Chat) -> String {
     }
 }
 
-fn preview_media_icon(media: crate::model::PreviewMedia) -> Icon {
+fn preview_media_icon(media: crate::model::PreviewMedia) -> (Icon, bool) {
     use crate::model::PreviewMedia;
     match media {
-        PreviewMedia::Image => Icon::Image,
-        PreviewMedia::Video => Icon::Video,
-        PreviewMedia::Audio => Icon::Music,
-        PreviewMedia::Voice => Icon::Mic,
-        PreviewMedia::Document => Icon::FileText,
-        PreviewMedia::Sticker => Icon::Sticker,
+        PreviewMedia::Image => (Icon::Image, false),
+        PreviewMedia::Gif => (Icon::Gif, false),
+        PreviewMedia::Video => (Icon::Video, false),
+        PreviewMedia::Audio => (Icon::Music, false),
+        PreviewMedia::Voice => (Icon::Mic, false),
+        PreviewMedia::Document => (Icon::FileText, false),
+        PreviewMedia::Sticker => (Icon::Sticker, false),
+        PreviewMedia::Location => (Icon::MapPin, false),
+        PreviewMedia::Contact => (Icon::Contact, false),
+        PreviewMedia::Poll => (Icon::ListChecks, false),
+        PreviewMedia::CallVoice => (Icon::Phone, false),
+        PreviewMedia::CallVideo => (Icon::Video, false),
+        PreviewMedia::CallVoiceMissed => (Icon::PhoneOff, true),
+        PreviewMedia::CallVideoMissed => (Icon::Video, true),
     }
 }
 
@@ -3599,5 +3619,83 @@ mod tests {
         let center = compact_badge_center(avatar);
         assert!(center.x + width / 2.0 <= rail.right(), "{width} too wide");
         assert!(center.y - 10.0 >= rail.top(), "the badge fits its cell");
+    }
+
+    #[test]
+    fn preview_glyph_follows_the_kind_of_message() {
+        use crate::model::{Content, OnceMedia};
+        let call = |video, outcome: &str| Content::Call {
+            video,
+            outcome: outcome.to_owned(),
+            seconds: None,
+        };
+        assert_eq!(
+            call(false, "Missed")
+                .preview_media()
+                .map(preview_media_icon),
+            Some((Icon::PhoneOff, true))
+        );
+        assert_eq!(
+            call(true, "Missed").preview_media().map(preview_media_icon),
+            Some((Icon::Video, true))
+        );
+        assert_eq!(
+            call(false, "Connected")
+                .preview_media()
+                .map(preview_media_icon),
+            Some((Icon::Phone, false))
+        );
+        assert_eq!(
+            Content::Location {
+                latitude: 0.0,
+                longitude: 0.0,
+                name: None,
+                address: None,
+            }
+            .preview_media()
+            .map(preview_media_icon),
+            Some((Icon::MapPin, false))
+        );
+        assert_eq!(
+            Content::Poll {
+                question: String::new(),
+                options: Vec::new(),
+                state: Default::default(),
+            }
+            .preview_media()
+            .map(preview_media_icon),
+            Some((Icon::ListChecks, false))
+        );
+        assert_eq!(
+            Content::Video {
+                caption: None,
+                media: crate::model::Media {
+                    mime: "video/mp4".into(),
+                    size: 1,
+                    width: None,
+                    height: None,
+                    album: None,
+                    path: None,
+                    state: Default::default(),
+                },
+                seconds: None,
+                gif: true,
+                note: false,
+            }
+            .preview_media()
+            .map(preview_media_icon),
+            Some((Icon::Gif, false))
+        );
+        assert_eq!(
+            Content::PhoneOnly {
+                view_once: true,
+                live_location: false,
+                once: Some(OnceMedia::Photo),
+            }
+            .preview_media()
+            .map(preview_media_icon),
+            Some((Icon::Image, false))
+        );
+        assert_eq!(Content::Revoked.preview_media(), None);
     }
 }
