@@ -37,6 +37,9 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="0.37.0" date="2026-11-27">
+      <url>https://github.com/SSParzival/zap-fastest/releases/tag/v0.37.0</url>
+    </release>
     <release version="0.36.0" date="2026-11-19">
       <url>https://github.com/SSParzival/zap-fastest/releases/tag/v0.36.0</url>
     </release>
