@@ -4,7 +4,7 @@ pkgname=zap-fastest-bin
 pkgver=@VERSION@
 pkgrel=@PKGREL@
 pkgdesc="Fast native WhatsApp client built with Rust and egui"
-arch=('x86_64' 'aarch64')
+arch=('x86_64')
 url="https://github.com/SSParzival/zap-fastest"
 license=('MIT' 'GPL-2.0-only')
 install="${pkgname}.install"
@@ -22,17 +22,10 @@ replaces=('zap-faster-bin')
 options=('!debug' '!strip')
 _repo="https://github.com/SSParzival/zap-fastest"
 source_x86_64=("${_repo}/releases/download/v${pkgver}/zap-fastest-v${pkgver}-x86_64-unknown-linux-gnu.tar.gz")
-source_aarch64=("${_repo}/releases/download/v${pkgver}/zap-fastest-v${pkgver}-aarch64-unknown-linux-gnu.tar.gz")
 sha256sums_x86_64=('@AMD64_SHA256@')
-sha256sums_aarch64=('@ARM64_SHA256@')
 
 package() {
-  local target
-  case "$CARCH" in
-    x86_64) target="x86_64-unknown-linux-gnu" ;;
-    aarch64) target="aarch64-unknown-linux-gnu" ;;
-  esac
-  local dir="${srcdir}/zap-fastest-v${pkgver}-${target}"
+  local dir="${srcdir}/zap-fastest-v${pkgver}-x86_64-unknown-linux-gnu"
 
   install -Dm755 "${dir}/zap-fastest" "${pkgdir}/usr/bin/zap-fastest"
   install -Dm644 "${dir}/LICENSE" "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"

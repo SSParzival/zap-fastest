@@ -8,7 +8,7 @@ arch=('x86_64' 'aarch64')
 url="https://github.com/SSParzival/zap-fastest"
 license=('MIT' 'GPL-2.0-only')
 install="${pkgname}.install"
-depends=('alsa-lib' 'alsa-plugins' 'libglvnd' 'libxkbcommon' 'libxkbcommon-x11' 'wayland' 'libx11' 'libxcb' 'libxcursor' 'libxi' 'libxrandr')
+depends=('alsa-lib' 'alsa-plugins' 'libglvnd' 'libwebp' 'libxkbcommon' 'libxkbcommon-x11' 'wayland' 'libx11' 'libxcb' 'libxcursor' 'libxi' 'libxrandr')
 makedepends=('git' 'cargo' 'cmake' 'clang' 'perl')
 optdepends=('org.freedesktop.secrets: archive encryption key storage'
             'noto-fonts-emoji: colour emoji in messages and reactions'

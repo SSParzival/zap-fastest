@@ -5,7 +5,6 @@ edition = "2024"
 rust-version = "1.98"
 license = "MIT"
 description = "ZapFastest, a native WhatsApp client built with Rust and egui."
-homepage = "https://github.com/SSParzival/zap-fastest"
 repository = "https://github.com/SSParzival/zap-fastest"
 keywords = ["whatsapp", "chat", "egui", "messaging"]
 categories = ["gui"]

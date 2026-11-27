@@ -9,7 +9,6 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  CXXFLAGS_aarch64_pc_windows_msvc: /EHsc
   # Baked into the binary by settings.rs; releases built without the
   # secret simply ship keyless and the picker asks for one.
   ZAPFAST_GIPHY_KEY: ${{ secrets.ZAPFAST_GIPHY_KEY || secrets.FASTSAPP_GIPHY_KEY }}
@@ -31,42 +30,18 @@ jobs:
           fi
 
   build:
-    name: build (${{ matrix.target }})
+    name: build (x86_64-unknown-linux-gnu)
     needs: release-source
     permissions:
       contents: read
       id-token: write
       attestations: write
-    runs-on: ${{ matrix.os }}
-    # Linux builds run in Debian 12: the binary needs the glibc it was built
-    # against or newer (2.36), and bookworm's libpipewire (0.3.65) meets the
-    # PipeWire output's 0.3.53, which Ubuntu 22.04's does not. The packages
-    # install on Debian 12, Ubuntu 22.10, Fedora 37 and newer. Windows rows
-    # leave it empty and run on the host.
-    container: ${{ matrix.container }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-24.04
-            target: x86_64-unknown-linux-gnu
-            container: debian:12
-          # A native arm64 runner, so the GUI's system libraries need no
-          # cross-compilation sysroot.
-          - os: ubuntu-24.04-arm
-            target: aarch64-unknown-linux-gnu
-            container: debian:12
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-          # Cross-compiled from x64: the MSVC arm64 linker ships with the
-          # runner's Visual Studio.
-          - os: windows-latest
-            target: aarch64-pc-windows-msvc
+    runs-on: ubuntu-24.04
+    # Built in Debian 12 so the binary links against glibc 2.36 and statically
+    # embeds libwebp, keeping it portable across CachyOS/Arch rolling updates.
+    container: debian:12
     steps:
-      # Before checkout and rustup: the bare image has no curl, git or
-      # certificates. Steps run as root, without sudo.
       - name: GUI build dependencies
-        if: runner.os == 'Linux'
         run: |
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
@@ -81,244 +56,104 @@ jobs:
           test "$GITHUB_REF_NAME" = "v$version"
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
-      # The repository pins its toolchain; add the cross-target's standard
-      # library to the toolchain the pin actually resolves to.
-      - run: rustup target add ${{ matrix.target }}
-      - name: Configure Windows ARM compiler
-        if: matrix.target == 'aarch64-pc-windows-msvc'
-        shell: bash
-        run: |
-          # whisper.cpp deliberately rejects MSVC's ARM backend. Keep the MSVC
-          # ABI while compiling its native code with the hosted LLVM toolchain.
-          echo CMAKE_GENERATOR=Ninja >> "$GITHUB_ENV"
-          echo CC_aarch64_pc_windows_msvc=clang-cl >> "$GITHUB_ENV"
-          echo CXX_aarch64_pc_windows_msvc=clang-cl >> "$GITHUB_ENV"
+          targets: x86_64-unknown-linux-gnu
+      - run: rustup target add x86_64-unknown-linux-gnu
       # No compiler cache: published binaries never build from outputs
       # restored from an Actions cache.
-      - run: cargo build --locked --release --target ${{ matrix.target }}
+      - run: cargo build --locked --release --target x86_64-unknown-linux-gnu
 
       - name: Package
         shell: bash
         run: |
-          name="zap-fastest-${GITHUB_REF_NAME}-${{ matrix.target }}"
+          name="zap-fastest-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu"
           mkdir -p "dist/$name"
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            cp "target/${{ matrix.target }}/release/zap-fastest.exe" "dist/$name/zap-fastest.exe"
-          else
-            cp "target/${{ matrix.target }}/release/zap-fastest" "dist/$name/zap-fastest"
-          fi
+          cp "target/x86_64-unknown-linux-gnu/release/zap-fastest" "dist/$name/zap-fastest"
           cp README.md LICENSE THIRD-PARTY-NOTICES.md packaging/zap-fastest-portable.txt "dist/$name/"
-          if [ "${{ runner.os }}" = "Linux" ]; then
-            # Desktop integration for package builds and hand-installs.
-            cp --parents packaging/applications/zap-fastest.desktop packaging/icons/zap-fastest.svg contrib/omarchy/zap-fastest.json.tpl contrib/omarchy/zap-fastest-theme "dist/$name/"
-          fi
+          cp --parents packaging/applications/zap-fastest.desktop packaging/icons/zap-fastest.svg \
+            contrib/omarchy/zap-fastest.json.tpl contrib/omarchy/zap-fastest-theme "dist/$name/"
           cd dist
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            7z a "$name.zip" "$name"
-          else
-            tar czf "$name.tar.gz" "$name"
-          fi
+          tar czf "$name.tar.gz" "$name"
 
-      # Inno Setup ships with the runner image. PowerShell, because bash on
-      # Windows rewrites /D... arguments as paths.
-      - name: Installer
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $version = $env:GITHUB_REF_NAME.TrimStart("v")
-          $arch = "${{ matrix.target }}".Split("-")[0]
-          $iscc = (Get-Command iscc -ErrorAction SilentlyContinue).Source
-          if (-not $iscc) { $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
-          $numericVersion = $version.Split("-")[0]
-          & $iscc "/DVersion=$version" "/DNumericVersion=$numericVersion" "/DArch=$arch" `
-            "/DBinary=$PWD\target\${{ matrix.target }}\release\zap-fastest.exe" `
-            "/DOutputDir=$PWD\dist" packaging\windows\zap-fastest.iss
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-      # The Windows Installer package, which replaces the setup program
-      # above once every install has updated through one release carrying
-      # both.
-      - uses: ruby/setup-ruby@v1
-        if: runner.os == 'Windows'
-        with:
-          ruby-version: '4.0'
-      - name: Windows Installer package
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          gem install native-packages --version 0.9.0 --no-document
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          dotnet tool install --global wix --version 5.0.2
-          wix extension add --global WixToolset.Util.wixext/5.0.2
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $env:Path += ";$env:USERPROFILE\.dotnet\tools"
-          $target = "${{ matrix.target }}"
-          $payload = "dist\windows-input-$target"
-          New-Item -ItemType Directory -Force $payload | Out-Null
-          Copy-Item "target\$target\release\zap-fastest.exe" "$payload\zap-fastest.exe"
-          Copy-Item README.md, LICENSE, THIRD-PARTY-NOTICES.md, `
-            packaging\windows\zap-fastest-installer.txt $payload
-          $packageTarget = if ($target.StartsWith("aarch64")) { "windows-arm64" } else { "windows-amd64" }
-          $version = $env:GITHUB_REF_NAME.TrimStart("v")
-          native-packages build --version $version --target $packageTarget `
-            --defer-recipes --output "$env:RUNNER_TEMP\windows-packages"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Copy-Item "$env:RUNNER_TEMP\windows-packages\packages\$packageTarget\msi\*.msi" dist\
-          $resolvedPayload = [IO.Path]::GetFullPath($payload)
-          $expectedPayload = [IO.Path]::GetFullPath("$PWD\dist\windows-input-$target")
-          if ($resolvedPayload -ne $expectedPayload) { throw "Unexpected installer payload path" }
-          Remove-Item -LiteralPath $resolvedPayload -Recurse
-
-      - name: Attest release packages
+      - name: Attest Linux tarball
         uses: crmne/native-packages/.github/actions/attest@83bd46c245488c2b8f1b9d74569e16cf6a449e8f # v0.9.0
         with:
-          subject-path: |
-            dist/*.tar.gz
-            dist/*.zip
-            dist/*-setup.exe
-            dist/*.msi
+          subject-path: dist/*.tar.gz
       - uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.target }}
-          path: |
-            dist/*.tar.gz
-            dist/*.zip
-            dist/*-setup.exe
-            dist/*.msi
+          name: x86_64-unknown-linux-gnu
+          path: dist/*.tar.gz
           if-no-files-found: error
 
-  macos:
-    name: macOS universal app
-    needs: release-source
-    permissions:
-      contents: read
-      id-token: write
-      attestations: write
-    runs-on: macos-latest
-    env:
-      # Complete Apple credentials enable native-packages signing/notarization.
-      APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
-      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-darwin,x86_64-apple-darwin
-      - run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
-      # No compiler cache, as in the build job above.
-      - name: Build both architectures
-        run: |
-          cargo build --locked --release --target aarch64-apple-darwin
-          cargo build --locked --release --target x86_64-apple-darwin
-
-      - name: Universal binary
-        run: |
-          mkdir -p universal
-          lipo -create \
-            target/aarch64-apple-darwin/release/zap-fastest \
-            target/x86_64-apple-darwin/release/zap-fastest \
-            -output universal/zap-fastest
-          # The two release builds fill most of the runner's disk; the DMG
-          # and its notarization copy need room of their own.
-          rm -rf target
-          df -h "$RUNNER_TEMP"
-
-      - uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: '4.0'
-      - name: Install native packaging
-        run: gem install native-packages --version 0.9.0 --no-document
-
-      - name: App bundle
-        run: |
-          version="${GITHUB_REF_NAME#v}"
-          mkdir -p dist/macos-input
-          bash packaging/macos/bundle.sh universal/zap-fastest "dist/macos-input/ZapFastest.app" "$version"
-          cp README.md LICENSE THIRD-PARTY-NOTICES.md dist/macos-input/
-
-      - name: Package, sign and notarize macOS app
-        run: |
-          native-packages build \
-            --version "${GITHUB_REF_NAME#v}" --target macos-universal --defer-recipes \
-            --output "$RUNNER_TEMP/macos-packages"
-          cp "$RUNNER_TEMP/macos-packages/packages/macos-universal/dmg/"*.dmg dist/
-
-      - name: Verify the notarized release app
-        if: env.APPLE_SIGNING_IDENTITY != '' && env.APPLE_ID != '' && env.APPLE_TEAM_ID != '' && env.APPLE_APP_PASSWORD != ''
-        run: bash packaging/macos/verify.sh "dist/zap-fastest-${GITHUB_REF_NAME}-macos-universal.dmg"
-
-      - name: Verify unsigned app bundle
-        if: env.APPLE_SIGNING_IDENTITY == '' || env.APPLE_ID == '' || env.APPLE_TEAM_ID == '' || env.APPLE_APP_PASSWORD == ''
-        run: |
-          echo "This release is ad-hoc signed, without Apple notarization."
-          codesign --verify --strict --deep "dist/macos-input/ZapFastest.app"
-          lipo "dist/macos-input/ZapFastest.app/Contents/MacOS/zap-fastest" -verify_arch x86_64 arm64
-          python3 - <<'PY'
-          import plistlib
-          with open('dist/macos-input/ZapFastest.app/Contents/Info.plist', 'rb') as source:
-              info = plistlib.load(source)
-          assert info['CFBundleIdentifier'] == 'io.github.eternalwaitt.ZapFastest'
-          assert info.get('NSMicrophoneUsageDescription', '').strip()
-          PY
-
-      - name: Attest macOS package
-        uses: crmne/native-packages/.github/actions/attest@83bd46c245488c2b8f1b9d74569e16cf6a449e8f # v0.9.0
-        with:
-          subject-path: dist/*.dmg
-      - uses: actions/upload-artifact@v7
-        with:
-          name: macos-universal
-          path: dist/*.dmg
-          if-no-files-found: error
-
-  # The Linux build packaged as a Flatpak bundle: the same binary, in the
-  # sandbox packaging/flatpak describes, so nothing compiles twice. Flathub
-  # builds from source on its own machines, from the manifest beside it.
-  flatpak:
-    name: Flatpak bundle
-    permissions:
-      contents: read
-      id-token: write
-      attestations: write
+  arch-package:
+    name: CachyOS / Arch package (x86_64)
     needs: build
-    runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-25.08
-      options: --privileged
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v7
         with:
           name: x86_64-unknown-linux-gnu
           path: dist
-      - name: Unpack the Linux build
+      - name: Build zap-fastest-bin pacman package
         run: |
-          tar xzf dist/zap-fastest-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu.tar.gz -C packaging/flatpak
-          mv packaging/flatpak/zap-fastest-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu packaging/flatpak/built
-      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
-        with:
-          manifest-path: packaging/flatpak/io.github.eternalwaitt.ZapFaster.bundle.yml
-          bundle: zap-fastest-${{ github.ref_name }}-x86_64.flatpak
-          cache: false
-          upload-artifact: false
-      - name: Attest Flatpak bundle
+          version="${GITHUB_REF_NAME#v}"
+          pkgver="${version//-/_}"
+          tarball="zap-fastest-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu.tar.gz"
+          work="$RUNNER_TEMP/arch-pkg"
+          mkdir -p "$work/input" "$work/output"
+          cp "dist/$tarball" "$work/input/"
+          sha=$(sha256sum "$work/input/$tarball" | awk '{print $1}')
+          sed -e "s/@VERSION@/${pkgver}/g" -e "s/@PKGREL@/1/g" -e "s/@AMD64_SHA256@/${sha}/g" \
+            packaging/arch/zap-fastest-bin/PKGBUILD.in > "$work/input/PKGBUILD"
+          if [ "$pkgver" != "$version" ]; then
+            sed -i "s/v\${pkgver}/${GITHUB_REF_NAME}/g" "$work/input/PKGBUILD"
+          fi
+          cp packaging/arch/zap-fastest.install "$work/input/zap-fastest-bin.install"
+          docker run --rm --ulimit nofile=1024:524288 \
+            -e HOST_UID="$(id -u)" \
+            -e HOST_GID="$(id -g)" \
+            -v "$work/input:/input:ro" \
+            -v "$work/output:/output" \
+            archlinux:base-devel bash -euo pipefail -c '
+              useradd -m builder
+              mkdir -p /home/builder/build
+              cp -a /input/. /home/builder/build/
+              chown -R builder:builder /home/builder/build
+              su - builder -c "cd /home/builder/build && PKGEXT=.pkg.tar.zst PACKAGER=\"ZapFastest <https://github.com/SSParzival/zap-fastest>\" makepkg -df --noconfirm"
+              pkg=(/home/builder/build/zap-fastest-bin-*-x86_64.pkg.tar.zst)
+              test "${#pkg[@]}" -eq 1
+              pacman -Qip "${pkg[0]}"
+              files=$(pacman -Qlp "${pkg[0]}")
+              echo "$files"
+              grep -q " /usr/bin/zap-fastest$" <<< "$files"
+              grep -q " /usr/share/applications/zap-fastest.desktop$" <<< "$files"
+              grep -q " /usr/share/icons/hicolor/scalable/apps/zap-fastest.svg$" <<< "$files"
+              grep -q " /usr/share/zap-fastest/omarchy/zap-fastest.json.tpl$" <<< "$files"
+              grep -q " /usr/share/zap-fastest/omarchy/zap-fastest-theme$" <<< "$files"
+              cp "${pkg[0]}" /output/
+              chown "$HOST_UID:$HOST_GID" /output/*.pkg.tar.zst
+              chmod 644 /output/*.pkg.tar.zst
+            '
+          mkdir -p dist/arch
+          cp "$work/output/"*.pkg.tar.zst dist/arch/
+      - name: Attest Arch package
         uses: crmne/native-packages/.github/actions/attest@83bd46c245488c2b8f1b9d74569e16cf6a449e8f # v0.9.0
         with:
-          subject-path: "*.flatpak"
+          subject-path: dist/arch/*.pkg.tar.zst
       - uses: actions/upload-artifact@v7
         with:
-          name: flatpak
-          path: "*.flatpak"
+          name: arch-package
+          path: dist/arch/*.pkg.tar.zst
           if-no-files-found: error
 
   publish:
     name: GitHub release
-    needs: [build, macos, flatpak]
+    needs: [build, arch-package]
     runs-on: ubuntu-latest
     environment: release-signing
     permissions:
@@ -382,13 +217,3 @@ jobs:
           draft: ${{ contains(github.ref_name, '-') }}
           prerelease: ${{ contains(github.ref_name, '-') }}
           make_latest: ${{ !contains(github.ref_name, '-') }}
-
-  packaging:
-    permissions:
-      contents: write
-    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
-    needs: publish
-    uses: ./.github/workflows/packaging.yml
-    with:
-      version: ${{ github.ref_name }}
-    secrets: inherit

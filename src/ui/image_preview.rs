@@ -434,6 +434,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                                             image_response.rect.center(),
                                             size,
                                         );
+                                        field_click(ui, area, drawn, &mut app.actions);
                                         let double_click = image_response
                                             .interact_pointer_pos()
                                             .filter(|_| image_response.double_clicked());
@@ -461,8 +462,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                         // The header's Fit/% toggle. The original size opens with the
                         // double-clicked point in the middle: the offset is stored for
                         // the next frame, which lays out the new size.
-                        let (drawn, double_click) = output.inner;
-                        field_click(ui, output.inner_rect, drawn, &mut app.actions);
+                        let (_, double_click) = output.inner;
                         if let Some(pos) = double_click {
                             if app
                                 .image_preview

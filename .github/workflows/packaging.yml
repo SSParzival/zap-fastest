@@ -2,153 +2,89 @@ name: Packaging
 
 on:
   push:
-    branches: [main, master]
-    paths: [native-packages.yaml, packaging/**, contrib/omarchy/**, .github/workflows/packaging.yml, .github/workflows/release.yml]
+    branches: [main]
+    paths:
+      - packaging/arch/**
+      - packaging/applications/**
+      - packaging/icons/**
+      - packaging/install-user.sh
+      - packaging/test-install-user.sh
+      - packaging/test-icon-qt.py
+      - contrib/omarchy/**
+      - .github/workflows/packaging.yml
+      - .github/workflows/release.yml
   pull_request:
-    paths: [native-packages.yaml, packaging/**, contrib/omarchy/**, .github/workflows/packaging.yml, .github/workflows/release.yml]
+    paths:
+      - packaging/arch/**
+      - packaging/applications/**
+      - packaging/icons/**
+      - packaging/install-user.sh
+      - packaging/test-install-user.sh
+      - packaging/test-icon-qt.py
+      - contrib/omarchy/**
+      - .github/workflows/packaging.yml
+      - .github/workflows/release.yml
   workflow_dispatch:
-    inputs:
-      version:
-        description: Published ZapFastest version (required for package builds)
-        type: string
-        default: ''
-      publish:
-        description: Attach packages and run enabled downstream publishers
-        type: boolean
-        default: false
-  workflow_call:
-    inputs:
-      version:
-        required: true
-        type: string
-      publish:
-        type: boolean
-        default: true
-    secrets:
-      AUR_SSH_KEY:
-        required: false
-      AUR_KNOWN_HOSTS:
-        required: false
-      HOMEBREW_TAP_GITHUB_TOKEN:
-        required: false
-      HOMEBREW_TAP_SSH_KEY:
-        required: false
 
 permissions:
   contents: read
 
 jobs:
-  packaging:
-    if: inputs.version != ''
-    permissions:
-      contents: write
-    uses: crmne/native-packages/.github/workflows/package.yml@83bd46c245488c2b8f1b9d74569e16cf6a449e8f # v0.9.0
-    with:
-      targets: linux-amd64,linux-arm64
-      version: ${{ inputs.version }}
-      publish: ${{ inputs.publish == true && inputs.version != '' }}
-    secrets: inherit
-
-  installation:
-    name: Install (${{ matrix.os }}, ${{ matrix.image }})
-    needs: packaging
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-24.04, ubuntu-24.04-arm]
-        # The oldest distributions the releases support (built in Debian 12,
-        # glibc 2.36) and newer, and openSUSE, whose packages are named
-        # differently from Fedora's. The v0.13.1 fixture that runs without a
-        # version needs glibc 2.39, so Debian 12 is tested on real releases.
-        image: ${{ fromJSON(inputs.version && '["debian:12-slim", "ubuntu:24.04", "debian:13-slim", "fedora:41", "fedora:latest", "opensuse/leap:16.0"]' || '["ubuntu:24.04", "debian:13-slim", "fedora:41", "fedora:latest", "opensuse/leap:16.0"]') }}
+  cachyos-packaging:
+    name: CachyOS / Arch Linux packaging checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v4
-        with:
-          name: native-packages
-          path: dist/native-packages
-      - name: Install and check runtime libraries in a clean container
-        env:
-          IMAGE: ${{ matrix.image }}
-        run: bash packaging/test-install.sh "$IMAGE" dist/native-packages
-
-  # The AppImage carries no libraries of its own, so the runner supplies
-  # ALSA as a desktop would. Runners have no FUSE: it unpacks itself to run.
-  appimage:
-    name: AppImage (${{ matrix.os }})
-    permissions:
-      contents: write
-    needs: packaging
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-24.04
-            target: linux-amd64
-            arch: x86_64
-          - os: ubuntu-24.04-arm
-            target: linux-arm64
-            arch: aarch64
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v4
-        with:
-          name: native-packages
-          path: dist/native-packages
-      - name: Run the AppImage
-        env:
-          TARGET: ${{ matrix.target }}
-          ARCH: ${{ matrix.arch }}
+      - name: Validate Arch PKGBUILD templates and install hooks
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libasound2t64
-          set -- dist/native-packages/packages/"$TARGET"/appimage/zap-fastest-*-"$ARCH".AppImage
-          test "$#" -eq 1
-          chmod +x "$1"
-          "$1" --appimage-extract-and-run --version | grep -Ex '(zap-fastest|zap-fastest|fastsapp) [0-9]+\.[0-9]+\.[0-9]+.*'
-      - name: Generate external AppImage update sidecar
-        env:
-          TARGET: ${{ matrix.target }}
-          ARCH: ${{ matrix.arch }}
-          VERSION: ${{ inputs.version }}
-        run: |
-          VERSION=${VERSION#v}
-          sudo apt-get install -y --no-install-recommends zsync
-          mkdir -p dist/appimage-updates
-          set -- dist/native-packages/packages/"$TARGET"/appimage/zap-fastest-*-"$ARCH".AppImage
-          test "$#" -eq 1
-          filename=$(basename "$1")
-          zsyncmake -u "https://github.com/SSParzival/zap-fastest/releases/download/v$VERSION/$filename" \
-            -o "dist/appimage-updates/$filename.zsync" "$1"
-          (cd dist/appimage-updates && sha256sum "$filename.zsync" > "appimage-update-checksums-$TARGET.txt")
-      - uses: actions/upload-artifact@v4
-        with:
-          name: appimage-updates-${{ matrix.target }}
-          path: dist/appimage-updates/*
-      - name: Attach external updater sidecar
-        if: inputs.publish == true
-        env:
-          GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ inputs.version }}
-        run: |
-          VERSION=${VERSION#v}
-          gh release upload "v$VERSION" dist/appimage-updates/* --repo SSParzival/zap-fastest
-
-  user-installer:
-    name: User installer
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v7
-      - name: Install a source build into a prefix with spaces and a percent
+          bash -n packaging/arch/zap-fastest/PKGBUILD.in
+          bash -n packaging/arch/zap-fastest-bin/PKGBUILD.in
+          bash -n packaging/arch/zap-fastest-git/PKGBUILD.in
+          bash -n packaging/arch/zap-fastest.install
+          bash -n packaging/install-user.sh
+          bash -n contrib/omarchy/zap-fastest-theme
+      - name: Test user installer with special paths
         run: bash packaging/test-install-user.sh
-      - name: Check AppImage metadata and Qt SVG compatibility
+      - name: Check desktop SVG compatibility with Qt
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends python3-pyqt5 python3-pyqt5.qtsvg libqt5svg5
-          python3 packaging/test-linux-finalize.py
           python3 packaging/test-icon-qt.py
+      - name: Test zap-fastest-bin Arch package build
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)
+          work="$RUNNER_TEMP/arch-pkg-check"
+          stage="$work/stage/zap-fastest-v${version}-x86_64-unknown-linux-gnu"
+          mkdir -p "$stage" "$work/input" "$work/output"
+          printf '#!/bin/sh\necho "zap-fastest %s"\n' "$version" > "$stage/zap-fastest"
+          chmod +x "$stage/zap-fastest"
+          cp README.md LICENSE THIRD-PARTY-NOTICES.md packaging/zap-fastest-portable.txt "$stage/"
+          cp --parents packaging/applications/zap-fastest.desktop packaging/icons/zap-fastest.svg \
+            contrib/omarchy/zap-fastest.json.tpl contrib/omarchy/zap-fastest-theme "$stage/"
+          tarball="zap-fastest-v${version}-x86_64-unknown-linux-gnu.tar.gz"
+          tar czf "$work/input/$tarball" -C "$work/stage" "zap-fastest-v${version}-x86_64-unknown-linux-gnu"
+          sha=$(sha256sum "$work/input/$tarball" | awk '{print $1}')
+          sed -e "s/@VERSION@/${version}/g" -e "s/@PKGREL@/1/g" -e "s/@AMD64_SHA256@/${sha}/g" \
+            packaging/arch/zap-fastest-bin/PKGBUILD.in > "$work/input/PKGBUILD"
+          cp packaging/arch/zap-fastest.install "$work/input/zap-fastest-bin.install"
+          docker run --rm --ulimit nofile=1024:524288 \
+            -v "$work/input:/input:ro" \
+            -v "$work/output:/output" \
+            archlinux:base-devel bash -euo pipefail -c '
+              useradd -m builder
+              mkdir -p /home/builder/build
+              cp -a /input/. /home/builder/build/
+              chown -R builder:builder /home/builder/build
+              su - builder -c "cd /home/builder/build && PKGEXT=.pkg.tar.zst PACKAGER=\"ZapFastest <https://github.com/SSParzival/zap-fastest>\" makepkg -df --noconfirm"
+              pkg=(/home/builder/build/zap-fastest-bin-*-x86_64.pkg.tar.zst)
+              test "${#pkg[@]}" -eq 1
+              pacman -Qip "${pkg[0]}"
+              files=$(pacman -Qlp "${pkg[0]}")
+              echo "$files"
+              grep -q " /usr/bin/zap-fastest$" <<< "$files"
+              grep -q " /usr/share/applications/zap-fastest.desktop$" <<< "$files"
+              grep -q " /usr/share/icons/hicolor/scalable/apps/zap-fastest.svg$" <<< "$files"
+              grep -q " /usr/share/zap-fastest/omarchy/zap-fastest.json.tpl$" <<< "$files"
+              grep -q " /usr/share/zap-fastest/omarchy/zap-fastest-theme$" <<< "$files"
+            '

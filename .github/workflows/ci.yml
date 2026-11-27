@@ -16,9 +16,6 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  # whisper.cpp requires clang on Windows ARM64. clang-cl leaves C++
-  # exceptions off unless they are requested explicitly.
-  CXXFLAGS_aarch64_pc_windows_msvc: /EHsc
 
 jobs:
   audit:
@@ -46,9 +43,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libxkbcommon-dev libwayland-dev libgl1-mesa-dev libasound2-dev cmake perl libclang-dev
-      # After the toolchain, so the cache key follows the pinned rustc. The
-      # key carries no job name, so each job sets its own generation. Saves
-      # only on pushes to main; pull requests restore.
       - uses: jdx/mr-boxington-action@v1
         with:
           cache-generation: quality-v1
@@ -66,18 +60,13 @@ jobs:
         run: mbx doc --locked --all-features --no-deps
 
   test:
-    name: test (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    name: test (Linux x86_64)
+    runs-on: ubuntu-latest
     timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest]
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - name: GUI build dependencies
-        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev libgl1-mesa-dev libasound2-dev cmake perl libclang-dev xvfb xauth libgl1-mesa-dri libegl1
@@ -90,10 +79,8 @@ jobs:
       - name: Tests (all features)
         run: mbx test --locked --all-targets --all-features
       - name: Build Linux demo
-        if: runner.os == 'Linux'
         run: mbx build --locked --features demo
       - name: Linux native window smoke test
-        if: runner.os == 'Linux'
         timeout-minutes: 10
         env:
           LIBGL_ALWAYS_SOFTWARE: "1"
@@ -103,7 +90,6 @@ jobs:
           mkdir -p "$XDG_RUNTIME_DIR"
           chmod 700 "$XDG_RUNTIME_DIR"
           bin="target/debug/zap-fastest"
-          [ -f "$bin" ] || bin="target/debug/zap-fastest"
           for page in media-album forward-review voice-transcript starred star-menu pinned background-history original-documents international-sender; do
             timeout 45s xvfb-run -a -s "-screen 0 1600x1200x24" \
               env -u WAYLAND_DISPLAY -u WAYLAND_SOCKET \
@@ -113,84 +99,10 @@ jobs:
             test -s "$RUNNER_TEMP/zap-fastest-$page.png"
           done
       - name: Linux preview
-        if: always() && runner.os == 'Linux'
+        if: always()
         uses: actions/upload-artifact@v7
         with:
           name: linux-preview
           path: |
             ${{ runner.temp }}/zap-fastest-*.png
             ${{ runner.temp }}/zap-fastest-*.log
-
-  # Linux releases build in Debian 12 for its older glibc (release.yml).
-  # Building here too catches a dependency that needs newer system
-  # libraries before a release tag does.
-  debian-12:
-    name: compile (Debian 12)
-    runs-on: ubuntu-latest
-    container: debian:12
-    timeout-minutes: 45
-    steps:
-      - name: GUI build dependencies
-        run: |
-          apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            ca-certificates curl git build-essential pkg-config \
-            libxkbcommon-dev libwayland-dev libgl1-mesa-dev libasound2-dev \
-            libpipewire-0.3-dev clang libclang-dev cmake perl
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - run: cargo build --locked
-
-  windows-arm64:
-    name: compile (Windows arm64)
-    runs-on: windows-latest
-    timeout-minutes: 40
-    env:
-      # whisper.cpp deliberately rejects MSVC's ARM backend. The hosted
-      # Windows image includes LLVM and Ninja, so use clang-cl while retaining
-      # the MSVC ABI expected by Rust's aarch64-pc-windows-msvc target.
-      CMAKE_GENERATOR: Ninja
-      CC_aarch64_pc_windows_msvc: clang-cl
-      CXX_aarch64_pc_windows_msvc: clang-cl
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-pc-windows-msvc
-      - run: rustup target add aarch64-pc-windows-msvc
-      - uses: jdx/mr-boxington-action@v1
-        with:
-          cache-generation: windows-arm64-v1
-      - run: mbx check --locked --all-targets --all-features --target aarch64-pc-windows-msvc
-
-  nix:
-    name: Nix package (${{ matrix.system }})
-    runs-on: ${{ matrix.os }}
-    # The macOS cold build exceeded the former 90-minute job limit.
-    # Keep a finite limit and show builder output so slow steps are diagnosable.
-    timeout-minutes: ${{ matrix.system == 'aarch64-darwin' && 120 || 90 }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            system: x86_64-linux
-          - os: ubuntu-24.04-arm
-            system: aarch64-linux
-          - os: macos-latest
-            system: aarch64-darwin
-    steps:
-      - uses: actions/checkout@v7
-      # Frees disk space on Ubuntu runners; macOS runners have enough.
-      - uses: wimpysworld/nothing-but-nix@v9
-        if: runner.os == 'Linux'
-      - uses: cachix/install-nix-action@v31
-      - uses: nix-community/cache-nix-action@v7
-        with:
-          save: ${{ github.ref == 'refs/heads/main' }}
-          primary-key: nix-${{ matrix.system }}-${{ hashFiles('**/flake.lock') }}
-          restore-prefixes-first-match: nix-${{ matrix.system }}-
-      - name: Check flake outputs
-        run: nix flake check --no-build
-      - name: Build package
-        run: nix build --print-build-logs .#default
