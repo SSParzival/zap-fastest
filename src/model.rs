@@ -387,6 +387,15 @@ impl Chat {
     }
 }
 
+/// Whether a name is only a phone number, grouped or as WhatsApp masks it
+/// (`+55∙∙∙∙∙∙∙∙12`) for someone not in the contacts: no saved name.
+pub fn is_number_only(name: &str) -> bool {
+    name.chars().any(|c| c.is_ascii_digit())
+        && name
+            .chars()
+            .all(|c| c.is_ascii_digit() || matches!(c, '+' | ' ' | '(' | ')' | '-' | '\u{2219}'))
+}
+
 /// Extracts digits from a `<phone>@s.whatsapp.net` id.
 pub fn phone_of(id: &str) -> Option<&str> {
     let (user, server) = id.split_once('@')?;
@@ -693,6 +702,10 @@ pub enum Content {
     Sticker {
         media: Media,
         animated: bool,
+        /// The sound of an audio sticker. Its download keys stay in the
+        /// raw message.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        audio: Option<Motion>,
     },
     /// A WhatsApp sticker pack shared in a chat. Its stickers download when
     /// someone opens it.
@@ -854,6 +867,10 @@ pub struct PollState {
     /// Latest decrypted votes only. Derived on load, never stored in content JSON.
     #[serde(skip)]
     pub votes: Vec<PollVoter>,
+    /// Hidden-name polls show counts only, never who voted. Derived from the
+    /// creation protobuf on load, never stored in content JSON.
+    #[serde(skip)]
+    pub hide_voter_names: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1184,9 +1201,34 @@ impl Content {
         }
     }
 
+    /// An audio sticker's sound, when this is one.
+    pub fn sticker_audio(&self) -> Option<&Motion> {
+        match self {
+            Self::Sticker { audio, .. } => audio.as_ref(),
+            _ => None,
+        }
+    }
+
+    /// Keeps the sound file `old`, another copy of this audio sticker,
+    /// downloaded where this copy has none.
+    fn keep_sticker_audio(&mut self, old: &Content) {
+        if let (
+            Self::Sticker {
+                audio: Some(new), ..
+            },
+            Some(old),
+        ) = (&mut *self, old.sticker_audio())
+            && new.path.is_none()
+        {
+            new.path = old.path.clone();
+        }
+    }
+
     /// Carries downloaded file paths over from `old` when rederiving content
-    /// from the raw protobuf: the main attachment and each carousel card's image.
+    /// from the raw protobuf: the main attachment, a motion photo's clip, an
+    /// audio sticker's sound, and each carousel card's image.
     pub fn keep_local_paths(&mut self, old: &Content) {
+        self.keep_sticker_audio(old);
         if let (Some(new), Some(old)) = (self.media_mut(), old.media()) {
             new.path = old.path.clone();
         }
@@ -1232,8 +1274,10 @@ impl Content {
 
     /// Takes the files that `other`, another copy of the same message,
     /// downloaded where this copy has none: the attachment, a motion photo's
-    /// clip, and each carousel card's image. A file this copy has stays.
+    /// clip, an audio sticker's sound, and each carousel card's image. A file
+    /// this copy has stays.
     pub fn fill_local_paths(&mut self, other: &Content) {
+        self.keep_sticker_audio(other);
         if let (Some(new), Some(old)) = (self.media_mut(), other.media())
             && new.path.is_none()
         {

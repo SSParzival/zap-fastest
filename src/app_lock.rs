@@ -10,12 +10,70 @@
 
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, TryRecvError};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use crate::settings::{hex, unhex};
 
 /// The shortest password Settings accepts, in characters.
 pub const MIN_PASSWORD_CHARS: usize = 6;
+
+/// The shortest locked-chats code accepted, in characters. Six, as a
+/// password: a shorter one falls to guessing even with the wait between tries.
+pub const MIN_CHAT_LOCK_CHARS: usize = MIN_PASSWORD_CHARS;
+
+/// A wall-clock instant as Unix milliseconds, the form the saved wait takes:
+/// it must survive a restart, and a monotonic instant does not.
+pub fn unix_millis(at: SystemTime) -> i64 {
+    at.duration_since(SystemTime::UNIX_EPOCH)
+        .map(|since| since.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+/// Wrong tries against one local code, kept on the wall clock so the wait
+/// after repeated failures survives a restart of the app.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Attempts {
+    failures: u32,
+    /// When the next try may be made, as Unix milliseconds.
+    retry_at_ms: Option<i64>,
+}
+
+impl Attempts {
+    pub fn new(failures: u32, retry_at_ms: Option<i64>) -> Self {
+        Self {
+            failures,
+            retry_at_ms,
+        }
+    }
+
+    pub fn failures(&self) -> u32 {
+        self.failures
+    }
+
+    pub fn retry_at_ms(&self) -> Option<i64> {
+        self.retry_at_ms
+    }
+
+    /// How long until another try may be made, if it must wait.
+    pub fn wait_left(&self, now_ms: i64) -> Option<Duration> {
+        let at = self.retry_at_ms?;
+        let left = at - now_ms;
+        (left > 0).then(|| Duration::from_millis(left as u64))
+    }
+
+    /// Records a wrong try at `now_ms`, starting a wait once too many have
+    /// come in a row.
+    pub fn failed(&mut self, now_ms: i64) {
+        self.failures = self.failures.saturating_add(1);
+        let wait = wait_after(self.failures);
+        self.retry_at_ms = (!wait.is_zero()).then(|| now_ms + wait.as_millis() as i64);
+    }
+
+    /// A right try, or a new code: the count and the wait start over.
+    pub fn passed(&mut self) {
+        *self = Self::default();
+    }
+}
 
 /// PBKDF2-HMAC-SHA256 rounds for new verifiers, OWASP's current advice for
 /// this function. About 60 ms here, paid once per unlock attempt.
@@ -30,6 +88,11 @@ const FREE_TRIES: u32 = 3;
 
 /// The longest wait between tries after repeated wrong passwords.
 const MAX_WAIT: Duration = Duration::from_secs(30);
+
+/// How far the wall clock must run ahead of the monotonic one before the
+/// difference counts as the machine having slept, rather than as the two
+/// clocks drifting apart by a few microseconds of ordinary use.
+const SLEEP_SLACK: Duration = Duration::from_secs(1);
 
 /// A stored verifier for `password`: `pbkdf2-sha256$rounds$salt$hash`, with
 /// salt and hash in hex. Slow on purpose; call it off the interface thread.
@@ -99,6 +162,11 @@ pub fn wait_after(failures: u32) -> Duration {
 
 /// Where the time comes from; tests replace it to move time forward.
 pub type Clock = Arc<dyn Fn() -> Instant + Send + Sync>;
+
+/// Where the wall-clock time comes from. Unlike [`Instant`], it keeps moving
+/// while the machine sleeps, which is how a suspend counts as inactivity:
+/// [`AppLock::idle_left`] takes whichever clock moved further.
+pub type WallClock = Arc<dyn Fn() -> SystemTime + Send + Sync>;
 
 /// What a Settings form does with the password.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -223,8 +291,12 @@ fn run(work: Work) -> Outcome {
 /// The lock's state while the app runs.
 pub struct AppLock {
     clock: Clock,
+    /// Keeps moving while the machine sleeps, where `clock` stops.
+    wall: WallClock,
     locked: bool,
     last_input: Instant,
+    /// When `last_input` happened on the wall clock.
+    last_input_wall: SystemTime,
     failures: u32,
     retry_at: Option<Instant>,
     job: Option<Receiver<Outcome>>,
@@ -252,9 +324,12 @@ impl AppLock {
     /// Starts locked when a password is set, as the app does at start.
     pub fn new(locked: bool) -> Self {
         let clock: Clock = Arc::new(Instant::now);
+        let wall: WallClock = Arc::new(SystemTime::now);
         Self {
             last_input: clock(),
+            last_input_wall: wall(),
             clock,
+            wall,
             locked,
             failures: 0,
             retry_at: None,
@@ -270,7 +345,37 @@ impl AppLock {
     /// Replaces the clock, and counts inactivity from its present.
     pub fn set_clock(&mut self, clock: Clock) {
         self.last_input = clock();
+        self.last_input_wall = (self.wall)();
         self.clock = clock;
+    }
+
+    /// Replaces the wall clock, and counts inactivity from its present. Tests
+    /// use it to sleep the machine: the monotonic clock stays put while this
+    /// one moves on.
+    pub fn set_wall_clock(&mut self, wall: WallClock) {
+        self.last_input_wall = wall();
+        self.wall = wall;
+    }
+
+    /// Picks up the wait saved by an earlier run, so restarting the app does
+    /// not offer three fresh tries.
+    pub fn restore_wait(&mut self, failures: u32, retry_at: Option<SystemTime>) {
+        self.failures = failures;
+        let wall_now = (self.wall)();
+        self.retry_at = retry_at
+            .and_then(|at| at.duration_since(wall_now).ok())
+            .filter(|left| !left.is_zero())
+            .map(|left| self.now() + left);
+    }
+
+    /// The wait to save: how many wrong tries in a row, and when the next may
+    /// be made on the wall clock.
+    pub fn wait_record(&self) -> (u32, Option<SystemTime>) {
+        let now = self.now();
+        let retry_at = self
+            .retry_at
+            .map(|at| (self.wall)() + at.saturating_duration_since(now));
+        (self.failures, retry_at)
     }
 
     pub fn now(&self) -> Instant {
@@ -284,11 +389,26 @@ impl AppLock {
     /// Someone used the window: the inactivity count starts again.
     pub fn note_input(&mut self) {
         self.last_input = self.now();
+        self.last_input_wall = (self.wall)();
     }
 
     /// How long until `after` of inactivity has passed; zero once it has.
+    ///
+    /// A machine that slept has been idle too, but its monotonic clock stops
+    /// while it sleeps, so this takes whichever clock moved further: the wall
+    /// clock catches the suspend, and the monotonic one keeps a clock set back
+    /// by hand from reviving an idle countdown (or ending it early).
     pub fn idle_left(&self, after: Duration) -> Duration {
-        after.saturating_sub(self.now().saturating_duration_since(self.last_input))
+        let monotonic = self.now().saturating_duration_since(self.last_input);
+        let wall = (self.wall)()
+            .duration_since(self.last_input_wall)
+            .unwrap_or(Duration::ZERO);
+        let elapsed = if wall > monotonic + SLEEP_SLACK {
+            wall
+        } else {
+            monotonic
+        };
+        after.saturating_sub(elapsed)
     }
 
     /// Locks, forgetting anything half typed on a previous lock screen.
@@ -310,6 +430,7 @@ impl AppLock {
         self.failures = 0;
         self.retry_at = None;
         self.last_input = self.now();
+        self.last_input_wall = (self.wall)();
     }
 
     /// How long until another password may be tried, if it must wait.
@@ -506,6 +627,93 @@ mod tests {
         assert_eq!(lock.idle_left(after), after);
         advance(&now, Duration::from_secs(61));
         assert!(lock.idle_left(after).is_zero());
+    }
+
+    fn manual_wall_clock() -> (WallClock, Arc<Mutex<SystemTime>>) {
+        let now = Arc::new(Mutex::new(
+            SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000),
+        ));
+        let read = Arc::clone(&now);
+        (Arc::new(move || *read.lock().unwrap()), now)
+    }
+
+    fn advance_wall(now: &Mutex<SystemTime>, by: Duration) {
+        *now.lock().unwrap() += by;
+    }
+
+    #[test]
+    fn a_suspend_counts_as_inactivity_though_the_monotonic_clock_stops() {
+        let (clock, _now) = manual_clock();
+        let (wall, wall_now) = manual_wall_clock();
+        let mut lock = AppLock::new(false);
+        lock.set_clock(clock);
+        lock.set_wall_clock(wall);
+        let after = Duration::from_secs(60);
+        assert_eq!(lock.idle_left(after), after);
+        advance_wall(&wall_now, Duration::from_secs(3600));
+        assert!(
+            lock.idle_left(after).is_zero(),
+            "a suspend is inactivity too"
+        );
+        lock.note_input();
+        assert_eq!(lock.idle_left(after), after);
+    }
+
+    #[test]
+    fn a_wall_clock_set_back_does_not_revive_an_idle_countdown() {
+        let (clock, now) = manual_clock();
+        let (wall, wall_now) = manual_wall_clock();
+        let mut lock = AppLock::new(false);
+        lock.set_clock(clock);
+        lock.set_wall_clock(wall);
+        let after = Duration::from_secs(60);
+        advance(&now, Duration::from_secs(45));
+        *wall_now.lock().unwrap() -= Duration::from_secs(3600);
+        assert_eq!(lock.idle_left(after), Duration::from_secs(15));
+    }
+
+    #[test]
+    fn a_saved_wait_survives_a_restart() {
+        let (clock, _now) = manual_clock();
+        let (wall, _wall_now) = manual_wall_clock();
+        let mut lock = AppLock::new(true);
+        lock.set_clock(clock);
+        lock.set_wall_clock(wall);
+        let stored = verifier_with_rounds("right-password", 10);
+        for _ in 0..3 {
+            lock.entry = "wrong".into();
+            lock.try_unlock(&stored, || {});
+            lock.wait();
+            lock.unlocked(false);
+        }
+        let (failures, retry_at) = lock.wait_record();
+        assert_eq!(failures, 3);
+        let retry_at = retry_at.expect("the third wrong password starts a wait");
+        let (clock, now) = manual_clock();
+        let (wall, _wall_now) = manual_wall_clock();
+        let mut restarted = AppLock::new(true);
+        restarted.set_clock(clock);
+        restarted.set_wall_clock(wall);
+        restarted.restore_wait(failures, Some(retry_at));
+        assert_eq!(restarted.wait_left(), Some(Duration::from_secs(1)));
+        advance(&now, Duration::from_secs(2));
+        assert_eq!(restarted.wait_left(), None);
+    }
+
+    #[test]
+    fn attempts_count_on_the_wall_clock_and_reset() {
+        let now = 1_700_000_000_000;
+        let mut attempts = Attempts::default();
+        attempts.failed(now);
+        attempts.failed(now);
+        assert_eq!(attempts.wait_left(now), None);
+        attempts.failed(now);
+        assert_eq!(attempts.failures(), 3);
+        assert_eq!(attempts.wait_left(now), Some(Duration::from_secs(1)));
+        assert_eq!(attempts.wait_left(now + 1_000), None);
+        attempts.passed();
+        assert_eq!(attempts.failures(), 0);
+        assert_eq!(attempts.retry_at_ms(), None);
     }
 
     #[test]

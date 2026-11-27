@@ -269,6 +269,18 @@ END;
 -- One person can be both a privacy id and a phone number; merging the two
 -- looks receipts up by recipient, and the primary key cannot serve that.
 CREATE INDEX IF NOT EXISTS group_receipts_by_recipient ON group_receipts (recipient);
+-- An edit goes out under an id of its own, which its receipts may name.
+CREATE TABLE IF NOT EXISTS edit_ids (
+    chat TEXT NOT NULL,
+    edit TEXT NOT NULL,
+    id TEXT NOT NULL,
+    PRIMARY KEY (chat, edit)
+);
+-- Deleting a message looks its edits up by the message.
+CREATE INDEX IF NOT EXISTS edit_ids_by_message ON edit_ids (chat, id);
+CREATE TRIGGER IF NOT EXISTS delete_edit_ids AFTER DELETE ON messages BEGIN
+    DELETE FROM edit_ids WHERE chat = OLD.chat AND id = OLD.id;
+END;
 CREATE TABLE IF NOT EXISTS transcriptions (
     chat TEXT NOT NULL,
     message TEXT NOT NULL,
@@ -685,9 +697,14 @@ impl Archive {
         Ok(())
     }
 
+    /// Whether writes made now may still roll back with an open batch.
+    pub fn in_batch(&self) -> bool {
+        !self.connection.is_autocommit()
+    }
+
     #[cfg(test)]
     pub(crate) fn in_batch_for_test(&self) -> bool {
-        !self.connection.is_autocommit()
+        self.in_batch()
     }
 
     #[cfg(test)]
@@ -706,6 +723,7 @@ impl Archive {
     /// message.
     pub fn release_memory(&self) {
         let _ = self.connection.release_memory();
+        crate::purge_thread_heap();
     }
 
     fn prepare(connection: Connection) -> Result<Self> {
@@ -1180,9 +1198,20 @@ impl Archive {
 
     /// Applies disappearing-message metadata unless a newer setting is stored.
     pub fn set_ephemeral(&self, id: &str, expiration: u32, setting_timestamp: i64) -> Result<bool> {
+        // The phone can report the setting time in milliseconds. Compare in
+        // seconds, including a millisecond time an older build stored, or that
+        // value outranks every later change.
+        let setting_timestamp = if setting_timestamp > 100_000_000_000 {
+            setting_timestamp / 1000
+        } else {
+            setting_timestamp
+        };
         Ok(self.connection.execute(
             "UPDATE chats SET ephemeral_expiration = ?2, ephemeral_setting_timestamp = ?3
-             WHERE id = ?1 AND (ephemeral_setting_timestamp IS NULL OR ephemeral_setting_timestamp <= ?3)",
+             WHERE id = ?1 AND (ephemeral_setting_timestamp IS NULL
+                 OR CASE WHEN ephemeral_setting_timestamp > 100000000000
+                     THEN ephemeral_setting_timestamp / 1000
+                     ELSE ephemeral_setting_timestamp END <= ?3)",
             params![id, expiration, setting_timestamp],
         )? > 0)
     }
@@ -1260,6 +1289,19 @@ impl Archive {
             params![id],
         )?;
         Ok(())
+    }
+
+    /// Whether a read-state write for this chat is still waiting to reach the
+    /// phone. A failed or backed-off sync leaves it set.
+    pub fn pending_read(&self, id: &str) -> Result<Option<i64>> {
+        self.connection
+            .query_row(
+                "SELECT pending_read FROM chats WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map(Option::flatten)
     }
 
     pub fn pending_reads(&self) -> Result<Vec<(String, i64)>> {
@@ -1536,22 +1578,27 @@ impl Archive {
             .optional()
     }
 
-    /// Returns whether the photo's updated path was actually written.
+    /// Returns whether the photo's or audio sticker's updated path was actually written.
     pub fn put_motion_path(&self, chat: &str, id: &str, path: Option<&Path>) -> Result<bool> {
         let Some(mut message) = self.message(chat, id)? else {
             return Ok(false);
         };
-        if let Content::Image { motion, .. } = &mut message.content {
-            motion.get_or_insert_default().path = path.map(Path::to_path_buf);
-            return self.set_content(chat, id, &message.content, message.edited);
-        }
-        Ok(false)
+        let clip = match &mut message.content {
+            Content::Image { motion, .. } => motion.get_or_insert_default(),
+            Content::Sticker {
+                audio: Some(audio), ..
+            } => audio,
+            _ => return Ok(false),
+        };
+        clip.path = path.map(Path::to_path_buf);
+        self.set_content(chat, id, &message.content, message.edited)
     }
 
-    /// Returns all recorded motion clip paths.
+    /// Returns all recorded motion clip and audio sticker sound paths.
     pub fn motion_paths(&self) -> Result<Vec<(String, String, PathBuf)>> {
         let mut statement = self.connection.prepare(
-            "SELECT chat, id, json_extract(content, '$.motion.path') AS path
+            "SELECT chat, id, coalesce(json_extract(content, '$.motion.path'),
+                json_extract(content, '$.audio.path')) AS path
              FROM messages WHERE path IS NOT NULL",
         )?;
         let rows = statement.query_map([], |row| {
@@ -1818,12 +1865,13 @@ impl Archive {
                     ELSE MAX(pending_unread, (SELECT pending_unread FROM chats WHERE id = ?1)) END,
                 ephemeral_expiration = CASE
                     WHEN (SELECT ephemeral_setting_timestamp FROM chats WHERE id = ?1) IS NOT NULL
-                        AND (ephemeral_setting_timestamp IS NULL OR (SELECT ephemeral_setting_timestamp FROM chats WHERE id = ?1) >= ephemeral_setting_timestamp)
+                        AND (ephemeral_setting_timestamp IS NULL OR (SELECT CASE WHEN ephemeral_setting_timestamp > 100000000000 THEN ephemeral_setting_timestamp / 1000 ELSE ephemeral_setting_timestamp END FROM chats WHERE id = ?1)
+                            >= CASE WHEN ephemeral_setting_timestamp > 100000000000 THEN ephemeral_setting_timestamp / 1000 ELSE ephemeral_setting_timestamp END)
                     THEN (SELECT ephemeral_expiration FROM chats WHERE id = ?1)
                     ELSE ephemeral_expiration END,
-                ephemeral_setting_timestamp = CASE WHEN ephemeral_setting_timestamp IS NULL THEN (SELECT ephemeral_setting_timestamp FROM chats WHERE id = ?1)
-                    WHEN (SELECT ephemeral_setting_timestamp FROM chats WHERE id = ?1) IS NULL THEN ephemeral_setting_timestamp
-                    ELSE MAX(ephemeral_setting_timestamp, (SELECT ephemeral_setting_timestamp FROM chats WHERE id = ?1)) END,
+                ephemeral_setting_timestamp = CASE WHEN ephemeral_setting_timestamp IS NULL THEN (SELECT CASE WHEN ephemeral_setting_timestamp > 100000000000 THEN ephemeral_setting_timestamp / 1000 ELSE ephemeral_setting_timestamp END FROM chats WHERE id = ?1)
+                    WHEN (SELECT ephemeral_setting_timestamp FROM chats WHERE id = ?1) IS NULL THEN CASE WHEN ephemeral_setting_timestamp > 100000000000 THEN ephemeral_setting_timestamp / 1000 ELSE ephemeral_setting_timestamp END
+                    ELSE MAX(CASE WHEN ephemeral_setting_timestamp > 100000000000 THEN ephemeral_setting_timestamp / 1000 ELSE ephemeral_setting_timestamp END, (SELECT CASE WHEN ephemeral_setting_timestamp > 100000000000 THEN ephemeral_setting_timestamp / 1000 ELSE ephemeral_setting_timestamp END FROM chats WHERE id = ?1)) END,
                 notification_sound = COALESCE(notification_sound, (SELECT notification_sound FROM chats WHERE id = ?1)),
                 voice_speed = COALESCE(voice_speed, (SELECT voice_speed FROM chats WHERE id = ?1)),
                 history_start = MAX(history_start, COALESCE((SELECT history_start FROM chats WHERE id = ?1), 0))
@@ -2785,6 +2833,7 @@ impl Archive {
             "call_log",
             "disappearing_messages",
             "group_receipts",
+            "edit_ids",
             "polls",
             "poll_history",
             "local_chat_labels",
@@ -2865,8 +2914,56 @@ impl Archive {
         rows.collect()
     }
 
+    /// Attachment paths of message `id` in any of `chats` (one chat, or its
+    /// phone-number and privacy-id aliases) that no other message uses. Read
+    /// before the message is deleted or revoked, so its files can go too.
+    pub fn files_only_in(&self, chats: &[String], id: &str) -> Result<Vec<PathBuf>> {
+        let chats = serde_json::to_string(chats).unwrap_or_default();
+        let mut files = self.cached_media(
+            "m.id = ?2 AND m.chat IN (SELECT value FROM json_each(?1))",
+            params![chats, id],
+        )?;
+        files.sort();
+        files.dedup();
+        let mut only = Vec::new();
+        for file in files {
+            if !self.file_used_outside(&chats, id, &file)? {
+                only.push(file);
+            }
+        }
+        Ok(only)
+    }
+
+    /// Whether any message points at `file`, such as a forward made here of
+    /// the message a late download belonged to.
+    pub fn file_in_use(&self, file: &Path) -> Result<bool> {
+        self.file_used_outside("[]", "", file)
+    }
+
+    /// Whether a message other than `id` in the JSON list `chats` points at
+    /// `file`, as an attachment, a card or carousel picture, a motion clip, or
+    /// an audio sticker's sound.
+    fn file_used_outside(&self, chats: &str, id: &str, file: &Path) -> Result<bool> {
+        let carousel = carousel_json("content");
+        self.connection
+            .prepare_cached(&format!(
+                "SELECT EXISTS (SELECT 1 FROM messages
+                     WHERE NOT (id = ?2 AND chat IN (SELECT value FROM json_each(?1)))
+                       AND json_valid(content)
+                       AND (json_extract(content, '$.media.path') = ?3
+                            OR json_extract(content, '$.card.image.path') = ?3
+                            OR json_extract(content, '$.motion.path') = ?3
+                            OR json_extract(content, '$.audio.path') = ?3
+                            OR EXISTS (SELECT 1 FROM json_each({carousel}, '$.card.carousel') c
+                                       WHERE c.type = 'object'
+                                         AND json_extract(c.value, '$.image.path') = ?3)))"
+            ))?
+            .query_row(params![chats, id, file.to_string_lossy()], |row| row.get(0))
+    }
+
     /// Attachment paths of the messages matching `filter` (over `messages m`),
-    /// including an interactive card's image and each carousel card's image.
+    /// including an interactive card's image, audio sticker sound, motion clip,
+    /// and each carousel card's image.
     fn cached_media(&self, filter: &str, params: impl rusqlite::Params) -> Result<Vec<PathBuf>> {
         let carousel = carousel_json("m.content");
         let mut statement = self.connection.prepare(&format!(
@@ -2876,6 +2973,8 @@ impl Archive {
                  SELECT json_extract(m.content, '$.card.image.path') FROM messages m WHERE {filter}
                  UNION ALL
                  SELECT json_extract(m.content, '$.motion.path') FROM messages m WHERE {filter}
+                 UNION ALL
+                 SELECT json_extract(m.content, '$.audio.path') FROM messages m WHERE {filter}
                  UNION ALL
                  SELECT json_extract(c.value, '$.image.path')
                  FROM messages m, json_each({carousel}, '$.card.carousel') c
@@ -3203,20 +3302,40 @@ impl Archive {
         content: &Content,
         edited: bool,
     ) -> Result<bool> {
-        let changed = self.connection.execute(
-            "UPDATE messages SET content = ?3, edited = ?4 WHERE chat = ?1 AND id = ?2",
+        let revoked = matches!(content, Content::Revoked);
+        // A revoke's writes land together, or a failed one leaves the row as it
+        // was for a retry.
+        let batch = Batch::begin(&self.connection)?;
+        // Deleted for everyone, the original protobuf (body, media keys) and
+        // the preview picture have nothing left to serve.
+        let changed = batch.execute(
+            "UPDATE messages SET content = ?3, edited = ?4,
+                 raw = CASE WHEN ?5 THEN NULL ELSE raw END,
+                 thumbnail = CASE WHEN ?5 THEN NULL ELSE thumbnail END
+             WHERE chat = ?1 AND id = ?2",
             params![
                 chat,
                 id,
                 serde_json::to_string(content).unwrap_or_default(),
-                edited
+                edited,
+                revoked
             ],
         )?;
-        if matches!(content, Content::Revoked) {
-            // Deleted for everyone also removes pending star intents.
+        if revoked {
+            // Deleted for everyone also removes pending star intents, pins,
+            // motion clips, and HD copies whose keys are no longer needed.
             self.delete_star(chat, id)?;
             self.delete_pin(chat, id)?;
+            batch.execute(
+                "DELETE FROM motion_clips WHERE chat = ?1 AND parent = ?2",
+                params![chat, id],
+            )?;
+            batch.execute(
+                "DELETE FROM hd_copies WHERE chat = ?1 AND parent = ?2",
+                params![chat, id],
+            )?;
         }
+        batch.commit()?;
         Ok(changed > 0)
     }
 
@@ -3344,7 +3463,7 @@ impl Archive {
                 |row| {
                     Ok(Contact {
                         id: row.get(0)?,
-                        full_name: row.get(1)?,
+                        full_name: saved_name(row.get(1)?),
                         first_name: row.get(2)?,
                         push_name: row.get(3)?,
                     })
@@ -3360,7 +3479,7 @@ impl Archive {
         let rows = statement.query_map([], |row| {
             Ok(Contact {
                 id: row.get(0)?,
-                full_name: row.get(1)?,
+                full_name: saved_name(row.get(1)?),
                 first_name: row.get(2)?,
                 push_name: row.get(3)?,
             })
@@ -3514,10 +3633,16 @@ impl Archive {
         )?;
         transaction.execute("DELETE FROM captured_history", [])?;
         transaction.execute_batch(
-            "DELETE FROM call_log; DELETE FROM synced_call_log; DELETE FROM stickers; DELETE FROM media_jobs; DELETE FROM stars; DELETE FROM star_changes; DELETE FROM message_pins; DELETE FROM pin_notices; DELETE FROM outgoing_queue; DELETE FROM poll_history; DELETE FROM poll_votes; DELETE FROM polls; DELETE FROM group_receipts; DELETE FROM transcriptions; DELETE FROM messages; DELETE FROM motion_clips; DELETE FROM hd_copies; DELETE FROM chats; DELETE FROM chat_removals; DELETE FROM message_removals; DELETE FROM pending_message_removals; DELETE FROM contacts; DELETE FROM meta; DELETE FROM lids; DELETE FROM drafts; DELETE FROM local_chat_labels; DELETE FROM local_labels; DELETE FROM removed_recent_stickers; DELETE FROM favorite_stickers; DELETE FROM favorites; DELETE FROM favorite_changes;",
+            "DELETE FROM call_log; DELETE FROM synced_call_log; DELETE FROM stickers; DELETE FROM media_jobs; DELETE FROM stars; DELETE FROM star_changes; DELETE FROM message_pins; DELETE FROM pin_notices; DELETE FROM outgoing_queue; DELETE FROM poll_history; DELETE FROM poll_votes; DELETE FROM polls; DELETE FROM group_receipts; DELETE FROM edit_ids; DELETE FROM transcriptions; DELETE FROM messages; DELETE FROM motion_clips; DELETE FROM hd_copies; DELETE FROM chats; DELETE FROM chat_removals; DELETE FROM message_removals; DELETE FROM pending_message_removals; DELETE FROM contacts; DELETE FROM meta; DELETE FROM lids; DELETE FROM drafts; DELETE FROM local_chat_labels; DELETE FROM local_labels; DELETE FROM removed_recent_stickers; DELETE FROM favorite_stickers; DELETE FROM favorites; DELETE FROM favorite_changes;",
         )?;
         transaction.commit()
     }
+}
+
+/// A stored saved name, unless it is only a phone number: history once filed
+/// WhatsApp's masked number (`+55∙∙∙∙∙∙∙∙12`) as one, hiding the profile name.
+fn saved_name(name: Option<String>) -> Option<String> {
+    name.filter(|name| !crate::model::is_number_only(name))
 }
 
 #[cfg(test)]
@@ -4786,6 +4911,7 @@ pub(crate) mod tests {
                 row.content = Content::Sticker {
                     media: media(30, Some("/s1.webp")),
                     animated: false,
+                    audio: None,
                 };
                 row
             },
@@ -4794,6 +4920,7 @@ pub(crate) mod tests {
                 row.content = Content::Sticker {
                     media: media(30, None),
                     animated: false,
+                    audio: None,
                 };
                 row
             },
@@ -5709,6 +5836,7 @@ pub(crate) mod tests {
                  INSERT INTO poll_votes (chat, poll, voter, sender, update_id, at, from_me)
                      VALUES ('{chat}', 'p1', '{chat}', '{chat}', 'u1', 150, 0);
                  INSERT INTO group_receipts (chat, id, recipient) VALUES ('{chat}', 'm1', '{chat}');
+                 INSERT INTO edit_ids (chat, edit, id) VALUES ('{chat}', 'e1', 'm1');
                  INSERT INTO local_chat_labels (chat, label) VALUES ('{chat}', 'label-1');
                  INSERT INTO drafts (chat, text, updated_at) VALUES ('{chat}', 'unsent', 150);"
             ))
@@ -5723,11 +5851,12 @@ pub(crate) mod tests {
     }
 
     /// Every table keyed by chat besides `chats` itself.
-    const CHAT_TABLES: [&str; 9] = [
+    const CHAT_TABLES: [&str; 10] = [
         "messages",
         "motion_clips",
         "hd_copies",
         "group_receipts",
+        "edit_ids",
         "polls",
         "poll_history",
         "poll_votes",
@@ -7413,6 +7542,7 @@ mod sticker_tests {
                     state: MediaState::Idle,
                 },
                 animated: false,
+                audio: None,
             },
             status: Delivery::None,
             delivered_at: None,

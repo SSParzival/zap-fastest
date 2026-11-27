@@ -646,6 +646,20 @@ pub fn menu_item_enabled(
     label: &str,
     enabled: bool,
 ) -> bool {
+    let response = menu_item_named(ui, palette, icon, label, label, enabled);
+    enabled && response.clicked()
+}
+
+/// Like [`menu_item_enabled`], returning the `Response` and letting a disabled
+/// row carry an accessible explanation in `accessible_name` and on hover.
+pub fn menu_item_named(
+    ui: &mut Ui,
+    palette: &Palette,
+    icon: Option<Icon>,
+    label: &str,
+    accessible_name: &str,
+    enabled: bool,
+) -> egui::Response {
     let width = ui.available_width();
     let color = if enabled { palette.text } else { palette.dim };
     let inset = if icon.is_some() { 46.0 } else { 20.0 };
@@ -667,7 +681,11 @@ pub fn menu_item_enabled(
     );
     theme::reveal_focus(&response);
     response.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled && ui.is_enabled(), label)
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Button,
+            enabled && ui.is_enabled(),
+            accessible_name,
+        )
     });
     ui.ctx().accesskit_node_builder(ui.unique_id(), |node| {
         node.set_role(egui::accesskit::Role::Menu)
@@ -699,14 +717,28 @@ pub fn menu_item_enabled(
         ui.painter().galley(pos, label_line.galley.clone(), color);
         emoji::paint(ui, &label_line.galley, pos, &label_line.placements);
     }
-    let clicked = enabled && response.clicked();
-    if clicked {
+    if enabled && response.clicked() {
         ui.close();
     }
     if enabled {
-        response.on_hover_cursor(egui::CursorIcon::PointingHand);
+        response.on_hover_cursor(egui::CursorIcon::PointingHand)
+    } else {
+        response
     }
-    clicked
+}
+
+/// Fades the bottom `height` points of `rect` into `color`, for clipped
+/// scrollable fields like the multiline composer.
+pub fn fade_bottom(ui: &Ui, rect: Rect, height: f32, color: Color32) {
+    let fade = Rect::from_min_max(pos2(rect.left(), rect.bottom() - height), rect.max);
+    let mut mesh = egui::Mesh::default();
+    mesh.colored_vertex(fade.left_top(), Color32::TRANSPARENT);
+    mesh.colored_vertex(fade.right_top(), Color32::TRANSPARENT);
+    mesh.colored_vertex(fade.right_bottom(), color);
+    mesh.colored_vertex(fade.left_bottom(), color);
+    mesh.add_triangle(0, 1, 2);
+    mesh.add_triangle(0, 2, 3);
+    ui.painter().add(egui::Shape::mesh(mesh));
 }
 
 pub fn menu_separator(ui: &mut Ui, palette: &Palette) {
@@ -1664,6 +1696,16 @@ pub fn dotted_chip(
     let width =
         dot_width + text.size().x + number.as_ref().map_or(0.0, |number| gap + number.size().x);
     let (rect, response) = ui.allocate_exact_size(vec2(width + 18.0, 28.0), Sense::click());
+    // A chip is a Tab stop, so it must say what it is and whether it is the
+    // one on screen: five unnamed buttons tell a screen reader nothing.
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::SelectableLabel,
+            ui.is_enabled(),
+            selected,
+            label,
+        )
+    });
     theme::reveal_focus(&response);
     theme::focus_outline(ui, response.id, rect, rect.height() / 2.0);
     if ui.is_rect_visible(rect) {

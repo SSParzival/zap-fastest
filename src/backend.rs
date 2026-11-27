@@ -42,6 +42,9 @@ pub enum LinkStatus {
         qr: Option<String>,
         pair_code: Option<String>,
         pairing_phone: Option<String>,
+        /// Every QR code of the link session expired and the window offers a
+        /// new one on a click instead of looping on a shut-down client.
+        expired: bool,
     },
     Connecting,
     Connected,
@@ -118,6 +121,7 @@ mod tests {
             qr: Some(qr.into()),
             pair_code: Some(code.into()),
             pairing_phone: Some(phone.into()),
+            expired: false,
         };
 
         // The previous Debug formatting leaked every field into zapfast.log.
@@ -497,6 +501,14 @@ pub enum Command {
         text: String,
         mentions: Vec<String>,
         draft: EditDraft,
+    },
+    /// Internal: the stanza id an edit sent from here went out under, so
+    /// receipts naming it count for the edited message.
+    EditSent {
+        chat: ChatId,
+        id: String,
+        edit: String,
+        epoch: u64,
     },
     /// Internal edit completion. A failed send never rewrites the archive.
     EditedText {

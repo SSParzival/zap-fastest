@@ -261,13 +261,14 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
             |ui| {
                 ui.set_width(width);
                 ui.horizontal(|ui| {
+                    let back = crate::i18n::gettext(app.locale, "Back (Esc)");
                     if theme::icon_button(
                         ui,
                         Icon::ArrowLeft,
                         20.0,
                         palette.secondary,
                         palette.text,
-                        "Back (Esc)",
+                        &back,
                     )
                     .clicked()
                     {
@@ -580,9 +581,17 @@ fn sections(app: &App) -> Vec<Section> {
                     .hint_text(crate::i18n::gettext(app.locale, "Secret code"))
                     .password(true),
             );
-            if response.changed() {
-                let trimmed = code.trim().to_owned();
-                app.actions.push(Action::SetChatLockCode(Some(trimmed)));
+            let trimmed = code.trim().to_owned();
+            if response.changed() && trimmed.chars().count() >= crate::app_lock::MIN_CHAT_LOCK_CHARS
+            {
+                app.actions
+                    .push(Action::SetChatLockCode(Some(trimmed.clone())));
+            }
+            if !trimmed.is_empty() && trimmed.chars().count() < crate::app_lock::MIN_CHAT_LOCK_CHARS
+            {
+                let requirement = crate::i18n::gettext(app.locale, "Use at least {} characters.")
+                    .replace("{}", &crate::app_lock::MIN_CHAT_LOCK_CHARS.to_string());
+                theme::paragraph(ui, &requirement, theme::regular(12.0), palette.dim);
             }
             if app.settings.chat_lock_code_hash.is_some()
                 && ui

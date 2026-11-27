@@ -90,6 +90,37 @@ mod tests {
         archive.delete_message("fixture", "one").unwrap();
         assert!(archive.pin_notices("fixture").unwrap().is_empty());
     }
+
+    #[test]
+    fn pin_cap_tracks_active_slots_and_expiry() {
+        let archive = Archive::in_memory().unwrap();
+        archive.ensure_chat("fixture", "Fixture").unwrap();
+        for id in ["a", "b", "c", "d"] {
+            archive
+                .insert_message(&message("fixture", id, 100, false), None)
+                .unwrap();
+        }
+        assert!(
+            archive
+                .set_pin("fixture", "a", true, 100, 200, &Pinner::here())
+                .unwrap()
+        );
+        assert!(
+            archive
+                .set_pin("fixture", "b", true, 101, 500, &Pinner::here())
+                .unwrap()
+        );
+        assert!(
+            archive
+                .set_pin("fixture", "c", true, 102, 500, &Pinner::here())
+                .unwrap()
+        );
+        assert!(archive.pin_full("fixture", "d", 150).unwrap());
+        // Re-pinning an already-pinned message stays allowed at the cap.
+        assert!(!archive.pin_full("fixture", "a", 150).unwrap());
+        // Once the earliest pin expires, a slot opens up.
+        assert!(!archive.pin_full("fixture", "d", 200).unwrap());
+    }
 }
 
 impl Pinner {

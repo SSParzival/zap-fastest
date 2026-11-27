@@ -232,6 +232,65 @@ impl Archive {
             .collect()
     }
 
+    /// Remembers that `edit` is the id an edit of message `id` went out under,
+    /// and moves to the message any receipts that already named the edit.
+    /// Returns whether there were any.
+    pub fn record_edit_id(&self, chat: &str, edit: &str, id: &str) -> Result<bool> {
+        if edit == id {
+            return Ok(false);
+        }
+        let transaction = super::Batch::begin(&self.connection)?;
+        transaction.execute(
+            "INSERT OR REPLACE INTO edit_ids (chat, edit, id) VALUES (?1, ?2, ?3)",
+            params![chat, edit, id],
+        )?;
+        let moved = Self::move_receipts(&transaction, chat, edit, id)?;
+        transaction.commit()?;
+        Ok(moved)
+    }
+
+    /// Refiles the receipts kept under `edit` under message `id`. Returns
+    /// whether there were any.
+    fn move_receipts(
+        transaction: &rusqlite::Connection,
+        chat: &str,
+        edit: &str,
+        id: &str,
+    ) -> Result<bool> {
+        transaction.execute(
+            "INSERT INTO group_receipts (chat, id, recipient, expected, status, delivered_at, read_at, played_at)
+             SELECT chat, ?3, recipient, expected, status, delivered_at, read_at, played_at
+             FROM group_receipts WHERE chat = ?1 AND id = ?2
+             ON CONFLICT(chat, id, recipient) DO UPDATE SET
+                expected = MAX(expected, excluded.expected),
+                status = MAX(status, excluded.status),
+                delivered_at = COALESCE(MIN(delivered_at, excluded.delivered_at), delivered_at, excluded.delivered_at),
+                read_at = COALESCE(MIN(read_at, excluded.read_at), read_at, excluded.read_at),
+                played_at = COALESCE(MIN(played_at, excluded.played_at), played_at, excluded.played_at)",
+            params![chat, edit, id],
+        )?;
+        let moved = transaction.execute(
+            "DELETE FROM group_receipts WHERE chat = ?1 AND id = ?2",
+            params![chat, edit],
+        )?;
+        Ok(moved > 0)
+    }
+
+    /// The message a receipt naming `id` is about: the edited message when
+    /// `id` belongs to one of its edits, otherwise `id` itself.
+    pub fn receipt_target(&self, chat: &str, id: &str) -> Result<String> {
+        use rusqlite::OptionalExtension as _;
+        Ok(self
+            .connection
+            .query_row(
+                "SELECT id FROM edit_ids WHERE chat = ?1 AND edit = ?2",
+                params![chat, id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .unwrap_or_else(|| id.to_owned()))
+    }
+
     /// Drops receipts whose message has not arrived within a day. It is not
     /// coming: receipts also name our reactions, edits, and votes, which are
     /// never archived as messages, and messages deleted here.
@@ -278,6 +337,24 @@ impl Archive {
             params![lid, pn],
         )?;
         transaction.execute("DELETE FROM group_receipts WHERE chat = ?1", [lid])?;
+        transaction.execute(
+            "INSERT OR IGNORE INTO edit_ids (chat, edit, id)
+             SELECT ?2, edit, id FROM edit_ids WHERE chat = ?1",
+            params![lid, pn],
+        )?;
+        transaction.execute("DELETE FROM edit_ids WHERE chat = ?1", [lid])?;
+        // One name may have held the edit's id and the other its receipts.
+        let waiting = transaction
+            .prepare(
+                "SELECT edit, id FROM edit_ids e WHERE chat = ?1 AND EXISTS (
+                     SELECT 1 FROM group_receipts r WHERE r.chat = e.chat AND r.id = e.edit
+                 )",
+            )?
+            .query_map([pn], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<Result<Vec<(String, String)>>>()?;
+        for (edit, id) in waiting {
+            Self::move_receipts(transaction, pn, &edit, &id)?;
+        }
         Ok(())
     }
 }

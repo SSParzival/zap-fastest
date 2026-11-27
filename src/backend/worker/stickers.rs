@@ -1621,6 +1621,7 @@ mod tests {
                 state: MediaState::Idle,
             },
             animated: false,
+            audio: None,
         };
         let raw = {
             let mut proto = wa::Message::default();
@@ -1768,6 +1769,7 @@ mod tests {
                 state: MediaState::Idle,
             },
             animated: false,
+            audio: None,
         };
         let raw = {
             let mut proto = wa::Message::default();

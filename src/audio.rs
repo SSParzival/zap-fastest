@@ -771,8 +771,24 @@ fn decode_file(path: &Path) -> Result<Vec<f32>, String> {
         .map_err(|error| format!("Could not decode the audio: {error}"))?;
     let channels = decoder.channels().get();
     let rate = decoder.sample_rate().get();
-    let interleaved: Vec<f32> = decoder.collect();
+    // As for OGG/Opus, the decoded length is bounded, not the file's. The
+    // budget is fixed, an hour of 48 kHz stereo, whatever rate and channels
+    // the file claims: a file at a higher rate or with more channels gets a
+    // shorter time, never more memory.
+    let limit = voice::RATE as usize * 2 * voice::LONGEST_CLIP_SECONDS as usize;
+    let interleaved: Vec<f32> = decoder.take(limit + 1).collect();
+    if interleaved.len() > limit || too_long(interleaved.len(), channels, rate) {
+        return Err("Could not decode the audio: it is too long to play".to_owned());
+    }
     Ok(voice::mono_at_rate(&interleaved, channels, rate))
+}
+
+/// Whether `samples` interleaved over `channels` at `rate` last longer than
+/// `voice::LONGEST_CLIP_SECONDS`. The sample budget alone lets a low-rate
+/// file through, and resampling it to 48 kHz would multiply it.
+fn too_long(samples: usize, channels: u16, rate: u32) -> bool {
+    let frames = samples as u64 / u64::from(channels.max(1));
+    frames > u64::from(rate) * voice::LONGEST_CLIP_SECONDS
 }
 
 type Outcome = Arc<Mutex<Option<Result<Vec<f32>, String>>>>;
@@ -1619,6 +1635,16 @@ mod tests {
             heard.len()
         );
         assert!(levels.len() >= 15, "{}", levels.len());
+    }
+
+    #[test]
+    fn a_low_rate_file_is_bounded_by_its_time_not_its_samples() {
+        let hour = voice::LONGEST_CLIP_SECONDS as usize;
+        assert!(!too_long(48_000 * 2 * hour, 2, 48_000));
+        assert!(too_long(48_000 * 2 * hour + 2, 2, 48_000));
+        assert!(too_long(48_000 * 2 * hour, 2, 8_000));
+        assert!(too_long(48_000, 1, 1));
+        assert!(!too_long(48_000, 1, 48_000));
     }
 
     /// An M4A whose index (moov) follows its audio, as many recorders and

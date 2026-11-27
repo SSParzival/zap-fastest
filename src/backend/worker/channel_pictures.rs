@@ -40,13 +40,51 @@ impl ChannelPicture {
     }
 }
 
-/// The address a channel picture's direct path is fetched from.
-fn picture_url(direct_path: &str) -> String {
-    if direct_path.starts_with("https://") {
+/// The address a channel picture's direct path is fetched from, when it names
+/// a host WhatsApp serves media from.
+///
+/// A channel's metadata is written by whoever runs the channel, so a direct
+/// path may name any address at all. Fetching it blindly would let that
+/// metadata send this computer to a server on the reader's own network, so a
+/// path naming anything but WhatsApp's own media hosts is refused here rather
+/// than downloaded.
+fn picture_url(direct_path: &str) -> Option<String> {
+    let url = if direct_path.starts_with("https://") {
         direct_path.to_owned()
-    } else {
+    } else if direct_path.starts_with('/') {
         format!("https://{}{direct_path}", DEFAULT_MEDIA_HOSTS[0])
+    } else {
+        return None;
+    };
+    media_host_allowed(&url).then_some(url)
+}
+
+/// Whether the URL is an `https` address on `whatsapp.net` or one of its
+/// subdomains, parsed strictly via `http::Uri` without userinfo, backslashes,
+/// or IP literals.
+fn media_host_allowed(url: &str) -> bool {
+    if url.contains('\\') {
+        return false;
     }
+    let Ok(uri) = url.parse::<http::Uri>() else {
+        return false;
+    };
+    if uri.scheme_str() != Some("https") {
+        return false;
+    }
+    let Some(authority) = uri.authority() else {
+        return false;
+    };
+    // Reject embedded userinfo (`user@host`) and non-standard authority forms.
+    if authority.as_str().contains('@') {
+        return false;
+    }
+    let host = authority.host().trim_end_matches('.');
+    if host.is_empty() || host.starts_with('[') || host.parse::<std::net::IpAddr>().is_ok() {
+        return false;
+    }
+    let host = host.to_ascii_lowercase();
+    host == "whatsapp.net" || host.ends_with(".whatsapp.net")
 }
 
 impl Worker {
@@ -103,11 +141,16 @@ impl Worker {
                         .map(|metadata| ChannelPicture::of(&metadata))
                         .map_err(|error| error.to_string())?,
                 };
-                match picture.path(full) {
-                    Some(direct_path) => download_avatar(&gate, picture_url(direct_path), path)
-                        .await
-                        .map(Some),
-                    None => Ok(None),
+                match picture.path(full).and_then(picture_url) {
+                    Some(url) => download_avatar(&gate, url, path).await.map(Some),
+                    None => {
+                        if picture.path(full).is_some() {
+                            log::debug!(
+                                "channel picture left alone: its address is not on WhatsApp's media hosts"
+                            );
+                        }
+                        Ok(None)
+                    }
                 }
             }
             .await;
@@ -131,13 +174,32 @@ mod tests {
     #[test]
     fn a_direct_path_is_fetched_from_the_media_host() {
         assert_eq!(
-            picture_url("/v/t61.24694-24/fixture.jpg?oh=1&oe=2"),
-            "https://mmg.whatsapp.net/v/t61.24694-24/fixture.jpg?oh=1&oe=2"
+            picture_url("/v/t61.24694-24/fixture.jpg?oh=1&oe=2").as_deref(),
+            Some("https://mmg.whatsapp.net/v/t61.24694-24/fixture.jpg?oh=1&oe=2")
         );
         assert_eq!(
-            picture_url("https://example.invalid/fixture.jpg"),
-            "https://example.invalid/fixture.jpg"
+            picture_url("https://pps.whatsapp.net/fixture.jpg").as_deref(),
+            Some("https://pps.whatsapp.net/fixture.jpg")
         );
+    }
+
+    #[test]
+    fn a_picture_address_elsewhere_is_refused() {
+        for url in [
+            "https://example.invalid/fixture.jpg",
+            "https://127.0.0.1/fixture.jpg",
+            "https://192.168.1.1:8443/fixture.jpg",
+            "https://[::1]/fixture.jpg",
+            "https://localhost/fixture.jpg",
+            "https://router.local/fixture.jpg",
+            "https://mmg.whatsapp.net.evil.invalid/fixture.jpg",
+            "https://mmg.whatsapp.net@127.0.0.1/fixture.jpg",
+            "https://mmg.whatsapp.net\\@127.0.0.1/fixture.jpg",
+            "http://mmg.whatsapp.net/fixture.jpg",
+            "@127.0.0.1/fixture.jpg",
+        ] {
+            assert_eq!(picture_url(url), None, "{url}");
+        }
     }
 
     #[test]

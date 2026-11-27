@@ -73,3 +73,11 @@ pub mod video;
 pub mod voice;
 pub mod wallpaper;
 pub mod window;
+
+/// Returns freed pages in the current thread's mimalloc heap to the OS.
+/// Long-lived background threads (image decoding, archive worker) otherwise
+/// retain peak allocations until that same thread allocates again.
+pub fn purge_thread_heap() {
+    // SAFETY: `mi_collect` only walks and purges the calling thread's heap.
+    unsafe { libmimalloc_sys::mi_collect(true) };
+}

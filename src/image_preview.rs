@@ -438,6 +438,9 @@ pub struct StickerPreview {
     animated: bool,
     /// The content hash, which names the favorite copy of the same sticker.
     hash: Option<String>,
+    /// The open chat's message this audio sticker came from, whose sound
+    /// the card plays.
+    pub sound: Option<String>,
 }
 
 impl StickerPreview {
@@ -467,6 +470,7 @@ impl StickerPreview {
                 .as_deref()
                 .map(crate::backend::sticker_store::content_hash),
             path,
+            sound: None,
         }
     }
 

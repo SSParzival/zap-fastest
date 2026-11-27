@@ -548,6 +548,9 @@ fn unlock_locked_chats(app: &mut App, ui: &mut egui::Ui) {
                 .hint_text("Confirm code")
                 .desired_width(f32::INFINITY),
         );
+        let requirement = crate::i18n::gettext(app.locale, "Use at least {} characters.")
+            .replace("{}", &crate::app_lock::MIN_CHAT_LOCK_CHARS.to_string());
+        theme::paragraph(ui, &requirement, theme::regular(12.5), palette.secondary);
     }
     if app.chat_lock_error {
         theme::paragraph(
@@ -558,7 +561,10 @@ fn unlock_locked_chats(app: &mut App, ui: &mut egui::Ui) {
         );
     }
     let ready = !app.chat_lock_entry.trim().is_empty()
-        && (!setup || app.chat_lock_entry.trim() == app.chat_lock_confirm.trim());
+        && (!setup
+            || (app.chat_lock_entry.trim() == app.chat_lock_confirm.trim()
+                && app.chat_lock_entry.trim().chars().count()
+                    >= crate::app_lock::MIN_CHAT_LOCK_CHARS));
     ui.horizontal_wrapped(|ui| {
         submit |= ui
             .add_enabled_ui(ready, |ui| {
@@ -999,16 +1005,12 @@ fn forward(app: &mut App, ui: &mut egui::Ui, messages: &[String]) {
     }
     ui.add_space(4.0);
 
-    let needle = app.forward_search.trim().to_lowercase();
+    let needle = crate::util::search_key(app.forward_search.trim());
     let mut chats: Vec<_> = app
         .chats
         .iter()
         .filter(|chat| forwardable(chat))
-        .filter(|chat| {
-            needle.is_empty()
-                || app.chat_title(chat).to_lowercase().contains(&needle)
-                || chat.phone().is_some_and(|phone| phone.contains(&needle))
-        })
+        .filter(|chat| forward_matches(&app.chat_title(chat), chat.phone(), &needle))
         .cloned()
         .collect();
     chats.sort_by_key(|chat| std::cmp::Reverse(chat.last_activity));
@@ -1228,6 +1230,14 @@ fn forward_footer(app: &mut App, ui: &mut egui::Ui) {
     }
 }
 
+/// Whether the forward search `needle` (a `search_key`) finds a chat by
+/// its title, ignoring case and accents, or by its number.
+fn forward_matches(title: &str, phone: Option<&str>, needle: &str) -> bool {
+    needle.is_empty()
+        || crate::util::search_key(title).contains(needle)
+        || phone.is_some_and(|phone| phone.contains(needle))
+}
+
 /// Uses the model's send permissions to reject unavailable forwarding
 /// destinations. Locked chats stay out of the picker, which would otherwise
 /// list them outside the locked folder.
@@ -1342,7 +1352,8 @@ fn shortcuts(app: &mut App, ui: &mut egui::Ui) {
                             ui.set_width(column);
                             ui.spacing_mut().item_spacing = vec2(18.0, 8.0);
                             for (keys, what) in rows {
-                                shortcut_row(ui, &palette, keys_width, keys, what);
+                                let what = crate::i18n::gettext(app.locale, what);
+                                shortcut_row(ui, &palette, keys_width, keys, &what);
                             }
                         },
                     );
@@ -1703,13 +1714,18 @@ fn sticker_maker(app: &mut App, ui: &mut egui::Ui) {
     }
     if draft.transparent {
         ui.horizontal(|ui| {
-            super::widgets::switch(ui, &palette, &mut draft.keep_transparent);
-            theme::text(
-                ui,
-                crate::i18n::gettext(locale, "Keep the transparent background"),
-                theme::regular(13.0),
-                palette.text,
-            );
+            let label = crate::i18n::gettext(locale, "Keep the transparent background");
+            let response = super::widgets::switch(ui, &palette, &mut draft.keep_transparent);
+            theme::reveal_focus(&response);
+            response.widget_info(|| {
+                egui::WidgetInfo::selected(
+                    egui::WidgetType::Checkbox,
+                    ui.is_enabled(),
+                    draft.keep_transparent,
+                    &*label,
+                )
+            });
+            theme::text(ui, &*label, theme::regular(13.0), palette.text);
         });
     }
     Frame::new()
@@ -3457,6 +3473,15 @@ pub(super) fn confirm_destructive<const N: usize>(
     let cancel = crate::i18n::gettext(app.locale, "Cancel");
     ui.horizontal(|ui| {
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            // Cancel comes first and takes focus on open so Enter closes the
+            // dialog rather than firing a destructive action.
+            let cancel_response = theme::pill_button(ui, &palette, &cancel, false);
+            if ui.memory(|memory| memory.focused().is_none()) {
+                cancel_response.request_focus();
+            }
+            if cancel_response.clicked() {
+                app.actions.push(Action::CloseDialog);
+            }
             let enabled = !matches!(app.dialog, Some(Dialog::ConfirmBlock { .. }))
                 || (app.is_connected() && app.blocklist.editable());
             if ui
@@ -3464,9 +3489,6 @@ pub(super) fn confirm_destructive<const N: usize>(
                 .inner
             {
                 app.actions.extend(actions);
-                app.actions.push(Action::CloseDialog);
-            }
-            if theme::pill_button(ui, &palette, &cancel, false).clicked() {
                 app.actions.push(Action::CloseDialog);
             }
         });

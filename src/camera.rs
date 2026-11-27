@@ -682,9 +682,19 @@ fn capture(
     if stop.load(Ordering::Acquire) {
         return Ok(());
     }
-    let requested = RequestedFormat::new::<RgbFormat>(RequestedFormatType::Closest(
-        CameraFormat::new(Resolution::new(WIDTH, HEIGHT), FrameFormat::MJPEG, FPS),
-    ));
+    let requested = if cfg!(target_os = "macos") {
+        // On macOS nokhwa lists each format's frame-rate range as two modes,
+        // its lowest and highest, but can set only a range's highest rate.
+        // Asking for Closest(640x480@15) fails on cameras whose range starts
+        // above 1 fps; AbsoluteHighestFrameRate always picks a settable rate.
+        RequestedFormat::new::<RgbFormat>(RequestedFormatType::AbsoluteHighestFrameRate)
+    } else {
+        RequestedFormat::new::<RgbFormat>(RequestedFormatType::Closest(CameraFormat::new(
+            Resolution::new(WIDTH, HEIGHT),
+            FrameFormat::MJPEG,
+            FPS,
+        )))
+    };
     let index = if selected.is_some() {
         match selected_index(&nokhwa::query(ApiBackend::Auto)?, selected) {
             Ok(index) => index,

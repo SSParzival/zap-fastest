@@ -262,6 +262,8 @@ pub fn handle(app: &mut App, ctx: &egui::Context) {
             actions.push(Action::CloseChat);
         } else if app.locked_folder {
             actions.push(Action::CloseLockedFolder);
+        } else if app.show_archived {
+            actions.push(Action::ShowArchived(false));
         }
     }
     // Enter sends a recording because the text field is hidden.
@@ -727,7 +729,7 @@ pub const SHORTCUTS: &[(&str, &str)] = &[
     ("Enter", "Send (Shift+Enter for a new line)"),
     (
         "Escape",
-        "Dismiss the current action, return from search, or close the chat",
+        "Dismiss the current action, close the chat, or return from search, Calls, Starred or Archived",
     ),
     ("Ctrl+N", "New chat or message yourself"),
     ("Ctrl+E", "Archive or unarchive the open chat"),

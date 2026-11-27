@@ -20,13 +20,20 @@ use std::time::Duration;
 
 /// Image URIs kept resident. Anything the current frame drew is always kept,
 /// so this only bounds what has scrolled away.
-const RESIDENT: usize = 96;
+///
+/// macOS keeps the tighter window because unified GPU memory counts directly
+/// inside Activity Monitor RSS; Linux and Windows keep 256 pictures so
+/// scrolling a photo chat or switching tabs does not re-decode on every pass.
+const RESIDENT: usize = if cfg!(target_os = "macos") { 96 } else { 256 };
 
 /// The most texture memory the resident images may take, in bytes. On a Mac
 /// the GPU shares the system's memory, so this is memory the app is seen to
-/// use. A window full of pictures fits many times over. Anything the current
-/// frame drew is always kept.
-const BUDGET: usize = 48 * 1024 * 1024;
+/// use. Anything the current frame drew is always kept.
+const BUDGET: usize = if cfg!(target_os = "macos") {
+    48 * 1024 * 1024
+} else {
+    128 * 1024 * 1024
+};
 
 /// How long the window may go without input before the images it is not
 /// showing are let go, whatever `RESIDENT` and `BUDGET` would keep: scrolling
@@ -666,14 +673,29 @@ fn decode_thumbnail(bytes: &[u8]) -> Option<egui::ColorImage> {
 }
 
 /// The decoder thread: takes every waiting request, decodes the newest still
-/// wanted, and puts the rest back.
+/// wanted, and puts the rest back. When a burst drains and the thread sits
+/// idle briefly, it returns its thread-local mimalloc pages to the OS.
 fn decode_jobs(receiver: &mpsc::Receiver<(String, egui::Context)>, fits: &Fits) {
+    const IDLE_COLLECT: Duration = Duration::from_millis(500);
     let mut waiting: Vec<(String, egui::Context)> = Vec::new();
+    let mut dirty = false;
     loop {
         if waiting.is_empty() {
-            match receiver.recv() {
-                Ok(job) => waiting.push(job),
-                Err(_) => return,
+            if dirty {
+                match receiver.recv_timeout(IDLE_COLLECT) {
+                    Ok(job) => waiting.push(job),
+                    Err(mpsc::RecvTimeoutError::Timeout) => {
+                        crate::purge_thread_heap();
+                        dirty = false;
+                        continue;
+                    }
+                    Err(mpsc::RecvTimeoutError::Disconnected) => return,
+                }
+            } else {
+                match receiver.recv() {
+                    Ok(job) => waiting.push(job),
+                    Err(_) => return,
+                }
             }
         }
         waiting.extend(receiver.try_iter());
@@ -699,6 +721,7 @@ fn decode_jobs(receiver: &mpsc::Receiver<(String, egui::Context)>, fits: &Fits) 
                 }))
                 .unwrap_or_else(|_| Err("the picture could not be decoded".to_owned()))
             });
+        dirty = true;
         let mut fits = fits.lock().unwrap_or_else(|p| p.into_inner());
         // Forgotten while it was being decoded: nobody draws it any more.
         if let Some(entry @ Fitted::Pending) = fits.get_mut(&uri) {

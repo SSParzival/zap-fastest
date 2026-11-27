@@ -717,6 +717,7 @@ pub fn populate(app: &mut App) {
                         Some(256),
                     ),
                     animated: true,
+                    audio: None,
                 },
             );
             if let Content::Sticker { media, .. } = &mut row.content {
@@ -3016,6 +3017,7 @@ pub fn apply_flags(app: &mut App, page: Option<&str>) {
                     qr: None,
                     pair_code: None,
                     pairing_phone: None,
+                    expired: false,
                 };
             }
             "login" => {
@@ -3024,6 +3026,7 @@ pub fn apply_flags(app: &mut App, page: Option<&str>) {
                     qr: Some(sample_qr()),
                     pair_code: None,
                     pairing_phone: None,
+                    expired: false,
                 };
             }
             "login-connecting" => {
@@ -3036,6 +3039,7 @@ pub fn apply_flags(app: &mut App, page: Option<&str>) {
                     qr: None,
                     pair_code: Some("FWAP1234".into()),
                     pairing_phone: Some("15550001111".into()),
+                    expired: false,
                 };
             }
             "phone" => {
@@ -3044,6 +3048,7 @@ pub fn apply_flags(app: &mut App, page: Option<&str>) {
                     qr: Some(sample_qr()),
                     pair_code: None,
                     pairing_phone: None,
+                    expired: false,
                 };
                 app.dialog = Some(Dialog::PairWithPhone);
             }
@@ -9541,18 +9546,10 @@ mod tests {
         app.attach(ctx);
         render(app, ctx);
         let (photo, _) = sample_files(app);
-        let uri = crate::util::image_uri(&photo);
         app.actions.push(crate::model::Action::PreviewImage(photo));
         for _ in 0..200 {
             render(app, ctx);
-            if matches!(
-                ctx.try_load_texture(
-                    &uri,
-                    egui::TextureOptions::default(),
-                    egui::SizeHint::default(),
-                ),
-                Ok(egui::load::TexturePoll::Ready { .. })
-            ) {
+            if crate::ui::image_preview::preview_ready(ctx) {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(10));

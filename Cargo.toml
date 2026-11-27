@@ -24,6 +24,9 @@ path = "src/main.rs"
 # Global allocator. System allocators retain transient peaks from history sync
 # and media decoding; mimalloc returns freed segments to the OS.
 mimalloc = { version = "0.1.52", default-features = false }
+# mimalloc's C bindings, already in the tree, with its extended API so idle
+# worker and image-decoder threads return their thread-local heaps via mi_collect.
+libmimalloc-sys = { version = "0.1.49", default-features = false, features = ["extended"] }
 bytes = "1"
 anyhow = "1"
 # Native call audio queues, already used by the official protocol library.

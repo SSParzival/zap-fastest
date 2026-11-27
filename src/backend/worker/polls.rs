@@ -5,12 +5,93 @@ use crate::archive::PollVote;
 use crate::model::{PollDraft, PollState};
 use whatsapp_rust::features::PollVoteCiphertext;
 
+/// Every top-level field that carries a `PollCreationMessage`.
+///
+/// WhatsApp moves a poll into a newer slot when it uses an extended setting:
+/// `poll_type` quizzes use V5, and end time, hidden voter names and added
+/// options use V6. Checking only the older slots makes those polls look
+/// unsupported. The pinned whatsapp-rust treats all of them as polls too.
 pub(super) fn definition(message: &wa::Message) -> Option<&wa::message::PollCreationMessage> {
     message
         .poll_creation_message
         .as_option()
         .or(message.poll_creation_message_v2.as_option())
         .or(message.poll_creation_message_v3.as_option())
+        .or(message.poll_creation_message_v5.as_option())
+        .or(message.poll_creation_message_v6.as_option())
+}
+
+impl Worker {
+    /// Reclassify polls archived as unsupported before V5 and V6 were read.
+    /// Raw protobufs are kept, so no phone history is needed.
+    pub(super) fn backfill_extended_polls(&mut self) {
+        const KEY: &str = "extended_polls";
+        if self.archive.meta(KEY).ok().flatten().as_deref() == Some("1") {
+            return;
+        }
+        let result = (|| -> anyhow::Result<usize> {
+            let mut updated = 0;
+            let mut after_rowid = 0;
+            // Scan every row with a raw protobuf in bounded pages, not just
+            // unsupported ones: the general derived-content backfill may
+            // already have turned an older V5/V6 poll into a poll without
+            // saving its definition.
+            loop {
+                let page = self.archive.rows_with_raw(after_rowid)?;
+                if page.is_empty() {
+                    break;
+                }
+                for (rowid, chat, id, raw) in page {
+                    after_rowid = rowid;
+                    let Ok(message) = wa::Message::decode_from_slice(&raw) else {
+                        continue;
+                    };
+                    let base = message.get_base_message();
+                    if definition(base).is_none() {
+                        continue;
+                    }
+                    let Some(old) = self.archive.message(&chat, &id)? else {
+                        continue;
+                    };
+                    if old.edited {
+                        continue;
+                    }
+                    let mut reclassified = old;
+                    let was_unsupported =
+                        matches!(reclassified.content, Content::Unsupported { .. });
+                    if was_unsupported {
+                        let Some(content @ Content::Poll { .. }) = classify(base) else {
+                            continue;
+                        };
+                        reclassified.content = content.clone();
+                        self.archive.set_derived(
+                            &chat,
+                            &id,
+                            &content,
+                            &self.mentions_of(&mentioned_of(base)),
+                            thumbnail_of(base).as_deref(),
+                            forwarded_of(base),
+                        )?;
+                        updated += 1;
+                    }
+                    let creator = reclassified.sender.clone();
+                    self.remember_poll(&reclassified, &message, &creator, None);
+                }
+            }
+            self.archive.set_meta(KEY, "1")?;
+            Ok(updated)
+        })();
+        match result {
+            Ok(updated) if updated > 0 => {
+                log::info!("reclassified {updated} archived extended polls");
+                self.emit_chats();
+            }
+            Err(_) => {
+                log::warn!("could not reclassify extended polls; will retry at next startup");
+            }
+            _ => {}
+        }
+    }
 }
 
 fn secret(message: &wa::Message) -> Option<&[u8]> {
@@ -270,11 +351,12 @@ impl Worker {
         let Content::Poll { options, state, .. } = &mut row.content else {
             return;
         };
-        if let Some(poll) = raw
+        let definition = raw
             .as_ref()
-            .and_then(|raw| definition(raw.get_base_message()))
-        {
+            .and_then(|raw| definition(raw.get_base_message()));
+        if let Some(poll) = definition {
             state.selectable = poll.selectable_options_count.unwrap_or(0) as usize;
+            state.hide_voter_names = poll.hide_participant_name.unwrap_or(false);
         }
         state.selectable = if state.selectable == 0 {
             options.len()
@@ -321,19 +403,21 @@ impl Worker {
             }
             if !choices.is_empty() {
                 state.voters += 1;
-                state.votes.push(crate::model::PollVoter {
-                    name: if vote.from_me || self.is_me(&vote.voter) {
-                        "You".into()
-                    } else {
-                        self.name_for(&voter).unwrap_or_else(|| {
-                            crate::util::phone(voter.split('@').next().unwrap_or(&voter))
-                        })
-                    },
-                    id: voter,
-                    from_me: vote.from_me || self.is_me(&vote.voter),
-                    timestamp: vote.at / 1000,
-                    choices: choices.clone(),
-                });
+                if !state.hide_voter_names {
+                    state.votes.push(crate::model::PollVoter {
+                        name: if vote.from_me || self.is_me(&vote.voter) {
+                            "You".into()
+                        } else {
+                            self.name_for(&voter).unwrap_or_else(|| {
+                                crate::util::phone(voter.split('@').next().unwrap_or(&voter))
+                            })
+                        },
+                        id: voter,
+                        from_me: vote.from_me || self.is_me(&vote.voter),
+                        timestamp: vote.at / 1000,
+                        choices: choices.clone(),
+                    });
+                }
             }
             for index in choices {
                 if let Some(count) = state.counts.get_mut(index) {

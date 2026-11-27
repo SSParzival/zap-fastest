@@ -91,7 +91,8 @@ fn body(app: &mut App, ui: &mut egui::Ui) {
         LinkStatus::Unlinked {
             qr: None,
             pair_code: None,
-            pairing_phone: None
+            pairing_phone: None,
+            expired: false,
         }
     ) && app.account().settings.sync_mode.is_none()
     {
@@ -172,6 +173,7 @@ fn body(app: &mut App, ui: &mut egui::Ui) {
             qr,
             pair_code,
             pairing_phone,
+            expired,
         } => {
             if let Some(code) = pair_code {
                 pair_code_view(app, ui, &code, pairing_phone.as_deref());
@@ -184,6 +186,25 @@ fn body(app: &mut App, ui: &mut egui::Ui) {
                 );
             } else if let Some(qr) = qr {
                 qr_view(app, ui, &qr);
+            } else if expired {
+                theme::icon(ui, Icon::Clock, 28.0, palette.dim);
+                theme::paragraph(
+                    ui,
+                    &*crate::i18n::gettext(app.locale, "The code expired."),
+                    theme::medium(14.0),
+                    palette.text,
+                );
+                ui.add_space(10.0);
+                if theme::pill_button(
+                    ui,
+                    &palette,
+                    &crate::i18n::gettext(app.locale, "New code"),
+                    true,
+                )
+                .clicked()
+                {
+                    app.actions.push(Action::Reconnect);
+                }
             } else {
                 busy(
                     ui,

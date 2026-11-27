@@ -631,6 +631,15 @@ pub struct Settings {
     pub app_lock_hash: Option<String>,
     /// How long ZapFastest may go unused before the app lock locks it.
     pub app_lock_after: AutoLock,
+    /// Wrong app-lock passwords tried in a row, so the wait after repeated
+    /// failures survives a restart of the app.
+    pub app_lock_failures: u32,
+    /// When the next app-lock password may be tried, in Unix milliseconds.
+    pub app_lock_retry_at: Option<i64>,
+    /// Wrong locked-chats codes tried in a row, surviving restarts.
+    pub chat_lock_failures: u32,
+    /// When the next locked-chats code may be tried, in Unix milliseconds.
+    pub chat_lock_retry_at: Option<i64>,
     /// Last window width in logical pixels (points at zoom 1), remembered
     /// across restarts; see [`fastframe_shell::window::Geometry`]. `None`
     /// uses the default size.
@@ -711,6 +720,10 @@ impl Default for Settings {
             chat_lock_hint_dismissed: false,
             app_lock_hash: None,
             app_lock_after: AutoLock::default(),
+            app_lock_failures: 0,
+            app_lock_retry_at: None,
+            chat_lock_failures: 0,
+            chat_lock_retry_at: None,
             window_width: None,
             window_height: None,
             window_x: None,

@@ -1025,6 +1025,22 @@ impl Player {
         self.pending_notice = None;
     }
 
+    /// Pauses the loaded video and keeps its position. One that is still
+    /// loading waits where it is instead of starting.
+    pub fn pause(&mut self) {
+        if let Some(session) = self.session.as_mut() {
+            session.pause(Instant::now());
+        }
+    }
+
+    /// Pauses the video playing from `path`, for another program that has
+    /// taken its file to play it there.
+    pub fn hand_over(&mut self, path: &Path) {
+        if self.is_active() && self.path() == Some(path) {
+            self.pause();
+        }
+    }
+
     /// Whether a video is playing or about to.
     pub fn is_active(&self) -> bool {
         self.session.as_ref().is_some_and(|session| {

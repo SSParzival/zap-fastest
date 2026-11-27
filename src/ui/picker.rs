@@ -44,9 +44,14 @@ fn loaded_id() -> egui::Id {
 }
 
 /// Forgets every texture and animation frame the sticker tab loaded. The
-/// driver keeps the high-water mark of GPU memory, so a shelf of 512 px
-/// stickers must not outlive the panel.
+/// driver keeps the high-water mark of GPU memory, so on macOS (unified memory)
+/// a shelf of stickers does not outlive the panel. On Linux and Windows,
+/// re-decoding still stickers on every opening wastes CPU, and `image_cache`'s
+/// 30-second idle sweep lets unseen tiles go on its own.
 fn release_stickers(ctx: &egui::Context) {
+    if !cfg!(target_os = "macos") {
+        return;
+    }
     let Some(loaded) = ctx.data_mut(|data| data.remove_temp::<PickerLoaded>(loaded_id())) else {
         return;
     };
@@ -771,6 +776,14 @@ fn emoji_grid(
     ui.ctx().data_mut(|data| {
         data.insert_temp(egui::Id::new(("emoji-visible", scroll_salt)), visible_label);
     });
+    if emoji_count == 0 && !app.picker_search.trim().is_empty() {
+        shelf_hint(
+            ui,
+            palette,
+            &crate::i18n::gettext(app.locale, "No emoji match your search."),
+        );
+        return None;
+    }
     grid.show_rows(ui, row_height, rows.len(), |ui, range| {
         for row in &rows[range] {
             match row {

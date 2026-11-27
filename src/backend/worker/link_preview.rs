@@ -8,6 +8,9 @@ use std::time::Duration;
 use crate::model::{ComposedPreview, LinkPreview};
 
 const USER_AGENT: &str = concat!("ZapFastest/", env!("CARGO_PKG_VERSION"));
+/// Instagram refuses generic user agents with a login wall; its WhatsApp bot
+/// agent returns the post's Open Graph card, as WhatsApp's own clients get.
+const WHATSAPP_USER_AGENT: &str = "WhatsApp/2.24.24.80 W";
 /// Page and picture together.
 const TOTAL_TIME: Duration = Duration::from_secs(5);
 const MAX_PAGE: usize = 512 * 1024;
@@ -437,7 +440,12 @@ fn proxy_environment_present(mut lookup: impl FnMut(&str) -> Option<String>) -> 
     .any(|name| lookup(name).is_some_and(|value| !value.trim().is_empty()))
 }
 
-fn client() -> Option<reqwest::Client> {
+fn instagram(host: &str) -> bool {
+    let host = host.to_ascii_lowercase();
+    host == "instagram.com" || host.ends_with(".instagram.com")
+}
+
+fn client(parsed: &reqwest::Url) -> Option<reqwest::Client> {
     // NO_PROXY only exempts the initial host, not every redirect or OG image.
     // Fail closed for the whole fetch, including malformed proxy settings.
     if crate::proxy::from_settings().is_some()
@@ -445,8 +453,13 @@ fn client() -> Option<reqwest::Client> {
     {
         return None;
     }
+    let user_agent = if parsed.host_str().is_some_and(instagram) {
+        WHATSAPP_USER_AGENT
+    } else {
+        USER_AGENT
+    };
     reqwest::Client::builder()
-        .user_agent(USER_AGENT)
+        .user_agent(user_agent)
         .redirect(reqwest::redirect::Policy::custom(|attempt| {
             if attempt.previous().len() >= MAX_REDIRECTS || !literal_host_allowed(attempt.url()) {
                 attempt.stop()
@@ -477,7 +490,14 @@ async fn fetch_inner(url: String) -> Option<ComposedPreview> {
     if !literal_host_allowed(&parsed) {
         return None;
     }
-    let client = client()?;
+    let client = client(&parsed)?;
+    // A YouTube page describes its video only deep in its body; its own
+    // oEmbed answer names it, and the video's still is at a known address.
+    if let Some(video) = youtube_id(&parsed)
+        && let Some(preview) = youtube(&client, &requested, &video).await
+    {
+        return Some(preview);
+    }
 
     let response = client.get(parsed).send().await.ok()?;
     if !response.status().is_success() {
@@ -521,6 +541,81 @@ async fn fetch_inner(url: String) -> Option<ComposedPreview> {
     })
 }
 
+/// The id of the video a YouTube address shows: `watch?v=`, `youtu.be/`,
+/// `/shorts/`, `/live/` or `/embed/`, on any of YouTube's own hosts. An id is
+/// eleven letters, digits, `-` or `_`; anything else is no video.
+fn youtube_id(url: &reqwest::Url) -> Option<String> {
+    let host = url.host_str()?.to_ascii_lowercase();
+    let host = host.strip_prefix("www.").unwrap_or(&host);
+    let mut segments = url.path_segments()?.filter(|segment| !segment.is_empty());
+    let id = match host {
+        "youtu.be" => segments.next()?.to_owned(),
+        "youtube.com" | "m.youtube.com" | "music.youtube.com" => match segments.next()? {
+            "watch" => url
+                .query_pairs()
+                .find(|(key, _)| key == "v")
+                .map(|(_, value)| value.into_owned())?,
+            "shorts" | "live" | "embed" => segments.next()?.to_owned(),
+            _ => return None,
+        },
+        _ => return None,
+    };
+    let valid = id.len() == 11
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_');
+    valid.then_some(id)
+}
+
+/// A YouTube video's preview: its title and channel from YouTube's oEmbed
+/// answer, and its still from YouTube's picture host. Only YouTube is asked.
+async fn youtube(
+    client: &reqwest::Client,
+    requested: &str,
+    video: &str,
+) -> Option<ComposedPreview> {
+    #[derive(serde::Deserialize)]
+    struct OEmbed {
+        title: Option<String>,
+        author_name: Option<String>,
+    }
+    let mut oembed = reqwest::Url::parse("https://www.youtube.com/oembed").ok()?;
+    oembed
+        .query_pairs_mut()
+        .append_pair("format", "json")
+        .append_pair("url", &format!("https://www.youtube.com/watch?v={video}"));
+    let response = client.get(oembed).send().await.ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
+    let (bytes, truncated) = read_body(response, MAX_PAGE).await?;
+    if truncated {
+        return None;
+    }
+    let answer: OEmbed = serde_json::from_slice(&bytes).ok()?;
+    let title = answer
+        .title
+        .as_deref()
+        .and_then(|title| clean(title, TITLE_CHARS));
+    title.as_ref()?;
+    let thumbnail = fetch_image(
+        client,
+        &format!("https://i.ytimg.com/vi/{video}/hqdefault.jpg"),
+    )
+    .await;
+    Some(ComposedPreview {
+        preview: LinkPreview {
+            url: requested.to_owned(),
+            title,
+            description: answer
+                .author_name
+                .as_deref()
+                .and_then(|name| clean(name, DESCRIPTION_CHARS)),
+        },
+        thumbnail,
+    })
+}
+
 async fn fetch_image(client: &reqwest::Client, url: &str) -> Option<Vec<u8>> {
     let url = reqwest::Url::parse(url).ok()?;
     // A literal address skips the resolver, so check it here.
@@ -545,6 +640,30 @@ async fn fetch_image(client: &reqwest::Client, url: &str) -> Option<Vec<u8>> {
 mod tests {
     use super::*;
     use std::net::IpAddr;
+
+    #[test]
+    fn youtube_addresses_name_their_video() {
+        let id = |text: &str| youtube_id(&reqwest::Url::parse(text).unwrap());
+        let video = Some("dQw4w9WgXcQ".to_owned());
+        assert_eq!(
+            id("https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=42"),
+            video
+        );
+        assert_eq!(id("https://youtu.be/dQw4w9WgXcQ?si=abc"), video);
+        assert_eq!(id("https://m.youtube.com/shorts/dQw4w9WgXcQ"), video);
+        assert_eq!(id("https://youtube.com/live/dQw4w9WgXcQ"), video);
+        assert_eq!(id("https://www.youtube.com/channel/UC123"), None);
+        assert_eq!(id("https://www.youtube.com/watch?v=short"), None);
+        assert_eq!(id("https://notyoutube.com/watch?v=dQw4w9WgXcQ"), None);
+    }
+
+    #[test]
+    fn only_instagram_hosts_are_instagram() {
+        assert!(instagram("instagram.com"));
+        assert!(instagram("www.instagram.com"));
+        assert!(!instagram("notinstagram.com"));
+        assert!(!instagram("instagram.com.example"));
+    }
 
     /// Every `&` here looks for a `;` that never comes; the look is bounded,
     /// so the page decodes in linear time.

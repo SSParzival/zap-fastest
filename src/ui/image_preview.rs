@@ -771,7 +771,7 @@ pub fn show_sticker(app: &mut App, ctx: &egui::Context) {
         .stroke(Stroke::new(1.0, palette.outline))
         .corner_radius(CornerRadius::same(theme::RADIUS + 4))
         .inner_margin(Margin::same(20));
-    let response = egui::Modal::new(egui::Id::new("sticker-preview"))
+    let response = egui::Modal::new(sticker_modal_id())
         .frame(card)
         .backdrop_color(palette.shadow)
         .show(ctx, |ui| {
@@ -779,7 +779,18 @@ pub fn show_sticker(app: &mut App, ctx: &egui::Context) {
             ui.vertical_centered(|ui| {
                 let (rect, response) =
                     ui.allocate_exact_size(Vec2::splat(side), egui::Sense::click());
+                if let Some(message) = &preview.sound {
+                    super::conversation::sound_in_step(
+                        ui.ctx(),
+                        sticker_modal_id().with("sound-step"),
+                        preview.path(),
+                        app.player.status(message).state,
+                    );
+                }
                 paint_sticker(ui, &preview, rect, &palette);
+                if let Some(message) = &preview.sound {
+                    sticker_sound_badge(ui, app, message, rect);
+                }
                 if response
                     .on_hover_cursor(egui::CursorIcon::PointingHand)
                     .clicked()
@@ -820,6 +831,42 @@ pub fn show_sticker(app: &mut App, ctx: &egui::Context) {
     if response.should_close() {
         app.actions.push(Action::CloseStickerPreview);
     }
+}
+
+/// The speaker over an audio sticker's large view, as on its bubble.
+fn sticker_sound_badge(ui: &mut egui::Ui, app: &mut App, message: &str, rect: egui::Rect) {
+    let Some(chat) = app.open_chat.clone() else {
+        return;
+    };
+    let Some(audio) = app
+        .conversations
+        .get(&chat)
+        .and_then(|conversation| conversation.message(message))
+        .and_then(|row| row.content.sticker_audio())
+    else {
+        return;
+    };
+    let state = app.player.status(message).state;
+    let id = sticker_modal_id().with("sound");
+    let badge = super::conversation::sound_badge(ui, id, rect, state, audio, app.locale);
+    if badge.clicked() {
+        let action = super::conversation::sound_action(&chat, message, audio, state);
+        app.actions.push(action);
+    }
+}
+
+/// The sticker view's `Modal`, the layer it is drawn on.
+pub(crate) fn sticker_modal_id() -> egui::Id {
+    egui::Id::new("sticker-preview")
+}
+
+/// Whether the image preview's fitted texture has finished decoding on `ctx`.
+#[cfg(test)]
+pub(crate) fn preview_ready(ctx: &egui::Context) -> bool {
+    ctx.data(|data| {
+        data.get_temp::<Textures>(textures_id())
+            .is_some_and(|held| held.fitted.is_some())
+    })
 }
 
 /// Where the sticker preview's favorite button was drawn, for tests.

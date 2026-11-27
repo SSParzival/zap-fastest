@@ -74,7 +74,7 @@ impl Archive {
                     super::Content::Image {
                         motion: Some(_),
                         ..
-                    }
+                    } | super::Content::Sticker { audio: Some(_), .. }
                 )
             }) {
                 self.put_motion_path(&job.chat, &job.id, Some(source))?

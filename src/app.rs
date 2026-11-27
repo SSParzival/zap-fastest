@@ -216,8 +216,16 @@ pub struct Conversation {
     /// The height each row last took, keyed by message id, so the transcript
     /// can skip rows far from the viewport instead of laying them out.
     pub(crate) rows: HashMap<String, RowHeight>,
+    /// Messages whose text held either end of a drag selection last frame,
+    /// kept laid out while scrolled off screen so a sweep stays intact without
+    /// laying out every row in the chat.
+    pub(crate) text_ends: HashSet<String>,
     /// The keyboard page, Home, or End scroll under way in the message list.
     pub(crate) key_scroll: Option<KeyScroll>,
+    /// The message that was first when older history was asked for, so the
+    /// transcript can keep it where the reader was looking when the page
+    /// lands rather than jumping up to the new rows above it.
+    pub(crate) keep_place: Option<String>,
 }
 
 /// A keyboard scroll the message list eases through, one instant step per
@@ -574,6 +582,9 @@ pub struct App {
     pub chat_lock_entry: String,
     pub chat_lock_confirm: String,
     pub chat_lock_error: bool,
+    /// Wrong tries against the locked-chats code, with the wait between them,
+    /// kept in the settings so a restart is not a fresh set of tries.
+    chat_lock_attempts: std::cell::Cell<crate::app_lock::Attempts>,
     pub new_chat_search: String,
     /// Last answer from the slow code verifier, keyed by what was checked.
     chat_lock_check: std::cell::RefCell<Option<(String, Option<String>, bool)>>,
@@ -598,6 +609,8 @@ pub struct App {
     pub dropping: bool,
     /// A text paste already handled the clipboard before the shortcut release.
     paste_before_release: bool,
+    /// When a `Paste` event last arrived with Ctrl/Cmd held.
+    held_paste_at: Option<f64>,
     /// Last observed command state, distinguishing a new shortcut from V-up.
     paste_command_down: bool,
     /// A V press delivered to us, unlike the press swallowed by native paste.
@@ -1352,7 +1365,14 @@ impl App {
             });
         let locale = crate::i18n::resolve(settings.interface_language);
         // With a password set, ZapFastest starts locked.
-        let app_lock = crate::app_lock::AppLock::new(settings.app_lock_hash.is_some());
+        let mut app_lock = crate::app_lock::AppLock::new(settings.app_lock_hash.is_some());
+        // A restart is not a fresh set of tries: the wait saved by the last
+        // run carries over.
+        let chat_lock_wait = (settings.chat_lock_failures, settings.chat_lock_retry_at);
+        let saved_wait = settings.app_lock_retry_at.map(|ms| {
+            std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(ms.max(0) as u64)
+        });
+        app_lock.restore_wait(settings.app_lock_failures, saved_wait);
         let tray_lockable = settings.app_lock_hash.is_some();
         let mut app = Self {
             dirs,
@@ -1412,6 +1432,10 @@ impl App {
             chat_lock_entry: String::new(),
             chat_lock_confirm: String::new(),
             chat_lock_error: false,
+            chat_lock_attempts: std::cell::Cell::new(crate::app_lock::Attempts::new(
+                chat_lock_wait.0,
+                chat_lock_wait.1,
+            )),
             new_chat_search: String::new(),
             chat_lock_check: Default::default(),
             search_keys: Default::default(),
@@ -1424,6 +1448,7 @@ impl App {
             sweep: None,
             dropping: false,
             paste_before_release: false,
+            held_paste_at: None,
             paste_command_down: false,
             ordinary_v_down: false,
             saw_paste_command: false,
@@ -1890,6 +1915,7 @@ impl App {
             self.close_locked_folder();
         }
         self.sticker_shelf = StickerShelf::default();
+        self.sticker_view = None;
         self.sticker_emojis.clear();
         self.sticker_pack_created = None;
         self.account_menu = false;
@@ -2877,6 +2903,7 @@ impl App {
         self.zoom_applied = false;
         self.window_hidden = false;
         self.paste_before_release = false;
+        self.held_paste_at = None;
         self.paste_command_down = false;
         self.ordinary_v_down = false;
         self.saw_paste_command = false;
@@ -3195,11 +3222,15 @@ impl App {
         self.person_name(id, None)
     }
 
+    /// Whether a group has a subject set by the phone rather than falling back
+    /// to its member list as the title.
+    pub fn group_subject_known(&self, chat: &Chat) -> bool {
+        !chat.name.trim().is_empty() && (chat.name != "Group" || chat.group_subject_known)
+    }
+
     /// Resolves the chat-list title.
     pub fn chat_title(&self, chat: &Chat) -> String {
-        if chat.is_group()
-            && (chat.name.trim().is_empty() || (chat.name == "Group" && !chat.group_subject_known))
-        {
+        if chat.is_group() && !self.group_subject_known(chat) {
             let participants = self.participant_names(chat);
             return if participants.is_empty() {
                 "Group".to_owned()
@@ -3280,7 +3311,7 @@ impl App {
         }
         if let Some(chat) = chat.or_else(|| self.chat(id))
             && !chat.name.is_empty()
-            && !chat.name.chars().all(|c| c.is_ascii_digit())
+            && !crate::model::is_number_only(&chat.name)
         {
             return chat.name.clone();
         }
@@ -3391,7 +3422,7 @@ impl App {
         if !chat.is_group() {
             return Vec::new();
         }
-        let needle = query.trim().to_lowercase();
+        let needle = crate::util::search_key(query.trim());
         let digits: String = query.chars().filter(char::is_ascii_digit).collect();
         self.participant_list(chat)
             .into_iter()
@@ -3402,9 +3433,7 @@ impl App {
                 if needle.is_empty() {
                     return true;
                 }
-                name.trim_start_matches('~')
-                    .to_lowercase()
-                    .contains(&needle)
+                crate::util::search_key(name.trim_start_matches('~')).contains(&needle)
                     || (!digits.is_empty()
                         && id
                             .split('@')
@@ -3463,6 +3492,14 @@ impl App {
         // Verifying runs a slow KDF, and this is read every frame, so the
         // answer is kept until the typed text or the stored verifier changes.
         let code = self.search.trim();
+        if self
+            .chat_lock_attempts
+            .get()
+            .wait_left(crate::app_lock::unix_millis(std::time::SystemTime::now()))
+            .is_some()
+        {
+            return false;
+        }
         let stored = &self.settings.chat_lock_code_hash;
         let mut cached = self.chat_lock_check.borrow_mut();
         if let Some((checked, against, matched)) = cached.as_ref()
@@ -4769,23 +4806,36 @@ impl App {
                             .and_then(|media| media.path.as_deref())
                             == Some(preview.path())
                     });
+                // A click on an audio sticker's speaker asked for its sound.
+                // A hidden account's copy of the same message is not that
+                // request, and the sound only plays in the chat it came from.
+                let requested = !self.events_hidden
+                    && self
+                        .motion_playing
+                        .as_ref()
+                        .is_some_and(|(c, m)| *c == chat && *m == message);
+                let sticker = self.is_sticker_sound(&chat, &message);
+                let sound =
+                    requested && sticker && self.open_chat.as_deref() == Some(chat.as_str());
                 if let Some(motion) = self.motion_mut(&chat, &message) {
                     match result {
                         Ok(path) => {
                             motion.path = Some(path.clone());
                             motion.state = MediaState::Idle;
-                            if previewed {
+                            // An inline motion photo keeps playing its clip.
+                            if requested && sticker {
+                                self.motion_playing = None;
+                            }
+                            if sound {
+                                self.actions.push(Action::PlayVoice { message, path });
+                            } else if previewed {
                                 self.actions.push(Action::CloseImagePreview);
                                 self.actions.push(Action::ExpandVideo { message, path });
                             }
                         }
                         Err(error) => {
                             motion.state = MediaState::Failed(error);
-                            if self
-                                .motion_playing
-                                .as_ref()
-                                .is_some_and(|(c, m)| *c == chat && *m == message)
-                            {
+                            if requested {
                                 self.motion_playing = None;
                             }
                         }
@@ -6093,6 +6143,7 @@ impl App {
     fn motion_mut(&mut self, chat: &str, id: &str) -> Option<&mut crate::model::Motion> {
         match &mut self.conversations.get_mut(chat)?.message_mut(id)?.content {
             Content::Image { motion, .. } => motion.as_mut(),
+            Content::Sticker { audio, .. } => audio.as_mut(),
             _ => None,
         }
     }
@@ -6346,7 +6397,7 @@ impl App {
         }
         conversation.loading_older = true;
         let before = (oldest.timestamp, oldest.id.clone());
-        self.scroll_anchor = Some(oldest.id.clone());
+        conversation.keep_place = Some(oldest.id.clone());
         account.backend.send(Command::LoadChat {
             chat: chat.to_owned(),
             before: Some(before),
@@ -6390,7 +6441,7 @@ impl App {
         }
         conversation.fetching_phone = true;
         conversation.phone_explicit = explicit;
-        self.scroll_anchor = conversation
+        conversation.keep_place = conversation
             .messages
             .first()
             .map(|oldest| oldest.id.clone());
@@ -6614,10 +6665,9 @@ impl App {
         {
             self.fetch_older(&id, false);
         }
-        if self
-            .chat(&id)
-            .is_some_and(|chat| chat.unread > 0 || chat.marked_unread)
-        {
+        // Reopen reads a chat even when it is already read, so a read sync
+        // that failed or backed off is re-armed instead of being stranded.
+        if self.chat(&id).is_some() {
             self.mark_read(&id);
         }
         if self.settings.last_chat.as_deref() != Some(id.as_str()) {
@@ -7570,7 +7620,10 @@ impl App {
                 }) {
                     self.toast_error("Finish the current call first");
                 } else if !self.is_connected() {
-                    self.toast_error("Wait for WhatsApp to connect before starting a call");
+                    self.toast_error(crate::i18n::gettext(
+                        self.locale,
+                        "Wait for WhatsApp to connect before starting a call",
+                    ));
                 } else {
                     self.call_preparing = true;
                     let request = crate::calls::CallRequest::default();
@@ -7597,7 +7650,10 @@ impl App {
                 }) {
                     self.toast_error("Finish the current call first");
                 } else if !self.is_connected() {
-                    self.toast_error("Wait for WhatsApp to connect before starting a call");
+                    self.toast_error(crate::i18n::gettext(
+                        self.locale,
+                        "Wait for WhatsApp to connect before starting a call",
+                    ));
                 } else {
                     self.call_preparing = true;
                     let request = crate::calls::CallRequest::default();
@@ -8214,11 +8270,11 @@ impl App {
                     && path.is_file()
                 {
                     let chat = self.open_chat.clone();
-                    let message = chat
+                    let found = chat
                         .as_ref()
                         .and_then(|chat| self.conversations.get(chat))
                         .and_then(|conversation| {
-                            conversation.messages.iter().find(|message| {
+                            conversation.messages.iter().rev().find(|message| {
                                 message
                                     .content
                                     .media()
@@ -8226,10 +8282,31 @@ impl App {
                                     == Some(path.as_path())
                             })
                         })
-                        .map(|message| message.id.clone());
-                    self.sticker_view = Some(
-                        crate::image_preview::StickerPreview::in_conversation(path, chat, message),
-                    );
+                        .map(|message| {
+                            (message.id.clone(), message.content.sticker_audio().cloned())
+                        });
+                    let message = found.as_ref().map(|(id, _)| id.clone());
+                    let sound = found
+                        .as_ref()
+                        .and_then(|(id, audio)| audio.as_ref().map(|audio| (id.clone(), audio)));
+                    // Opening an audio sticker large plays its sound, as on
+                    // the phone, unless it already plays or is on its way.
+                    if let (Some(chat), Some((id, audio))) = (chat.as_deref(), sound.as_ref())
+                        && !matches!(audio.state, MediaState::Downloading)
+                        && !matches!(self.player.status(id).state, crate::audio::State::Playing)
+                    {
+                        crate::animation::restart(ctx, &path);
+                        self.actions.push(crate::ui::conversation::sound_action(
+                            chat,
+                            id,
+                            audio,
+                            crate::audio::State::Idle,
+                        ));
+                    }
+                    let mut view =
+                        crate::image_preview::StickerPreview::in_conversation(path, chat, message);
+                    view.sound = sound.map(|(id, _)| id);
+                    self.sticker_view = Some(view);
                     self.image_preview = None;
                     self.dialog = None;
                     self.picker = None;
@@ -8244,18 +8321,9 @@ impl App {
                 self.sticker_view = None;
                 self.refocus_composer(ctx);
             }
-            Action::OpenFile(path) => {
-                if crate::safety::can_open_attachment(&path) && path.is_file() {
-                    if let Err(error) = open::that_detached(&path) {
-                        self.toast_error(format!("Could not open the attachment: {error}"));
-                    }
-                } else {
-                    self.toast("For safety, open this file yourself from its folder");
-                    if let Some(folder) = path.parent() {
-                        self.actions.push(Action::OpenFolder(folder.to_owned()));
-                    }
-                }
-            }
+            Action::OpenFile(path) => self.open_in_another_app(path, |path| {
+                open::that_detached(path).map_err(|error| error.to_string())
+            }),
             Action::OpenLog(path) => self.backend.send(Command::OpenLog(path)),
             Action::ExportChat {
                 chat,
@@ -8882,11 +8950,13 @@ impl App {
                 // over one a run is still fetching.
                 self.video.stop();
                 self.voice_wanted = None;
+                self.cancel_sticker_sound();
                 self.voice_chat = self.open_chat.clone();
                 self.player
                     .set_output_device(self.account().settings.call_speaker.clone());
                 self.voice_clip_chat = self.open_chat.clone();
-                self.sync_voice_speed();
+                self.player
+                    .set_speed(self.voice_speed_for(Some(message.as_str())));
                 if let Err(error) = self.player.seek(&message, &path, fraction) {
                     self.toast_error(error);
                 }
@@ -10015,18 +10085,39 @@ impl App {
                 }
             }
             Action::UnlockLockedFolder(code) => {
-                if self.settings.verifies_chat_lock_code(code.trim()) {
+                let attempts = self.chat_lock_attempts.get();
+                let now = crate::app_lock::unix_millis(std::time::SystemTime::now());
+                if attempts.wait_left(now).is_some() {
+                    self.chat_lock_entry.clear();
+                    self.chat_lock_error = true;
+                } else if self.settings.verifies_chat_lock_code(code.trim()) {
+                    self.chat_lock_attempts
+                        .set(crate::app_lock::Attempts::default());
+                    self.chat_lock_check.borrow_mut().take();
                     self.enter_locked_folder();
                 } else {
                     self.chat_lock_entry.clear();
                     self.chat_lock_error = true;
+                    let mut attempts = attempts;
+                    attempts.failed(now);
+                    self.chat_lock_attempts.set(attempts);
                 }
+                self.sync_chat_lock_wait();
             }
             Action::CreateChatLockCode(code) => {
-                if self.settings.chat_lock_code_hash.is_none() && !code.trim().is_empty() {
-                    self.settings.set_chat_lock_code(Some(code.trim()));
+                let code = code.trim();
+                if self.settings.chat_lock_code_hash.is_none()
+                    && code.chars().count() >= crate::app_lock::MIN_CHAT_LOCK_CHARS
+                {
+                    self.settings.set_chat_lock_code(Some(code));
                     self.mark_settings_dirty();
+                    self.chat_lock_attempts
+                        .set(crate::app_lock::Attempts::default());
+                    self.chat_lock_check.borrow_mut().take();
+                    self.sync_chat_lock_wait();
                     self.enter_locked_folder();
+                } else {
+                    self.chat_lock_error = true;
                 }
             }
             Action::CloseLockedFolder => {
@@ -10035,7 +10126,17 @@ impl App {
                 self.search_hits.clear();
             }
             Action::SetChatLockCode(code) => {
+                if code.as_deref().is_some_and(|code| {
+                    code.trim().chars().count() < crate::app_lock::MIN_CHAT_LOCK_CHARS
+                }) {
+                    self.chat_lock_error = true;
+                    return;
+                }
                 self.settings.set_chat_lock_code(code.as_deref());
+                self.chat_lock_attempts
+                    .set(crate::app_lock::Attempts::default());
+                self.chat_lock_check.borrow_mut().take();
+                self.sync_chat_lock_wait();
                 self.close_locked_folder();
                 self.search.clear();
                 self.search_hits.clear();
@@ -10180,7 +10281,8 @@ impl App {
                     LinkStatus::Unlinked {
                         qr: None,
                         pair_code: None,
-                        pairing_phone: None
+                        pairing_phone: None,
+                        expired: false,
                     }
                 ) {
                     return;
@@ -10922,9 +11024,14 @@ impl App {
                 );
             }
         }
-        // Events are drained before frame_ui observes focus. Losing focus in
-        // this frame must take effect before an incoming chat update can read it.
-        if self.window_hidden || ctx.input(|input| input.viewport().focused) == Some(false) {
+        // Events are drained before frame_ui observes focus. Losing focus or
+        // minimizing in this frame must take effect before an incoming chat update can read it.
+        if self.window_hidden
+            || ctx.input(|input| {
+                let viewport = input.viewport();
+                viewport.focused == Some(false) || viewport.minimized == Some(true)
+            })
+        {
             self.window_focused = false;
         }
         self.tick_app_lock(ctx);
@@ -11130,6 +11237,32 @@ impl App {
             .clear();
     }
 
+    /// Keeps the wait after repeated wrong passwords in the settings, so the
+    /// next start of the app does not offer three fresh tries.
+    fn remember_lock_wait(&mut self) {
+        let (failures, retry_at) = self.app_lock.wait_record();
+        let retry_at = retry_at.map(crate::app_lock::unix_millis);
+        if self.settings.app_lock_failures != failures
+            || self.settings.app_lock_retry_at != retry_at
+        {
+            self.settings.app_lock_failures = failures;
+            self.settings.app_lock_retry_at = retry_at;
+            self.mark_settings_dirty();
+        }
+    }
+
+    /// The same for the locked-chats code.
+    fn sync_chat_lock_wait(&mut self) {
+        let attempts = self.chat_lock_attempts.get();
+        if self.settings.chat_lock_failures != attempts.failures()
+            || self.settings.chat_lock_retry_at != attempts.retry_at_ms()
+        {
+            self.settings.chat_lock_failures = attempts.failures();
+            self.settings.chat_lock_retry_at = attempts.retry_at_ms();
+            self.mark_settings_dirty();
+        }
+    }
+
     /// Applies what the password thread worked out.
     fn app_lock_outcome(&mut self, outcome: crate::app_lock::Outcome) {
         use crate::app_lock::{FormError, Outcome};
@@ -11139,6 +11272,7 @@ impl App {
                     return;
                 }
                 self.app_lock.unlocked(matched);
+                self.remember_lock_wait();
                 if matched && let Some(target) = self.app_lock.deferred.take() {
                     self.switch_account(&target.account);
                     self.actions.push(Action::OpenMessage {
@@ -11159,6 +11293,9 @@ impl App {
                 }
                 self.settings.app_lock_hash = Some(verifier);
                 self.app_lock.note_input();
+                // A new password starts with a clean count.
+                self.app_lock.release();
+                self.remember_lock_wait();
                 self.save_settings();
                 self.toast(crate::i18n::gettext(self.locale, "App lock password saved"));
             }
@@ -11167,6 +11304,8 @@ impl App {
                     return;
                 }
                 self.settings.app_lock_hash = None;
+                self.app_lock.release();
+                self.remember_lock_wait();
                 self.save_settings();
                 self.toast(crate::i18n::gettext(self.locale, "App lock turned off"));
             }
@@ -11179,6 +11318,7 @@ impl App {
         self.app_lock.form = None;
         self.app_lock.deferred = None;
         self.app_lock.release();
+        self.remember_lock_wait();
         if self.settings.app_lock_hash.take().is_some() {
             self.save_settings();
         }
@@ -11434,20 +11574,90 @@ impl App {
         }
     }
 
+    /// Opens a file in another app. A clip of ours that is playing pauses
+    /// once that app has the file, so the two do not play it at once. A file
+    /// that is gone, or that no app could open, leaves the clip playing.
+    fn open_in_another_app(
+        &mut self,
+        path: PathBuf,
+        open: impl FnOnce(&std::path::Path) -> Result<(), String>,
+    ) {
+        let allowed = crate::safety::can_open_attachment(&path);
+        if allowed && path.is_file() {
+            if let Err(error) = open(&path) {
+                self.toast_error(format!("Could not open the attachment: {error}"));
+            } else {
+                self.video.hand_over(&path);
+            }
+        } else {
+            self.toast("For safety, open this file yourself from its folder");
+            if let Some(folder) = path.parent() {
+                self.actions.push(Action::OpenFolder(folder.to_owned()));
+            }
+        }
+    }
+
     /// Plays or pauses audio and sends the first played receipt when needed.
     fn play_voice(&mut self, message: String, path: PathBuf) {
         self.player
             .set_output_device(self.account().settings.call_speaker.clone());
         self.video.stop();
         self.voice_wanted = None;
+        self.cancel_sticker_sound();
         self.voice_chat = self.open_chat.clone();
         self.voice_clip_chat = self.open_chat.clone();
-        self.sync_voice_speed();
+        let speed = self.voice_speed_for(Some(&message));
+        self.player.set_speed(speed);
         if let Err(error) = self.player.toggle(&message, &path) {
             self.toast_error(error);
             return;
         }
-        self.tell_played(message);
+        if !self.voice_is_sticker(&message) {
+            self.tell_played(message);
+        }
+    }
+
+    /// Whether `message` in `chat` is an audio sticker with a sound.
+    fn is_sticker_sound(&self, chat: &str, message: &str) -> bool {
+        self.conversations
+            .get(chat)
+            .and_then(|conversation| conversation.message(message))
+            .is_some_and(|row| row.content.sticker_audio().is_some())
+    }
+
+    /// Drops a sticker sound still downloading, so it does not interrupt
+    /// a clip the reader chose after it.
+    fn cancel_sticker_sound(&mut self) {
+        if self
+            .motion_playing
+            .as_ref()
+            .is_some_and(|(chat, message)| self.is_sticker_sound(chat, message))
+        {
+            self.motion_playing = None;
+        }
+    }
+
+    /// Whether `message`, in the player's chat, is an audio sticker.
+    fn voice_is_sticker(&self, message: &str) -> bool {
+        self.voice_clip_chat
+            .as_ref()
+            .or(self.open_chat.as_ref())
+            .and_then(|chat| self.conversations.get(chat))
+            .and_then(|conversation| conversation.message(message))
+            .is_some_and(|row| matches!(row.content, Content::Sticker { .. }))
+    }
+
+    /// The speed for `message`: an audio sticker's sound plays as recorded,
+    /// voice messages follow their chat's speed.
+    fn voice_speed_for(&self, message: Option<&str>) -> f32 {
+        if message.is_some_and(|message| self.voice_is_sticker(message)) {
+            return 1.0;
+        }
+        let chat = self
+            .voice_clip_chat
+            .as_deref()
+            .or(self.open_chat.as_deref());
+        self.voice_speed_in(chat)
     }
 
     /// Gives `chat` its own voice message speed, or `None` to follow
@@ -11465,8 +11675,9 @@ impl App {
     /// Plays the clip in the player at the speed of its own chat, which may
     /// not be the one on screen.
     fn sync_voice_speed(&mut self) {
-        let chat = self.voice_clip_chat.clone().or(self.open_chat.clone());
-        self.player.set_speed(self.voice_speed_in(chat.as_deref()));
+        let current = self.player.current().map(str::to_owned);
+        self.player
+            .set_speed(self.voice_speed_for(current.as_deref()));
     }
 
     /// The clip in the player and its chat, while that chat is not the one
@@ -11533,6 +11744,10 @@ impl App {
         let Some(chat) = self.open_chat.clone() else {
             return;
         };
+        // A sticker's sound is not part of a run of voice messages.
+        if self.voice_is_sticker(finished) {
+            return;
+        }
         if self.voice_chat.as_ref() != Some(&chat) {
             return;
         }
@@ -11711,9 +11926,14 @@ impl App {
             self.app_lock.note_input();
         }
         let locked = self.app_lock.is_locked();
-        // Behind the lock screen nobody is reading; unlocking counts as
-        // coming back to the window.
-        let focused = ctx.input(|input| input.viewport().focused.unwrap_or(true)) && !locked;
+        // Behind the lock screen or while minimized/hidden nobody is reading;
+        // unlocking or returning counts as coming back to the window.
+        let focused = !self.window_hidden
+            && ctx.input(|input| {
+                let viewport = input.viewport();
+                viewport.focused.unwrap_or(true) && viewport.minimized != Some(true)
+            })
+            && !locked;
         let regained_focus = focused && !self.window_focused;
         // Mark messages received while hidden as read on window return.
         if regained_focus
@@ -12140,10 +12360,16 @@ impl App {
                 plain_paste,
             )
         });
+        let now = ctx.input(|input| input.time);
         if command && !self.paste_command_down {
             // A new command press starts another shortcut, including after a
-            // menu paste that had no V release.
-            self.paste_before_release = false;
+            // menu paste that had no V release. One right after a paste with
+            // Ctrl/Cmd held is still that shortcut: Omarchy's Super+V sends
+            // V down and up apart, with Control up in between.
+            let same_shortcut = self.held_paste_at.is_some_and(|at| now - at <= 0.5);
+            if !same_shortcut {
+                self.paste_before_release = false;
+            }
         }
         self.paste_command_down = command && focused;
         let requested = paste
@@ -12171,11 +12397,13 @@ impl App {
         }
         if released || !focused {
             self.paste_before_release = false;
+            self.held_paste_at = None;
             self.ordinary_v_down = false;
             self.saw_paste_command = false;
         } else if text {
             // A menu paste has no key release to wait for.
             self.paste_before_release = command || self.saw_paste_command;
+            self.held_paste_at = command.then_some(now);
         }
         if focused && !released && command {
             self.saw_paste_command = true;
@@ -12322,6 +12550,10 @@ fn compose_name(first: &str, last: &str) -> (Option<String>, Option<String>) {
     } else {
         format!("{first} {last}")
     };
+    // A number-only name would read back as none: see `archive::saved_name`.
+    if crate::model::is_number_only(&full) {
+        return (None, None);
+    }
     let short = (!first.is_empty()).then(|| first.to_owned());
     (Some(full), short)
 }
@@ -15616,6 +15848,7 @@ mod tests {
             qr: None,
             pair_code: None,
             pairing_phone: None,
+            expired: false,
         };
         app.apply(Action::CancelAddAccount, &ctx);
         assert_eq!(app.account().id, AccountId::first());
@@ -17181,6 +17414,7 @@ mod tests {
         sticker.content = Content::Sticker {
             media: media(Some(paths[3].clone())),
             animated: false,
+            audio: None,
         };
         rows.push(sticker);
         let mut pending = message("chat", "pending", 7);
@@ -19733,6 +19967,7 @@ mod tests {
             let mut row = message(chat, "sticker", 100);
             row.content = crate::model::Content::Sticker {
                 animated: false,
+                audio: None,
                 media: crate::model::Media {
                     mime: "image/webp".into(),
                     size,

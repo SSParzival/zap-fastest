@@ -99,21 +99,18 @@ pub fn create(app: &mut App, ui: &mut egui::Ui, chat: &str) {
         }
         ui.add_space(8.0);
         ui.horizontal_wrapped(|ui| {
+            let label = crate::i18n::gettext(app.locale, "Allow multiple answers");
             let response = widgets::switch(ui, &palette, &mut app.poll_draft.multiple);
+            theme::reveal_focus(&response);
             response.widget_info(|| {
                 egui::WidgetInfo::selected(
                     egui::WidgetType::Checkbox,
                     ui.is_enabled(),
                     app.poll_draft.multiple,
-                    "Allow multiple answers",
+                    &label,
                 )
             });
-            theme::text(
-                ui,
-                "Allow multiple answers",
-                theme::regular(13.5),
-                palette.text,
-            );
+            theme::text(ui, label, theme::regular(13.5), palette.text);
         });
     });
     ui.add_space(8.0);
@@ -556,10 +553,13 @@ pub fn results(app: &mut App, ui: &mut egui::Ui, chat: &str, id: &str) {
                         });
                     });
                 }
-                if voters.len() < count {
+                if !state.hide_voter_names && voters.len() < count {
                     theme::text(
                         ui,
-                        "Participant details are not available yet",
+                        crate::i18n::gettext(
+                            app.locale,
+                            "Participant details are not available yet",
+                        ),
                         theme::regular(12.0),
                         palette.secondary,
                     );
