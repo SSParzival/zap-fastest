@@ -9069,7 +9069,7 @@ dependencies = [
 
 [[package]]
 name = "zap-fastest"
-version = "0.37.0"
+version = "0.37.1"
 dependencies = [
  "accesskit_consumer 0.35.0",
  "aes 0.9.3",
